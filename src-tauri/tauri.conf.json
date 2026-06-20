@@ -70,6 +70,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -86,5 +87,11 @@
       }
     ],
     "resources": ["icons/island-file.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/Nihilop/island/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZDRTA1QzdGMjE3Mjg4MjEKUldRaGlISWhmMXpnYkR5Q2I1cmNBUUlVNWQ1WFpiTC9aQ2FuU05HL0hOU29mcVVoZG0xYit0MCsK"
+    }
   }
 }

@@ -10,10 +10,13 @@ import RegionSelect from "./RegionSelect.vue";
 import { loadExtensions } from "../composables/extensions";
 import { selecting, regionOutline } from "../composables/overlay";
 import { initNotifications } from "../composables/notifications";
+import { checkForUpdate } from "../composables/updater";
 
 onMounted(() => {
   loadExtensions();
   initNotifications();
+  // Vérif de mise à jour peu après le démarrage (silencieuse s'il n'y a rien).
+  window.setTimeout(() => void checkForUpdate(), 4000);
 });
 
 // Le contour est stocké en px PHYSIQUES → on reconvertit en CSS px (÷ dpr).
