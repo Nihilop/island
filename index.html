@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Island</title>
+    <style>
+      /* !important : Tailwind base met `body { bg-background }` → on garde l'overlay transparent. */
+      html, body { margin: 0; padding: 0; height: 100%; background: transparent !important; overflow: hidden; }
+      #app { height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- Loader PROD : les extensions installées importent `vue`/`@island/sdk` en bare ;
+         l'import map les résout vers des shims qui ré-exportent le runtime de l'hôte
+         (même instance). Inoffensif en dev (Vite résout côté serveur). -->
+    <script type="importmap">
+      {
+        "imports": {
+          "vue": "/island-runtime/vue.mjs",
+          "@island/sdk": "/island-runtime/sdk.mjs"
+        }
+      }
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

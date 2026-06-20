@@ -1,0 +1,15 @@
+/* Contrat Tailwind d'une extension Island : réutilise les tokens de l'hôte,
+   sans preflight ni fuite de :root. */
+@import "tailwindcss/theme" theme(reference);
+@import "tailwindcss/utilities";
+
+@source not "./dist";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+}

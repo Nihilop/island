@@ -1,0 +1,54 @@
+# Build + publication d'une release à CHAQUE push d'un tag `v*` (ex. `git tag v0.5.0 && git push --tags`).
+# tauri-action compile l'app, signe les artefacts (updater) et crée la release GitHub
+# avec les installeurs + `latest.json` (consommé par l'auto-updater).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      contents: write # créer la release + uploader les assets
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Clés de signature de l'updater (à ajouter dans les secrets du dépôt) :
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: "Installeurs ci-dessous. L'app se mettra à jour automatiquement."
+          releaseDraft: true # relue avant publication ; passe à false pour auto-publier
+          prerelease: false
+          includeUpdaterJson: true # génère latest.json pour l'auto-updater

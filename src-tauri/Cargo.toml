@@ -1,0 +1,66 @@
+[package]
+name = "island"
+version = "0.4.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "island_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+notify = "6"
+notify-debouncer-mini = "0.4"
+sysinfo = "0.32"
+ureq = { version = "2", features = ["cookies"] } # HTTP natif côté hôte : téléchargement de binaires + client cookie-jar par extension (comme dio/cookie_jar de Flutter)
+cookie_store = "0.21" # persistance du cookie-jar par extension (session conservée entre redémarrages)
+arboard = "3" # presse-papiers cross-platform (texte + image) exposé aux extensions
+keyring = { version = "3", features = ["windows-native"] } # secrets chiffrés (Windows Credential Manager ; apple/linux à ajouter au portage)
+base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers)
+png = "0.17" # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
+
+# Capture d'écran (Windows Graphics Capture, anti-cheat safe).
+[target.'cfg(windows)'.dependencies.windows-capture]
+version = "1"
+
+# Contrôleur média natif (Windows uniquement) : SMTC + volume via session audio.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+windows = { version = "0.61", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Media_Control",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Threading",
+  "Win32_System_Power",
+  "Win32_System_SystemInformation",
+  "Win32_Networking_WinInet",
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  "Win32_Media_Speech",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Shell",
+] }
+

@@ -1,0 +1,11 @@
+{
+  "id": "__EXT_ID__",
+  "name": "__EXT_NAME__",
+  "version": "0.1.0",
+  "author": "you",
+  "description": "__EXT_NAME__ — extension Island.",
+  "main": "dist/index.mjs",
+  "styles": "dist/style.css",
+  "permissions": [],
+  "surfaces": { "view": "island" }
+}
