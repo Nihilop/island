@@ -47,8 +47,19 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: "Installeurs ci-dessous. L'app se mettra à jour automatiquement."
-          releaseDraft: true # relue avant publication ; passe à false pour auto-publier
+          releaseName: "Island ${{ github.ref_name }}"
+          releaseBody: |
+            ## Island ${{ github.ref_name }}
+
+            A Dynamic Island for Windows — a floating, shape-shifting bar at the top of
+            your screen that hosts your tools (media, screen capture, launcher, system
+            monitor, …) as installable extensions.
+
+            ### Install
+            Download **`Island_*_x64-setup.exe`** (recommended) or the `.msi` below, and run it.
+
+            ### Auto-update
+            Installed versions update themselves automatically on the next launch.
+          releaseDraft: false # publie directement (plus de draft caché)
           prerelease: false
-          includeUpdaterJson: true # génère latest.json pour l'auto-updater
+          includeUpdaterJson: true # génère latest.json (signé) pour l'auto-updater
