@@ -154,7 +154,7 @@ export interface IslandApi {
      * de l'île / perte de focus (ex. Monitoring) — elle ne se referme alors que
      * via le « Retour » de l'île ou `view.close()`.
      */
-    open(component: Component, size?: { width?: number; height?: number; radius?: number; persistent?: boolean; safeArea?: boolean }): void;
+    open(component: Component, size?: { width?: number; height?: number; radius?: number; persistent?: boolean; safeZone?: "relative" | "absolute" | "hidden"; /** @deprecated → safeZone */ safeArea?: boolean }): void;
     close(): void;
     /** Redimensionne la view ACTIVE (l'île morphe en douceur) sans la remonter. */
     resize(size: { width?: number; height?: number; radius?: number }): void;
@@ -326,7 +326,7 @@ interface Bridge {
   listen(event: string, cb: (e: { payload: any }) => void): Promise<() => void>;
   openModal(req: ModalRequest): void;
   closeModal(): void;
-  openView(component: Component, size?: { width?: number; height?: number; radius?: number; persistent?: boolean; safeArea?: boolean }): void;
+  openView(component: Component, size?: { width?: number; height?: number; radius?: number; persistent?: boolean; safeZone?: "relative" | "absolute" | "hidden"; safeArea?: boolean }): void;
   closeView(): void;
   resizeView(size: { width?: number; height?: number; radius?: number }): void;
   openDrop(component: Component): void;

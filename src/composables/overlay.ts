@@ -4,7 +4,24 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface ModalSpec { title?: string; subtitle?: string; ui?: any[]; component?: Component }
-export interface ViewSize { width?: number; height?: number; radius?: number; persistent?: boolean; safeArea?: boolean }
+// Zone haute réservée (poignée de collapse + marge au bord d'écran), 3 états :
+//  - relative : réserve la bande en haut, la poignée y vit, le contenu démarre dessous (défaut).
+//  - absolute : la poignée FLOTTE par-dessus le contenu (+ scrim) ; le contenu va jusqu'au bord
+//    (ex. une view à bannière image — détail animé Aniplex).
+//  - hidden   : aucune poignée, aucune réserve (ex. notifications — une notif qui pop n'affiche rien).
+export type SafeZone = "relative" | "absolute" | "hidden";
+export interface ViewSize {
+  width?: number; height?: number; radius?: number; persistent?: boolean;
+  safeZone?: SafeZone;
+  /** @deprecated alias rétro-compat : true → "relative", false → "absolute". Utiliser `safeZone`. */
+  safeArea?: boolean;
+}
+// Résout l'alias historique `safeArea` vers le nouveau `safeZone`.
+function resolveSafeZone(size?: ViewSize): SafeZone {
+  if (size?.safeZone) return size.safeZone;
+  if (size?.safeArea === false) return "absolute";
+  return "relative";
+}
 
 // --- View : la surface d'une extension montée DANS l'île (slot générique) ---
 export const activeView = shallowRef<Component | null>(null);
@@ -12,9 +29,8 @@ export const activeViewSize = ref<{ width: number; height: number; radius: numbe
 // Persistante : reste ouverte malgré un clic hors de l'île / une perte de focus
 // (ex. Monitoring : garder les stats visibles en faisant autre chose).
 export const activeViewPersistent = ref(false);
-// Zone haute réservée (défaut true). `false` = la view gère son propre haut
-// (ex. une bannière qui doit toucher le bord).
-export const activeViewSafeArea = ref(true);
+// Mode de zone haute de la view active (cf. SafeZone). Défaut "relative".
+export const activeViewSafeZone = ref<SafeZone>("relative");
 export function openView(component: Component, size?: ViewSize) {
   activeViewSize.value = {
     width: size?.width ?? 440,
@@ -22,7 +38,7 @@ export function openView(component: Component, size?: ViewSize) {
     radius: size?.radius ?? 28,
   };
   activeViewPersistent.value = size?.persistent ?? false;
-  activeViewSafeArea.value = size?.safeArea ?? true;
+  activeViewSafeZone.value = resolveSafeZone(size);
   activeView.value = markRaw(component);
 }
 export function closeView() { activeView.value = null; activeViewPersistent.value = false; }

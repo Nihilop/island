@@ -50,16 +50,21 @@ const island = useIsland(EXT_ID);
 ### `view` — l'écran principal, dans l'île
 
 ```ts
-ctx.view.open(MaView, { width: 460, height: 320, radius: 26, persistent: true, safeArea: false });
+ctx.view.open(MaView, { width: 460, height: 320, radius: 26, persistent: true, safeZone: "absolute" });
 ctx.view.resize({ width: 780, height: 560 });  // l'île morphe en douceur, sans remonter la view
 ctx.view.close();
 ```
 
 - **`persistent: true`** : la view reste ouverte malgré un clic ailleurs / une perte de
   focus (ex. garder des stats visibles). Sinon, un clic hors de l'île la replie.
-- **`safeArea: false`** : ton contenu peut toucher le bord haut (ex. une bannière). Par
-  défaut, l'hôte réserve une zone haute (~14px) sous la poignée de collapse — garde un
-  padding normal (`p-3`) et laisse l'hôte gérer le haut.
+- **`safeZone`** : pilote la zone haute (poignée de collapse + marge au bord d'écran) :
+  - `"relative"` *(défaut)* — l'hôte réserve une bande haute (~14px) sous la poignée ; ton
+    contenu démarre dessous. Garde un padding normal et laisse l'hôte gérer le haut.
+  - `"absolute"` — ton contenu va jusqu'au bord haut, la poignée **flotte par-dessus** (+ un
+    léger scrim pour rester lisible). Idéal pour une **bannière image**.
+  - `"hidden"` — aucune poignée ni réserve (usage interne notifs).
+
+  > Ancien alias : `safeArea: true/false` reste accepté (`true → relative`, `false → absolute`).
 
 ### `drop` — goutte sous une view
 

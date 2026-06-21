@@ -42,17 +42,13 @@ const outlineStyle = computed(() => {
   <RegionSelect v-if="selecting" />
   <div
     v-if="outlineStyle"
-    class="region-outline pointer-events-none fixed z-[9998] border-2 border-[#ff453a]"
+    class="pointer-events-none fixed z-[9998] rounded-[2px] border-2 border-[#ff453a] shadow-[0_0_0_1px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(0,0,0,0.3)] animate-[outline-pulse_1.6s_ease-in-out_infinite]"
     :style="outlineStyle"
   ></div>
 </template>
 
 <style scoped>
-.region-outline {
-  border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.3);
-  animation: outline-pulse 1.6s ease-in-out infinite;
-}
+/* Keyframes only (non exprimable en classe) — l'animation est appliquée en inline. */
 @keyframes outline-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

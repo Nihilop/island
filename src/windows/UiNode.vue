@@ -29,66 +29,59 @@ function set(value: unknown) {
 </script>
 
 <template>
-  <div v-if="node.type === 'text'" class="ui-text">{{ node.label }}</div>
+  <div v-if="node.type === 'text'" class="py-1 text-[13px] text-white/60">{{ node.label }}</div>
 
-  <div v-else-if="node.type === 'toggle'" class="ui-field">
-    <span class="ui-label">{{ node.label }}</span>
-    <div class="ui-sw" :class="{ on: cur(false) }" @click="set(!cur(false))"></div>
+  <div v-else-if="node.type === 'toggle'" class="flex items-center justify-between gap-3.5 border-b-[0.5px] border-white/[0.07] py-[11px] last:border-b-0">
+    <span class="text-[13px] text-white/85">{{ node.label }}</span>
+    <!-- bouton du switch = pseudo-élément ::after → variants after: -->
+    <div
+      class="relative h-6 w-[42px] flex-none cursor-pointer rounded-[13px] transition-[background] after:absolute after:top-[3px] after:h-[18px] after:w-[18px] after:rounded-full after:bg-white after:transition-[left] after:content-['']"
+      :class="cur(false) ? 'bg-[#1db954] after:left-[21px]' : 'bg-white/[0.18] after:left-[3px]'"
+      @click="set(!cur(false))"
+    ></div>
   </div>
 
-  <div v-else-if="node.type === 'segmented' || node.type === 'select'" class="ui-field">
-    <span class="ui-label">{{ node.label }}</span>
-    <div class="ui-seg">
-      <button v-for="o in node.options" :key="o" :class="{ on: cur('') === o }" @click="set(o)">{{ o }}</button>
+  <div v-else-if="node.type === 'segmented' || node.type === 'select'" class="flex items-center justify-between gap-3.5 border-b-[0.5px] border-white/[0.07] py-[11px] last:border-b-0">
+    <span class="text-[13px] text-white/85">{{ node.label }}</span>
+    <div class="flex gap-1 rounded-[10px] bg-white/[0.08] p-[3px]">
+      <button
+        v-for="o in node.options" :key="o"
+        class="cursor-pointer rounded-lg border-none px-3 py-[5px] text-[12px]"
+        :class="cur('') === o ? 'bg-white text-[#111]' : 'bg-transparent text-white/70'"
+        @click="set(o)"
+      >{{ o }}</button>
     </div>
   </div>
 
-  <div v-else-if="node.type === 'slider'" class="ui-field">
-    <span class="ui-label">{{ node.label }}</span>
-    <input class="ui-range" type="range" :min="node.min ?? 0" :max="node.max ?? 100"
+  <div v-else-if="node.type === 'slider'" class="flex items-center justify-between gap-3.5 border-b-[0.5px] border-white/[0.07] py-[11px] last:border-b-0">
+    <span class="text-[13px] text-white/85">{{ node.label }}</span>
+    <input class="w-[130px] accent-[#1db954]" type="range" :min="node.min ?? 0" :max="node.max ?? 100"
            :value="cur(0)" @input="set(+($event.target as HTMLInputElement).value)" />
   </div>
 
-  <div v-else-if="node.type === 'input'" class="ui-field col">
-    <span class="ui-label">{{ node.label }}</span>
-    <input class="ui-input" :value="cur('')" :placeholder="node.placeholder"
+  <div v-else-if="node.type === 'input'" class="flex flex-col items-stretch gap-2 border-b-[0.5px] border-white/[0.07] py-[11px] last:border-b-0">
+    <span class="text-[13px] text-white/85">{{ node.label }}</span>
+    <input class="rounded-[10px] border-[0.5px] border-white/[0.12] bg-white/[0.08] px-3 py-[9px] text-[13px] text-white outline-none"
+           :value="cur('')" :placeholder="node.placeholder"
            @input="set(($event.target as HTMLInputElement).value)" />
   </div>
 
-  <button v-else-if="node.type === 'button'" class="ui-btn" :class="node.variant || 'ghost'"
+  <button v-else-if="node.type === 'button'"
+          class="h-10 flex-1 cursor-pointer rounded-xl border-none text-[14px] font-medium active:scale-[0.98]"
+          :class="node.variant === 'primary' ? 'bg-[#1db954] text-white' : node.variant === 'danger' ? 'bg-[#ff3b30] text-white' : 'bg-white/10 text-white'"
           @click="emit('action', { id: node.id || '' })">{{ node.label }}</button>
 
-  <div v-else-if="node.type === 'progress'" class="ui-prog">
-    <div class="ui-prog-fill" :style="{ width: cur(0) + '%' }"></div>
+  <div v-else-if="node.type === 'progress'" class="h-1.5 overflow-hidden rounded-[3px] bg-white/15">
+    <div class="h-full rounded-[3px] bg-[#1db954] transition-[width] duration-300" :style="{ width: cur(0) + '%' }"></div>
   </div>
 
-  <div v-else-if="node.type === 'row'" class="ui-row">
+  <div v-else-if="node.type === 'row'" class="flex gap-2.5 pt-1.5">
     <UiNode v-for="(c, i) in node.children" :key="i" :node="c" :values="values"
             @change="emit('change', $event)" @action="emit('action', $event)" />
   </div>
 </template>
 
 <style scoped>
-.ui-text { font-size: 13px; color: rgba(255, 255, 255, 0.6); padding: 4px 0; }
-.ui-field { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 0.5px solid rgba(255, 255, 255, 0.07); }
-.ui-field.col { flex-direction: column; align-items: stretch; gap: 8px; }
-.ui-field:last-child { border-bottom: none; }
-.ui-label { font-size: 13px; color: rgba(255, 255, 255, 0.85); }
-.ui-sw { width: 42px; height: 24px; border-radius: 13px; background: rgba(255, 255, 255, 0.18); position: relative; cursor: pointer; transition: background 0.2s; flex: none; }
-.ui-sw.on { background: #1db954; }
-.ui-sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left 0.2s; }
-.ui-sw.on::after { left: 21px; }
-.ui-seg { display: flex; gap: 4px; background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 3px; }
-.ui-seg button { border: none; background: transparent; color: rgba(255, 255, 255, 0.7); font-size: 12px; padding: 5px 12px; border-radius: 8px; cursor: pointer; font-family: inherit; }
-.ui-seg button.on { background: #fff; color: #111; }
-.ui-range { width: 130px; accent-color: #1db954; }
-.ui-input { background: rgba(255, 255, 255, 0.08); border: 0.5px solid rgba(255, 255, 255, 0.12); border-radius: 10px; color: #fff; font-size: 13px; padding: 9px 12px; outline: none; font-family: inherit; }
-.ui-btn { flex: 1; height: 40px; border-radius: 12px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; font-family: inherit; }
-.ui-btn.primary { background: #1db954; color: #fff; }
-.ui-btn.ghost { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.ui-btn.danger { background: #ff3b30; color: #fff; }
-.ui-btn:active { transform: scale(0.98); }
-.ui-prog { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
-.ui-prog-fill { height: 100%; border-radius: 3px; background: #1db954; transition: width 0.3s ease; }
-.ui-row { display: flex; gap: 10px; padding-top: 6px; }
+/* Les contrôles de formulaire n'héritent pas de la police par défaut (UA) → reset. */
+button, input { font-family: inherit; }
 </style>

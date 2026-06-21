@@ -5,7 +5,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted, useTemplateRef } from "vu
 import UiNode from "./UiNode.vue";
 import { modalSpec, closeModal, setHitRegion, type ModalSpec } from "../composables/overlay";
 
-const BOX_W = 360;
+const BOX_W = 440;
 const localSpec = ref<ModalSpec | null>(null);
 const open = ref(false);
 const values = ref<Record<string, unknown>>({});
@@ -50,20 +50,20 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
 <template>
   <div v-if="localSpec"
     class="absolute inset-0 z-[200] flex items-center justify-center transition-all duration-300 opacity-0"
-    :class="{ 'bg-black/99 opacity-100': open }"
+    :class="{ 'bg-black/55 backdrop-blur-sm opacity-100': open }"
     @click="closeModal"
   >
   <Transition name="fade-in" mode="in-out">
     <div 
       v-if="open"
-      class="box relative bg-background rounded-3xl shadow-2xl overflow-hidden border min-w-150 min-h-fit" 
-      :style="{ width: BOX_W + 'px', height: boxH + 'px' }" 
+      class="box relative bg-background rounded-3xl shadow-2xl overflow-hidden border min-h-fit"
+      :style="{ width: BOX_W + 'px', height: boxH + 'px' }"
       @click.stop
     >
       <div ref="innerEl" class="absolute inset-0 flex flex-col">
-        <div v-if="localSpec.title" ref="headerEl" class="head">
-          <div class="ttl">{{ localSpec.title }}</div>
-          <div v-if="localSpec.subtitle" class="sub">{{ localSpec.subtitle }}</div>
+        <div v-if="localSpec.title" ref="headerEl" class="px-[18px] pt-4 pb-1">
+          <div class="text-[15px] font-medium">{{ localSpec.title }}</div>
+          <div v-if="localSpec.subtitle" class="text-[12px] text-white/50">{{ localSpec.subtitle }}</div>
         </div>
         <div class="flex-1 w-full overflow-x-hidden overflow-y-auto p-8">
           <component v-if="localSpec.component" :is="localSpec.component" />
@@ -89,12 +89,9 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
   @apply scale-50 opacity-0;
 }
 
+/* Transition multi-propriété à béziers différents par propriété → garde en CSS. */
 .box {
   transition: width 0.5s cubic-bezier(0.34, 1.42, 0.4, 1), height 0.5s cubic-bezier(0.34, 1.42, 0.4, 1),
     opacity 0.3s ease, transform 0.5s cubic-bezier(0.34, 1.45, 0.4, 1);
 }
-
-.head { padding: 16px 18px 4px; }
-.ttl { font-size: 15px; font-weight: 500; }
-.sub { font-size: 12px; color: rgba(255, 255, 255, 0.5); }
 </style>

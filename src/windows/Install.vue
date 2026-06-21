@@ -107,7 +107,7 @@ onMounted(async () => {
 <template>
   <div class="dark flex h-dvh w-dvw items-center justify-center bg-transparent select-none">
     <div
-      class="card relative flex flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl"
+      class="relative flex flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl transition-[width,min-height] duration-[450ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
       :style="cardSize"
       data-tauri-drag-region
     >
@@ -221,9 +221,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.card {
-  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1), min-height 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-}
+/* Classes de <Transition> Vue (appliquées par Vue → non inlinables). */
 .step-enter-active,
 .step-leave-active {
   transition: opacity 0.22s ease, transform 0.22s ease;

@@ -53,40 +53,18 @@ function endDrag() {
   <div
     v-for="w in floatWindows"
     :key="w.id"
-    class="fwin"
+    class="fixed flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl pointer-events-auto select-none"
     :style="{ left: w.x + 'px', top: w.y + 'px', width: w.width + 'px', height: w.height + 'px', zIndex: w.z }"
     @pointerdown="focusWindow(w.id)"
   >
-    <div class="fwin-bar" @pointerdown.stop="startDrag(w.id, $event)">
-      <span class="fwin-title">{{ w.title }}</span>
-      <button class="fwin-close" @pointerdown.stop @click="closeWindow(w.id)" aria-label="Fermer">
-        <svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18" /></svg>
+    <div class="flex h-7 flex-none items-center justify-between gap-2 px-2 cursor-move bg-foreground/[0.06]" @pointerdown.stop="startDrag(w.id, $event)">
+      <span class="truncate text-[11px] text-muted-foreground">{{ w.title }}</span>
+      <button class="grid h-5 w-5 flex-none place-items-center rounded text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground" @pointerdown.stop @click="closeWindow(w.id)" aria-label="Fermer">
+        <svg viewBox="0 0 24 24" class="h-3 w-3"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
-    <div class="fwin-body">
+    <div class="min-h-0 flex-1">
       <component :is="w.component" />
     </div>
   </div>
 </template>
-
-<style scoped>
-@reference "@/style.css";
-.fwin {
-  @apply fixed flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl pointer-events-auto select-none;
-}
-.fwin-bar {
-  @apply flex h-7 flex-none items-center justify-between gap-2 px-2 cursor-move bg-foreground/[0.06];
-}
-.fwin-title {
-  @apply truncate text-[11px] text-muted-foreground;
-}
-.fwin-close {
-  @apply grid h-5 w-5 flex-none place-items-center rounded text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground;
-}
-.fwin-close svg {
-  @apply h-3 w-3;
-}
-.fwin-body {
-  @apply min-h-0 flex-1;
-}
-</style>

@@ -4,32 +4,25 @@
 // view (monte une surface d'extension) · + un sous-slot "goutte" dans une view.
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, PhysicalSize, PhysicalPosition } from "@tauri-apps/api/window";
 import { idleState, idleActions, idleTap } from "../composables/idle";
-import { launcherEntries, runProviders, hasProviders } from "../composables/launcher";
+import { hasProviders, launcherCells, loadBuiltins } from "../composables/launcher";
 import {
-  setHitRegion, activeView, activeViewSize, activeViewPersistent, activeViewSafeArea, closeView, dropContent, closeDrop,
-  modalSpec, floatWindows, selecting, regionOutline,
+  setHitRegion, activeView, activeViewSize, activeViewPersistent, activeViewSafeZone, closeView, dropContent, closeDrop,
+  modalSpec, floatWindows, selecting, regionOutline, type SafeZone,
 } from "../composables/overlay";
+import { DEV, devPin, installDevShortcuts, devRestore } from "../composables/dev";
+import NotifCard from "./NotifCard.vue";
+import Launcher from "./Launcher.vue";
 import { stack as notifStack, unread, unreadCount, lastPosted, setDnd as setNotifDnd, pauseStack, resumeStack, markRead, clearUnread, type Notif } from "../composables/notifications";
 
 type Format = "idle" | "launcher" | "view" | "notifcenter";
 type Phase = "stable" | "exit" | "morph" | "enter";
-interface Cell { id: string; label: string; icon: string; kind: string; toggle?: boolean; onActivate?: () => void }
-
-const ICONS: Record<string, string> = {
-  settings: "<svg viewBox='0 0 24 24'><path fill='currentColor' d='M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.48.48 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54A.49.49 0 0 0 13.5 2h-3a.49.49 0 0 0-.48.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.48a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.48.48 0 0 0-.12.61l1.92 3.32c.13.22.39.31.59.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.48.42h3c.23 0 .43-.18.48-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.2.09.46 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z'/></svg>",
-  moon: "<svg viewBox='0 0 24 24'><path fill='currentColor' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.5 5.5 0 0 1-7.54-7.54C12.92 3.04 12.46 3 12 3z'/></svg>",
-  puzzle: "<svg viewBox='0 0 24 24'><path fill='currentColor' d='M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.7 2.7 0 0 1 0 5.4H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.7 2.7 0 0 1 5.4 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z'/></svg>",
-};
-const ico = (name: string) => ICONS[name] || "";
 
 const format = ref<Format>("idle");
 const phase = ref<Phase>("stable");
 const hovered = ref(false);
 const dnd = ref(false);
-const builtinActions = ref<Cell[]>([]);
 
 // --- Auto-hide : l'île se rétracte vers le haut quand une app est en plein écran,
 // et ressort quand on survole le bord haut de l'écran ---
@@ -79,44 +72,6 @@ function triggerDrop(n: Notif) {
   dropTimer = window.setTimeout(() => (dndDrop.value = null), 1000);
 }
 
-// --- Launcher : recherche extensible (les extensions enregistrent un provider) ---
-const query = ref("");
-const providerResults = ref<Cell[]>([]);
-const searchEl = ref<HTMLInputElement>();
-let queryTimer: number | undefined;
-const RESULT_ICON =
-  "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='m21 21-4.3-4.3'/></svg>";
-
-// Mode recherche actif uniquement si une extension fournit un provider ET qu'on tape.
-const searching = computed(() => hasProviders.value && query.value.trim().length > 0);
-
-// Débounce : interroge les providers quand l'utilisateur tape.
-watch(query, (q) => {
-  if (queryTimer) clearTimeout(queryTimer);
-  const term = q.trim();
-  if (!hasProviders.value || !term) { providerResults.value = []; return; }
-  queryTimer = window.setTimeout(async () => {
-    const res = await runProviders(term).catch(() => []);
-    providerResults.value = res.map((r) => ({ id: r.id, label: r.title, icon: r.icon || RESULT_ICON, kind: "result", onActivate: r.onActivate }));
-  }, 120);
-});
-
-const launcherCells = computed<Cell[]>(() => {
-  // Recherche : résultats des providers + entrées dont le label matche.
-  if (searching.value) {
-    const q = query.value.trim().toLowerCase();
-    const matched = launcherEntries.value
-      .filter((e) => e.label.toLowerCase().includes(q))
-      .map((e) => ({ id: e.id, label: e.label, icon: e.icon, kind: "entry", onActivate: e.onActivate }));
-    return [...providerResults.value, ...matched];
-  }
-  // Au repos : built-ins (icône = nom → SVG) + entrées des extensions ACTIVES.
-  return [
-    ...builtinActions.value.map((a) => ({ ...a, icon: ico(a.icon) })),
-    ...launcherEntries.value.map((e) => ({ id: e.id, label: e.label, icon: e.icon, kind: "entry", onActivate: e.onActivate })),
-  ];
-});
-
 // --- Goutte (sous-slot d'une view) ---
 const dropOpen = ref(false);
 const dropWide = ref(false);
@@ -128,6 +83,17 @@ const wrapEl = ref<HTMLElement>();
 const contentEl = ref<HTMLElement>();
 
 const contentVisible = computed(() => phase.value === "stable" || phase.value === "enter");
+
+// Mode de zone haute ACTIF selon le format courant (cf. SafeZone). Pilote d'un seul
+// endroit : la poignée de collapse, la réserve de padding, et le scrim.
+//  - view → mode déclaré par l'extension · launcher → relative · notifs → hidden.
+const safeZone = computed<SafeZone>(() => {
+  if (showStack.value) return "hidden";
+  if (format.value === "notifcenter") return "hidden";
+  if (format.value === "view") return activeViewSafeZone.value;
+  if (format.value === "launcher") return "relative";
+  return "relative";
+});
 
 function islandDims(): [number, number, number] {
   if (showStack.value) return [372, stackHeight.value, 26]; // pile de notifications
@@ -247,6 +213,7 @@ function collapseToIdle() {
 // Fermeture AUTOMATIQUE (clic hors de l'île / perte de focus) : une view marquée
 // `persistent` y résiste (elle ne se ferme qu'au « Retour » ou via view.close()).
 function autoDismiss() {
+  if (DEV && devPin.value) return; // dev : île épinglée → ne se referme pas (cf. composables/dev)
   if (activeView.value && activeViewPersistent.value) return;
   collapseToIdle();
 }
@@ -258,14 +225,8 @@ function onWrapClick() {
     else setFormat("launcher");
   } else if (format.value === "launcher") collapseToIdle();
 }
-function onAction(c: Cell) {
-  if (c.kind === "settings") invoke("open_settings").catch(() => {});
-  else if (c.kind === "dnd") { dnd.value = !dnd.value; collapseToIdle(); }
-  else if (c.kind === "entry" || c.kind === "result") { c.onActivate?.(); query.value = ""; } // action de l'extension
-}
-// Recherche du launcher : Entrée = 1er résultat ; Échap = vide le champ puis referme.
-function onEnter() { const first = launcherCells.value[0]; if (first) onAction(first); }
-function onEsc() { if (query.value) query.value = ""; else collapseToIdle(); }
+// DND basculé depuis une cellule native du launcher → bascule + referme.
+function onToggleDnd() { dnd.value = !dnd.value; collapseToIdle(); }
 
 // --- Goutte : ouverture/fermeture + largeur adaptée au contenu ---
 async function openDropAnim() {
@@ -313,18 +274,19 @@ watch(unreadCount, (c) => { if (c === 0 && format.value === "notifcenter") colla
 // DND : pas de bannière (le centre le sait) + une gouttelette discrète à l'arrivée.
 watch(dnd, (v) => setNotifDnd(v), { immediate: true });
 watch(lastPosted, (n) => { if (n && dnd.value) triggerDrop(n); });
-// Launcher avec recherche : focus le champ à l'ouverture, vide le champ à la fermeture.
-watch(format, (f, prev) => {
-  if (f === "launcher" && hasProviders.value) {
-    nextTick(() => { invoke("overlay_focus").catch(() => {}); searchEl.value?.focus(); });
-  }
-  if (prev === "launcher" && f !== "launcher") query.value = "";
-});
 
 let unfocus: (() => void) | undefined;
+let uninstallDev: (() => void) | undefined;
 onMounted(async () => {
   raf = requestAnimationFrame(tick);
-  try { builtinActions.value = await invoke<Cell[]>("list_launcher"); } catch { /* noop */ }
+  loadBuiltins(); // actions natives du launcher (Réglages, DND…)
+
+  // Dev : raccourcis (Ctrl+Alt+P/N/M/W/0) + restauration de la surface forcée après HMR.
+  if (DEV) {
+    const force = (f: string) => setFormat(f as Format);
+    uninstallDev = installDevShortcuts(force);
+    nextTick(() => devRestore(force));
+  }
 
   await listen<boolean>("overlay://hover", (e) => { hovered.value = e.payload; });
   await listen("overlay://dismiss", () => autoDismiss());
@@ -337,12 +299,12 @@ onMounted(async () => {
     if (!focused) autoDismiss();
   });
 });
-onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); });
+onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); });
 </script>
 
 <template>
-  <div class="root">
-    <svg width="0" height="0" class="goo-def">
+  <div class="relative z-1 flex h-screen items-start justify-center bg-transparent pt-2 pointer-events-none select-none">
+    <svg width="0" height="0" class="absolute">
       <defs>
         <filter id="goo">
           <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b" />
@@ -352,23 +314,23 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); });
     </svg>
 
     <!-- Auto-hide : zone de survol (bord haut) + petit indice quand l'île est rétractée -->
-    <div v-if="hiddenFs" class="peek-zone" @mouseenter="peekShow" @mouseleave="peekHideSoon"></div>
-    <div v-if="slidUp" class="peek-hint"></div>
+    <div v-if="hiddenFs" class="fixed top-0 left-0 right-0 h-1.5 pointer-events-auto" @mouseenter="peekShow" @mouseleave="peekHideSoon"></div>
+    <div v-if="slidUp" class="fixed top-[3px] left-1/2 h-1 w-10 -translate-x-1/2 rounded-full pointer-events-none bg-white/[0.22] transition-opacity duration-300"></div>
 
     <!-- Gouttelette DND : tombe sous l'île à l'arrivée d'une notif (sans déranger) -->
-    <div v-if="dndDrop && dnd" :key="dndDrop.id" class="dnddrop" :style="{ background: dndDrop.color }"></div>
+    <div v-if="dndDrop && dnd" :key="dndDrop.id" class="dnddrop absolute left-1/2 top-[34px] h-2.5 w-2.5 rounded-full pointer-events-none shadow-[0_0_6px_rgba(0,0,0,0.25)]" :style="{ background: dndDrop.color }"></div>
 
     <div
       ref="wrapEl"
       class="wrap"
-      :class="{ up: slidUp }"
+      :class="['sz-' + safeZone, { up: slidUp }]"
       :style="wrapStyle"
       @click="onWrapClick"
       @mouseenter="peekShow"
       @mouseleave="peekHideSoon"
     >
       <div class="goo" :class="{ dropping: dropOpen }">
-        <div class="bg"></div>
+        <div class="absolute inset-0 rounded-(--r) bg-background shadow-[0_8px_24px_rgba(0,0,0,0.4),inset_0_0_0_0.5px_rgba(255,255,255,0.07)]"></div>
         <div class="drop-bg" :class="{ wide: dropWide }" :style="dropWide ? { width: dropW + 'px' } : {}"></div>
       </div>
 
@@ -377,111 +339,87 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); });
         <component v-if="dropContent" :is="dropContent" />
       </div>
 
-      <div v-if="format !== 'idle'" class="topback" @click.stop="collapseToIdle" aria-label="Retour">
-        <span class="grab"></span>
+      <!-- Scrim sous la poignée en mode `absolute` : lisibilité de la poignée sur une bannière -->
+      <div v-if="format !== 'idle' && safeZone === 'absolute'" class="absolute top-0 left-0 right-0 z-3 h-7 pointer-events-none rounded-[var(--r)_var(--r)_0_0] bg-[linear-gradient(to_bottom,rgba(0,0,0,0.38),transparent)]"></div>
+      <!-- Poignée de collapse : masquée en `hidden` (notifs) -->
+      <div v-if="format !== 'idle' && safeZone !== 'hidden'" class="absolute top-0 left-0 right-0 z-4 flex h-4 items-center justify-center cursor-pointer" @click.stop="collapseToIdle" aria-label="Retour">
+        <span class="h-0.75 w-6.5 rounded-full bg-gray-600/75 transition-all hover:bg-gray-600"></span>
       </div>
 
-      <div ref="contentEl" class="content" :style="{ opacity: contentVisible ? 1 : 0 }">
+      <!-- Dev : badge d'épinglage (DEV-only) -->
+      <div v-if="DEV && devPin" class="absolute bottom-1 right-2 z-10 rounded bg-[#6366f1]/85 px-1.5 py-0.5 text-[9px] font-bold tracking-[0.04em] text-white pointer-events-none" title="Île épinglée (Ctrl+Alt+P) — Ctrl+Alt+0 pour libérer">DEV ⊙</div>
+
+      <div ref="contentEl" class="absolute inset-0 flex items-center overflow-hidden rounded-(--r) transition-opacity duration-[220ms]" :style="{ opacity: contentVisible ? 1 : 0 }">
         <!-- PILE de notifications : l'île se déplie et liste les notifs (scroll au-delà de 5) -->
         <TransitionGroup
           v-if="showStack"
           name="ncard"
           tag="div"
-          class="nstack"
-          :class="{ safe: notifStack.length > 1 }"
+          class="nstack relative flex h-full w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden p-1.5 [scrollbar-width:thin]"
           @click.stop
           @mouseenter="pauseStack"
           @mouseleave="resumeStack"
         >
-          <div v-for="n in notifStack" :key="n.id" class="notif" @click.stop="onNotifClick(n)">
-            <div
-              class="nicon"
-              :style="n.color ? { background: n.color + '26', color: n.color } : {}"
-              v-html="n.icon"
-            ></div>
-            <div class="ntext">
-              <div class="ntitle">{{ n.title }}</div>
-              <div v-if="n.body" class="nbody">{{ n.body }}</div>
-            </div>
-            <div v-if="n.source" class="nsource">{{ n.source }}</div>
-          </div>
+          <NotifCard v-for="n in notifStack" :key="n.id" :notif="n" @click.stop="onNotifClick(n)" />
         </TransitionGroup>
 
         <!-- IDLE : centre ABSOLUMENT centré ; les slots s'étendent aux bords -->
-        <div v-else-if="format === 'idle'" class="idle">
+        <div v-else-if="format === 'idle'" class="relative h-full w-full">
           <template v-if="dnd">
-            <div class="center"><div class="dot dim" :style="{ opacity: hovered ? 1 : 0 }"></div></div>
+            <div class="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center"><div class="m-auto h-2 w-2 rounded-full bg-white/35 transition-opacity duration-[250ms]" :style="{ opacity: hovered ? 1 : 0 }"></div></div>
           </template>
           <template v-else>
             <!-- Slot gauche (bord gauche) : icônes/textes CUMULÉS -->
-            <div class="slots slots-left">
+            <div class="absolute top-1/2 left-[10px] flex -translate-y-1/2 items-center gap-0.5">
               <template v-for="(a, i) in idleActions.left" :key="'l' + i">
-                <button v-if="a.onActivate" class="slot" :style="{ color: a.color }" @click.stop="a.onActivate()">
-                  <span v-if="a.text" class="stext">{{ a.text }}</span>
-                  <span v-else class="sico" v-html="a.icon"></span>
+                <button v-if="a.onActivate" class="flex h-[26px] w-[26px] items-center justify-center border-none bg-transparent p-0 cursor-pointer opacity-[0.92] hover:opacity-100" :style="{ color: a.color }" @click.stop="a.onActivate()">
+                  <span v-if="a.text" class="px-0.5 text-[11px] tabular-nums opacity-90">{{ a.text }}</span>
+                  <span v-else class="flex h-[15px] w-[15px] [&_svg]:h-full [&_svg]:w-full" v-html="a.icon"></span>
                 </button>
-                <span v-else class="slot stext" :style="{ color: a.color }">{{ a.text }}</span>
+                <span v-else class="flex h-[26px] w-[26px] items-center justify-center px-0.5 text-[11px] tabular-nums opacity-90" :style="{ color: a.color }">{{ a.text }}</span>
               </template>
             </div>
 
             <!-- Centre : état géré par l'hôte, toujours au centre -->
-            <div class="center">
-              <div v-if="idleState === 'playing'" class="wave">
+            <div class="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center">
+              <div v-if="idleState === 'playing'" class="wave flex h-5 items-center gap-[3px] text-foreground">
                 <span></span><span></span><span></span><span></span><span></span><span></span>
               </div>
-              <div v-else-if="idleState === 'busy'" class="busy"><span></span><span></span><span></span></div>
-              <div v-else-if="idleState === 'recording'" class="rec"></div>
-              <div v-else class="dot"></div>
+              <div v-else-if="idleState === 'busy'" class="busy flex items-center gap-1"><span></span><span></span><span></span></div>
+              <div v-else-if="idleState === 'recording'" class="rec m-auto h-2 w-2 rounded-full bg-[#ef4444]"></div>
+              <div v-else class="dot m-auto h-2 w-2 rounded-full bg-primary"></div>
             </div>
 
             <!-- Slot droit (bord droit) : icônes/textes CUMULÉS + cloche -->
-            <div class="slots slots-right">
+            <div class="absolute top-1/2 right-[10px] flex -translate-y-1/2 items-center gap-0.5">
               <template v-for="(a, i) in idleActions.right" :key="'r' + i">
-                <button v-if="a.onActivate" class="slot" :style="{ color: a.color }" @click.stop="a.onActivate()">
-                  <span v-if="a.text" class="stext">{{ a.text }}</span>
-                  <span v-else class="sico" v-html="a.icon"></span>
+                <button v-if="a.onActivate" class="flex h-[26px] w-[26px] items-center justify-center border-none bg-transparent p-0 cursor-pointer opacity-[0.92] hover:opacity-100" :style="{ color: a.color }" @click.stop="a.onActivate()">
+                  <span v-if="a.text" class="px-0.5 text-[11px] tabular-nums opacity-90">{{ a.text }}</span>
+                  <span v-else class="flex h-[15px] w-[15px] [&_svg]:h-full [&_svg]:w-full" v-html="a.icon"></span>
                 </button>
-                <span v-else class="slot stext" :style="{ color: a.color }">{{ a.text }}</span>
+                <span v-else class="flex h-[26px] w-[26px] items-center justify-center px-0.5 text-[11px] tabular-nums opacity-90" :style="{ color: a.color }">{{ a.text }}</span>
               </template>
-              <button v-if="unreadCount" class="slot bell" @click.stop="openCenter" aria-label="Notifications">
-                <span class="sico" v-html="BELL"></span>
-                <span class="badge">{{ unreadCount }}</span>
+              <button v-if="unreadCount" class="relative flex h-[26px] w-[26px] items-center justify-center border-none bg-transparent p-0 cursor-pointer opacity-[0.92] hover:opacity-100" @click.stop="openCenter" aria-label="Notifications">
+                <span class="flex h-[15px] w-[15px] [&_svg]:h-full [&_svg]:w-full" v-html="BELL"></span>
+                <span class="absolute top-[-3px] right-[-3px] grid h-3.5 min-w-3.5 place-items-center rounded-full bg-[#ff453a] px-0.5 text-[8px] font-bold leading-none text-white">{{ unreadCount }}</span>
               </button>
             </div>
           </template>
         </div>
 
         <!-- LAUNCHER : recherche (si provider) + grille extensions/natifs -->
-        <div v-else-if="format === 'launcher'" class="lwrap">
-          <input v-if="hasProviders" ref="searchEl" v-model="query" class="lsearch" type="text"
-                 spellcheck="false" placeholder="Rechercher…"
-                 @keydown.enter.prevent="onEnter" @keydown.esc.prevent="onEsc" @click.stop />
-          <div class="grid">
-            <button v-for="c in launcherCells" :key="c.id" class="cell"
-                    :class="{ on: c.kind === 'dnd' && dnd }" @click.stop="onAction(c)">
-              <span class="cico" v-html="c.icon"></span>
-              <span class="clabel">{{ c.label }}</span>
-            </button>
-          </div>
-        </div>
+        <Launcher v-else-if="format === 'launcher'" :dnd="dnd" @close="collapseToIdle" @toggle-dnd="onToggleDnd" />
 
         <!-- CENTRE de notifications : liste des non-lues (lues = retirées pour de bon) -->
-        <div v-else-if="format === 'notifcenter'" class="ncenter" @click.stop>
-          <div v-if="!unread.length" class="nempty">Aucune notification</div>
-          <TransitionGroup v-else name="ncard" tag="div" class="nlist" :class="{ safe: unread.length > 1 }">
-            <div v-for="n in unread" :key="n.id" class="notif" @click.stop="onNotifClick(n)">
-              <div class="nicon" :style="n.color ? { background: n.color + '26', color: n.color } : {}" v-html="n.icon"></div>
-              <div class="ntext">
-                <div class="ntitle">{{ n.title }}</div>
-                <div v-if="n.body" class="nbody">{{ n.body }}</div>
-              </div>
-              <div v-if="n.source" class="nsource">{{ n.source }}</div>
-            </div>
+        <div v-else-if="format === 'notifcenter'" class="relative h-full w-full" @click.stop>
+          <div v-if="!unread.length" class="grid h-full w-full place-items-center text-[12px] text-muted-foreground">Aucune notification</div>
+          <TransitionGroup v-else name="ncard" tag="div" class="nlist relative flex h-full w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden p-1.5 [scrollbar-width:thin]">
+            <NotifCard v-for="n in unread" :key="n.id" :notif="n" @click.stop="onNotifClick(n)" />
           </TransitionGroup>
         </div>
 
         <!-- VIEW : la surface de l'extension active -->
-        <div v-else-if="format === 'view'" class="view" :class="{ 'no-safe': !activeViewSafeArea }">
+        <div v-else-if="format === 'view'" class="view">
           <component v-if="activeView" :is="activeView" />
         </div>
       </div>
@@ -491,133 +429,69 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); });
 
 <style scoped>
 @reference '@/style.css';
-.root {
-  @apply relative h-screen flex justify-center items-start pt-2 bg-transparent pointer-events-none select-none z-1;
-}
-.goo-def { @apply absolute; }
+/* Ce bloc ne garde QUE ce qui n'est pas exprimable en classes : variables CSS,
+   transitions multi-propriétés à béziers, filtre #goo, scrollbars custom,
+   classes de <TransitionGroup>, et les keyframes/animations des indicateurs. */
+
+/* Boîte de l'île : --safe-top (consommé par les enfants) + morph multi-prop. */
 .wrap {
   @apply relative w-(--w) h-(--h) rounded-(--r) cursor-pointer pointer-events-auto!;
-  /* Zone haute réservée : l'île touche le bord d'écran + porte la poignée de
-     collapse → on ne laisse pas le contenu (views/notifs) coller tout en haut. */
   --safe-top: 14px;
   transition: width 0.55s cubic-bezier(0.34, 1.4, 0.42, 1), height 0.55s cubic-bezier(0.34, 1.4, 0.42, 1), border-radius 0.45s ease, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1);
 }
-/* Rétractée vers le haut, hors écran (au-delà du padding top de .root). */
-.wrap.up { transform: translateY(calc(-100% - 18px)); }
-/* Bande invisible en haut qui capte le survol pour faire ressortir l'île. */
-.peek-zone { @apply fixed top-0 left-0 right-0 h-1.5 pointer-events-auto; }
-/* Petit indice visuel quand l'île est cachée. */
-.peek-hint {
-  @apply fixed top-[3px] left-1/2 h-1 w-10 -translate-x-1/2 rounded-full pointer-events-none;
-  background: rgba(255, 255, 255, 0.22);
-  transition: opacity 0.3s ease;
-}
-/* Gouttelette DND : forme une goutte sous l'île puis tombe et s'efface. */
-.dnddrop {
-  @apply absolute left-1/2 h-2.5 w-2.5 rounded-full pointer-events-none;
-  top: 34px;
-  box-shadow: 0 0 6px rgba(0, 0, 0, 0.25);
-  animation: drip 1s cubic-bezier(0.4, 0, 0.6, 1) forwards;
-}
+.wrap.up { transform: translateY(calc(-100% - 18px)); } /* rétractée hors écran */
+
+/* Gouttelette DND : layout en classes ; ici seulement l'animation (collée à ses
+   keyframes, car Vue renomme les @keyframes scoped → l'animation doit rester ici). */
+.dnddrop { animation: drip 1s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
 @keyframes drip {
   0%   { transform: translate(-50%, -6px) scale(0.2); opacity: 0; }
   25%  { transform: translate(-50%, 0) scale(1); opacity: 0.9; }
   55%  { transform: translate(-50%, 12px) scaleY(1.35) scaleX(0.8); opacity: 0.85; }
   100% { transform: translate(-50%, 36px) scale(0.35); opacity: 0; }
 }
+
+/* Effet metaball : le filtre fusionne l'île et la goutte. */
 .goo { @apply absolute inset-0; }
 .goo.dropping { filter: url(#goo); }
-.bg { @apply absolute inset-0 bg-background rounded-(--r); box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 0 0 0.5px rgba(255,255,255,.07); }
-
-/* Goutte */
-.drop-bg { 
+.drop-bg {
   @apply absolute left-1/2 top-[calc(100%-13px)] w-8.5 h-9.5 rounded-[19px] bg-background -translate-x-1/2 scale-0 origin-top opacity-0;
-  /* position: absolute; left: 50%; top: calc(100% - 13px); width: 34px; height: 38px; border-radius: 19px; background: #070708; transform: translateX(-50%) scale(0); transform-origin: top center; opacity: 0;  */
-  transition: width 0.42s cubic-bezier(0.34,1.4,0.4,1), opacity 0.2s ease; 
+  transition: width 0.42s cubic-bezier(0.34,1.4,0.4,1), opacity 0.2s ease;
 }
-.goo.dropping .drop-bg { @apply -translate-x-1/2 scale-100 opacity-100; /* transform: translateX(-50%) scale(1); opacity: 1; */ }
-.drop-content { 
+.goo.dropping .drop-bg { @apply -translate-x-1/2 scale-100 opacity-100; }
+.drop-content {
   @apply absolute left-1/2 top-[calc(100%-13px)] -translate-x-1/2 h-9.5 flex items-center py-0 px-3.5 opacity-0 z-3 pointer-events-auto;
-  /* position: absolute; left: 50%; top: calc(100% - 13px); transform: translateX(-50%); height: 38px; display: flex; align-items: center; padding: 0 14px; box-sizing: border-box; opacity: 0; z-index: 3; pointer-events: auto; color: #fff;  */
-  transition: opacity 0.16s ease; 
+  transition: opacity 0.16s ease;
 }
 .drop-content.show { opacity: 1; }
 
-.content { position: absolute; inset: 0; display: flex; align-items: center; border-radius: var(--r); overflow: hidden; transition: opacity 0.22s ease; }
-.view { width: 100%; height: 100%; box-sizing: border-box; padding-top: var(--safe-top); }
-.view.no-safe { padding-top: 0; } /* la view gère son propre haut (ex. bannière) */
-
-/* Idle */
-.idle { position: relative; width: 100%; height: 100%; }
-/* Centre absolument centré : reste au milieu quel que soit le nombre d'actions. */
-.center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; }
-.slot { width: 26px; height: 26px; border: none; background: transparent; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: .92; }
-.slot:hover { opacity: 1; }
-.sico { width: 15px; height: 15px; display: flex; }
-.sico :deep(svg) {@apply w-full h-full; }
-.spacer { @apply w-6.5 h-6.5; }
-/* Pile de notifications + centre */
-.nstack, .nlist { @apply relative flex h-full w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden p-1.5; scrollbar-width: thin; }
-/* Safe-zone seulement au-delà d'1 notif : sinon 1 carte + padding déborde → scroll moche. */
-.nstack.safe, .nlist.safe { padding-top: calc(0.375rem + var(--safe-top)); }
+/* Zone haute de la view : padding réservé seulement en mode "relative" (sélecteur descendant). */
+.view { width: 100%; height: 100%; box-sizing: border-box; padding-top: 0; }
+.sz-relative .view { padding-top: var(--safe-top); }
+/* Pile / centre de notifs : layout en classes ; ici seulement les scrollbars custom
+   (pseudo-éléments ::-webkit-scrollbar non inlinables). */
 .nstack::-webkit-scrollbar, .nlist::-webkit-scrollbar { width: 6px; }
 .nstack::-webkit-scrollbar-thumb, .nlist::-webkit-scrollbar-thumb { @apply rounded-full bg-foreground/20; }
-.ncenter { @apply relative h-full w-full; }
-.nempty { @apply grid h-full w-full place-items-center text-[12px] text-muted-foreground; }
-.notif { @apply flex h-14 flex-none items-center gap-2.5 rounded-xl px-2.5 transition; }
-.notif:hover { @apply bg-foreground/[0.06]; }
-.nicon { @apply grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-foreground/10 text-foreground; }
-.nicon :deep(svg) { width: 18px; height: 18px; }
-.ntext { @apply min-w-0 flex-1; }
-.ntitle { @apply truncate text-[12.5px] font-semibold leading-tight; }
-.nbody { @apply truncate text-[11px] leading-tight text-muted-foreground; margin-top: 1px; }
-.nsource { @apply flex-none self-start text-[10px] text-muted-foreground; }
-/* Lissage des cartes (insertion / réordonnancement / retrait) */
+/* Cartes (TransitionGroup) — s'applique à la racine .notif de NotifCard. */
 .ncard-move, .ncard-enter-active, .ncard-leave-active { transition: opacity 0.28s ease, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
 .ncard-enter-from { opacity: 0; transform: translateY(-10px); }
 .ncard-leave-to { opacity: 0; transform: translateX(24px); }
 .ncard-leave-active { position: absolute; left: 6px; right: 6px; }
 
-/* Slots idle cumulables + cloche */
-/* Slots aux bords (absolus) : s'étendent vers l'extérieur sans bouger le centre. */
-.slots { @apply absolute flex items-center gap-0.5; top: 50%; transform: translateY(-50%); }
-.slots-left { left: 10px; }
-.slots-right { right: 10px; }
-.bell { position: relative; }
-.badge { @apply absolute grid h-3.5 min-w-3.5 place-items-center rounded-full px-0.5 text-[8px] font-bold leading-none text-white; top: -3px; right: -3px; background: #ff453a; }
-
-.dot { @apply w-2 h-2 bg-primary rounded-full m-auto; animation: breathe 2s ease-in-out infinite; }
-.dot.dim { background: rgba(255,255,255,.35); animation: none; transition: opacity 0.25s ease; }
-.rec { width: 8px; height: 8px; margin: auto; border-radius: 50%; background: #ef4444; animation: recpulse 1.5s ease-out infinite; }
+/* Indicateurs animés du centre idle : layout en classes ; ici seulement les animations
+   (+ keyframes), et les délais par enfant via :nth-child (non exprimables en classe). */
+.dot { animation: breathe 2s ease-in-out infinite; }
+.rec { animation: recpulse 1.5s ease-out infinite; }
 @keyframes recpulse {
   0%   { box-shadow: 0 0 0 0 rgba(239,68,68,.55); }
   70%  { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
   100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
 }
-.stext { font-size: 11px; font-variant-numeric: tabular-nums; opacity: .9; padding: 0 2px; }
 @keyframes breathe { 0%,100%{opacity:.5;transform:scale(.85)} 50%{opacity:1;transform:scale(1.15)} }
-.wave { display: flex; align-items: center; gap: 3px; height: 20px; color: var(--foreground); }
 .wave span { width: 3px; background: currentColor; border-radius: 2px; animation: wave 1s ease-in-out infinite; }
 .wave span:nth-child(1){animation-delay:0s}.wave span:nth-child(2){animation-delay:.18s}.wave span:nth-child(3){animation-delay:.36s}.wave span:nth-child(4){animation-delay:.12s}.wave span:nth-child(5){animation-delay:.3s}.wave span:nth-child(6){animation-delay:.22s}
 @keyframes wave { 0%,100%{height:5px} 50%{height:20px} }
-.busy { display: flex; align-items: center; gap: 4px; }
 .busy span { width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); animation: busy 1.2s ease-in-out infinite; }
 .busy span:nth-child(2){animation-delay:.15s}.busy span:nth-child(3){animation-delay:.3s}
 @keyframes busy { 0%,100%{opacity:.3;transform:translateY(0)} 40%{opacity:1;transform:translateY(-3px)} }
-
-/* Launcher */
-.lwrap { @apply flex flex-col w-full h-full; }
-.lsearch { @apply mx-3 mt-3 mb-0.5 rounded-lg border border-border bg-foreground/[0.04] px-3 py-2 text-[13px] text-foreground outline-none transition; }
-.lsearch:focus { @apply border-primary; }
-.lsearch::placeholder { @apply text-muted-foreground; }
-.grid { @apply grid grid-cols-3 content-start gap-2 p-4 w-full flex-1 min-h-0 overflow-y-auto overflow-x-hidden; scrollbar-width: thin; }
-.cell { @apply flex flex-col items-center gap-1.5 py-2.5 px-1 rounded-xl cursor-pointer hover:bg-card/50; }
-.cell.on { @apply bg-primary text-primary-foreground; }
-.cico { @apply w-5.5 h-5.5 flex; }
-.cico :deep(svg) { @apply w-full h-full }
-.clabel { @apply text-[11px] text-muted-foreground; }
-
-/* Retour */
-.topback { @apply absolute top-0 left-0 right-0 h-4 flex items-center justify-center cursor-pointer z-4; }
-.grab { @apply w-6.5 h-0.75 bg-gray-600/75 hover:bg-gray-600 rounded-full transition-all; }
 </style>
