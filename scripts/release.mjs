@@ -51,12 +51,6 @@ try {
     process.exit(1);
   }
 
-  const dirty = shOut("git status --porcelain");
-  if (dirty) {
-    console.log("\n⚠️  Changements non commités — ils NE seront PAS dans la release tant");
-    console.log("    qu'ils ne sont pas commités à part :\n" + dirty + "\n");
-  }
-
   console.log(`Version actuelle : ${cur}`);
   const suggested = bump(cur, "patch");
   const ans = (await rl.question(`Nouvelle version (X.Y.Z, ou patch/minor/major) [${suggested}] : `)).trim();
@@ -71,19 +65,23 @@ try {
     process.exit(1);
   }
 
+  // TOUT l'état courant du repo part dans la release (pas seulement les fichiers de version).
+  const pending = shOut("git status --short");
+  if (pending) console.log("\nSeront committés (en plus du bump de version) :\n" + pending);
+
   const tag = `v${next}`;
-  const ok = (await rl.question(`\n→ ${cur} → ${next} : update fichiers + commit + tag ${tag} + push. Continuer ? [y/N] `)).trim().toLowerCase();
+  const ok = (await rl.question(`\n→ ${cur} → ${next} : git add -A + commit + push + tag ${tag} + push. Continuer ? [y/N] `)).trim().toLowerCase();
   if (!["y", "o", "yes", "oui"].includes(ok)) {
     console.log("Annulé. (Aucun fichier modifié.)");
     process.exit(0);
   }
 
   setVersion(next);
-  sh("git add src-tauri/tauri.conf.json src-tauri/Cargo.toml package.json");
+  sh("git add -A"); // tout l'état courant, pas juste les 3 fichiers de version
   sh(`git commit -m "release ${tag}"`);
+  sh("git push"); // pousse le commit AVANT le tag
   sh(`git tag ${tag}`);
-  sh("git push");
-  sh(`git push origin ${tag}`);
+  sh(`git push origin ${tag}`); // le tag déclenche la CI (son commit est déjà sur origin)
 
   const repo = shOut("git remote get-url origin")
     .replace(/\.git$/, "")

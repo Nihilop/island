@@ -9,35 +9,54 @@ const active = ref(false); // un drag est en cours
 const rect = ref({ x: 0, y: 0, w: 0, h: 0 }); // CSS px
 let startX = 0;
 let startY = 0;
+// Coordonnées ÉCRAN (relatives au moniteur), indépendantes de la position/taille de la
+// fenêtre overlay → la région reste correcte même si l'overlay n'est pas encore plein
+// écran au moment du drag (le passage petite-boîte→plein écran est asynchrone).
+let startSX = 0;
+let startSY = 0;
+const out = { x: 0, y: 0, w: 0, h: 0 }; // écran, CSS px (= ce qu'on renvoie)
 
 function onDown(e: PointerEvent) {
   if (e.button !== 0) return;
   active.value = true;
   startX = e.clientX;
   startY = e.clientY;
+  startSX = e.screenX;
+  startSY = e.screenY;
   rect.value = { x: startX, y: startY, w: 0, h: 0 };
+  Object.assign(out, { x: startSX, y: startSY, w: 0, h: 0 });
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
 }
 function onMove(e: PointerEvent) {
-  const x = Math.min(startX, e.clientX);
-  const y = Math.min(startY, e.clientY);
-  rect.value = { x, y, w: Math.abs(e.clientX - startX), h: Math.abs(e.clientY - startY) };
+  // Rectangle AFFICHÉ : coordonnées fenêtre (viewport).
+  rect.value = {
+    x: Math.min(startX, e.clientX),
+    y: Math.min(startY, e.clientY),
+    w: Math.abs(e.clientX - startX),
+    h: Math.abs(e.clientY - startY),
+  };
+  // Région RENVOYÉE : coordonnées écran.
+  Object.assign(out, {
+    x: Math.min(startSX, e.screenX),
+    y: Math.min(startSY, e.screenY),
+    w: Math.abs(e.screenX - startSX),
+    h: Math.abs(e.screenY - startSY),
+  });
 }
 function onUp() {
   window.removeEventListener("pointermove", onMove);
   window.removeEventListener("pointerup", onUp);
-  const r = rect.value;
   const dpr = window.devicePixelRatio || 1;
-  if (r.w < 8 || r.h < 8) {
+  if (out.w < 8 || out.h < 8) {
     finishRegion(null); // trop petit = annulation
     return;
   }
   finishRegion({
-    x: Math.round(r.x * dpr),
-    y: Math.round(r.y * dpr),
-    w: Math.round(r.w * dpr),
-    h: Math.round(r.h * dpr),
+    x: Math.round(out.x * dpr),
+    y: Math.round(out.y * dpr),
+    w: Math.round(out.w * dpr),
+    h: Math.round(out.h * dpr),
   });
 }
 function onKey(e: KeyboardEvent) {
