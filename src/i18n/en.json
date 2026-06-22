@@ -1,0 +1,22 @@
+{
+  "nav.general": "General",
+  "nav.extensions": "Extensions",
+  "header.settings": "Settings",
+  "general.autostart.title": "Start with Windows",
+  "general.autostart.desc": "Launch Island at sign-in",
+  "general.theme.title": "Theme",
+  "general.theme.desc": "Appearance of the Settings window",
+  "theme.dark": "Dark",
+  "theme.light": "Light",
+  "general.islandStyle.title": "Island style",
+  "general.islandStyle.desc": "Shape and position of the island",
+  "style.floating": "Floating",
+  "style.topbar": "Top bar",
+  "general.accent.title": "Accent color",
+  "general.accent.desc": "Island color (independent of style)",
+  "general.accent.reset": "Default",
+  "general.lang.title": "Language",
+  "general.lang.desc": "Interface language",
+  "lang.fr": "Français",
+  "lang.en": "English"
+}

@@ -9,6 +9,8 @@ import Install from "./windows/Install.vue";
 import Create from "./windows/Create.vue";
 import { installBridge } from "./island-bridge";
 import * as Sdk from "./sdk";
+import { registerMessages, setLocale } from "./sdk/i18n";
+import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "./stores/appStore";
 
 // Runtime PARTAGÉ avec les extensions (loader prod) : l'import map mappe
@@ -43,4 +45,10 @@ app.mount("#app");
 
 // Chaque fenêtre charge les prefs, applique le thème, et écoute les changements
 // émis par les autres fenêtres → le thème est appliqué PARTOUT.
-useAppStore(pinia).init();
+const store = useAppStore(pinia);
+store.init().then(() => setLocale(store.lang));
+
+// i18n de l'hôte : catalogue "host" en lazy-load (un chunk par langue via import()),
+// et la locale suit la langue d'Island (event lang://changed, émis par appStore.onLang).
+registerMessages("host", (l) => import(`./i18n/${l}.json`).then((m) => m.default).catch(() => ({})));
+listen<string>("lang://changed", (e) => setLocale(e.payload || "fr"));

@@ -8,6 +8,7 @@
 // épingle/ouvre une fois, et chaque save remet la surface en place.
 import { ref, h } from "vue";
 import { post, clearUnread } from "./notifications";
+import { cycleIslandTheme } from "./islandTheme";
 import {
   openModal, closeModal, modalSpec,
   openWindow, closeWindow, floatWindows,
@@ -102,6 +103,7 @@ export function installDevShortcuts(setFormat: (f: string) => void) {
     else if (k === "n") { e.preventDefault(); devSetPin(true); devSeedNotifs(); devSetForce("notifcenter"); setFormat("notifcenter"); }
     else if (k === "m") { e.preventDefault(); modalSpec.value ? (closeModal(), devSetForce("")) : openDemoModal(); }
     else if (k === "w") { e.preventDefault(); floatWindows.value.length ? (closeWindow(), devSetForce("")) : openDemoWindow(); }
+    else if (k === "t") { e.preventDefault(); cycleIslandTheme(); }
     else if (k === "0") { e.preventDefault(); resetAll(setFormat); }
   };
   window.addEventListener("keydown", onKey);

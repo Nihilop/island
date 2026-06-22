@@ -10,6 +10,8 @@ import {
   Button,
 } from "@island/sdk";
 import { discoverManifests, getEnabled, setEnabled } from "../composables/extensions";
+import { islandTheme, setIslandTheme, initIslandTheme, islandAccent, setIslandAccent, type IslandTheme } from "../composables/islandTheme";
+import { t } from "../composables/i18n";
 import { useAppStore } from "@/stores/appStore.ts";
 import { storeToRefs } from "pinia";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -83,6 +85,7 @@ async function pickAndInstall() {
 }
 
 onMounted(async () => {
+  initIslandTheme(); // charge le style de l'île persisté + suit les changements cross-fenêtre
   await loadRows();
   // Une install (modal) émet ext://reload → on rafraîchit la liste sans recharger la page.
   await listen("ext://reload", () => loadRows());
@@ -92,37 +95,37 @@ onMounted(async () => {
 <template>
   <div class="relative h-dvh w-dvw flex flex-col">
     <header class="flex justify-between items-center gap-4 py-2 px-5 border-b" data-tauri-drag-region>
-      <div><span class="brand">Island</span><span class="text-[13px] opacity-55">Réglages</span></div>
+      <div><span class="brand">Island</span><span class="text-[13px] opacity-55">{{ t('header.settings') }}</span></div>
       <Titlebar data-tauri-drag-region />
     </header>
 
     <div class="min-h-0 flex flex-1">
       <nav class="w-1/3 flex-none border-r py-4 px-3 flex flex-col gap-2">
-        <Button :variant="tab === 'general' ? 'default' : 'ghost'" class="justify-start" @click="tab = 'general'">Général</Button>
-        <Button :variant="tab === 'extensions' ? 'default' : 'ghost'" class="justify-start" @click="tab = 'extensions'">Extensions</Button>
+        <Button :variant="tab === 'general' ? 'default' : 'ghost'" class="justify-start" @click="tab = 'general'">{{ t('nav.general') }}</Button>
+        <Button :variant="tab === 'extensions' ? 'default' : 'ghost'" class="justify-start" @click="tab = 'extensions'">{{ t('nav.extensions') }}</Button>
       </nav>
 
       <main class="flex-1 overflow-y-auto py-4.5 px-6">
         <section v-if="tab === 'general'">
           <div class="flex items-center justify-between gap-4 py-3.5 border-b">
             <div>
-              <div class="text-[14px]">Démarrer avec Windows</div>
-              <div class="text-[12px] opacity-50 mt-0.5">Lancer Island à l'ouverture de session</div>
+              <div class="text-[14px]">{{ t('general.autostart.title') }}</div>
+              <div class="text-[12px] opacity-50 mt-0.5">{{ t('general.autostart.desc') }}</div>
             </div>
             <Switch v-model="autostart" @update:model-value="onAutostart" />
           </div>
           <div class="flex items-center justify-between gap-4 py-3.5 border-b">
             <div>
-              <div class="text-[14px]">Thème</div>
-              <div class="text-[12px] opacity-50 mt-0.5">Apparence de la fenêtre Réglages</div>
+              <div class="text-[14px]">{{ t('general.theme.title') }}</div>
+              <div class="text-[12px] opacity-50 mt-0.5">{{ t('general.theme.desc') }}</div>
             </div>
             <Select v-model="theme" @update:modelValue="onTheme">
               <SelectTrigger>
-                <SelectValue placeholder="Select theme" />
+                <SelectValue :placeholder="t('general.theme.title')">{{ t('theme.' + theme) }}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem :value="el.value"
-                  v-for="el in [{ value: 'dark', label: 'Sombre' }, { value: 'light', label: 'Clair' }]">
+                  v-for="el in [{ value: 'dark', label: t('theme.dark') }, { value: 'light', label: t('theme.light') }]">
                   {{ el.label }}
                 </SelectItem>
               </SelectContent>
@@ -130,17 +133,46 @@ onMounted(async () => {
           </div>
           <div class="flex items-center justify-between gap-4 py-3.5 border-b">
             <div>
-              <div class="text-[14px]">Langue</div>
-              <div class="text-[12px] opacity-50 mt-0.5">Traductions à venir (i18n)</div>
+              <div class="text-[14px]">{{ t('general.islandStyle.title') }}</div>
+              <div class="text-[12px] opacity-50 mt-0.5">{{ t('general.islandStyle.desc') }}</div>
+            </div>
+            <Select :model-value="islandTheme" @update:modelValue="(v) => setIslandTheme(v as IslandTheme)">
+              <SelectTrigger>
+                <SelectValue :placeholder="t('general.islandStyle.title')">{{ t('style.' + islandTheme) }}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="el.value"
+                  v-for="el in [{ value: 'floating', label: t('style.floating') }, { value: 'topbar', label: t('style.topbar') }]">
+                  {{ el.label }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="flex items-center justify-between gap-4 py-3.5 border-b">
+            <div>
+              <div class="text-[14px]">{{ t('general.accent.title') }}</div>
+              <div class="text-[12px] opacity-50 mt-0.5">{{ t('general.accent.desc') }}</div>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="color" :value="islandAccent || '#0a84ff'"
+                     @input="(e) => setIslandAccent((e.target as HTMLInputElement).value)"
+                     class="h-7 w-10 cursor-pointer rounded border border-border bg-transparent p-0.5" />
+              <Button v-if="islandAccent" variant="ghost" @click="setIslandAccent('')">{{ t('general.accent.reset') }}</Button>
+            </div>
+          </div>
+          <div class="flex items-center justify-between gap-4 py-3.5 border-b">
+            <div>
+              <div class="text-[14px]">{{ t('general.lang.title') }}</div>
+              <div class="text-[12px] opacity-50 mt-0.5">{{ t('general.lang.desc') }}</div>
             </div>
 
               <Select v-model="lang" @update:modelValue="onLang">
               <SelectTrigger>
-                <SelectValue placeholder="Select langue" />
+                <SelectValue :placeholder="t('general.lang.title')">{{ t('lang.' + lang) }}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem :value="el.value"
-                  v-for="el in [{ value: 'fr', label: 'Français' }, { value: 'en', label: 'English' }]">
+                  v-for="el in [{ value: 'fr', label: t('lang.fr') }, { value: 'en', label: t('lang.en') }]">
                   {{ el.label }}
                 </SelectItem>
               </SelectContent>

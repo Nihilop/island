@@ -1,0 +1,22 @@
+{
+  "nav.general": "Général",
+  "nav.extensions": "Extensions",
+  "header.settings": "Réglages",
+  "general.autostart.title": "Démarrer avec Windows",
+  "general.autostart.desc": "Lancer Island à l'ouverture de session",
+  "general.theme.title": "Thème",
+  "general.theme.desc": "Apparence de la fenêtre Réglages",
+  "theme.dark": "Sombre",
+  "theme.light": "Clair",
+  "general.islandStyle.title": "Style de l'île",
+  "general.islandStyle.desc": "Forme et position de l'île",
+  "style.floating": "Flottant",
+  "style.topbar": "Barre haute",
+  "general.accent.title": "Couleur d'accent",
+  "general.accent.desc": "Couleur de l'île (indépendante du style)",
+  "general.accent.reset": "Défaut",
+  "general.lang.title": "Langue",
+  "general.lang.desc": "Langue de l'interface",
+  "lang.fr": "Français",
+  "lang.en": "English"
+}

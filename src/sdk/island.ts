@@ -1,7 +1,8 @@
 // @island/sdk — API runtime fournie par l'hôte (livré AVEC Island).
 // Les extensions importent depuis "@island/sdk" ; au runtime, tout passe par le
 // pont global `window.__ISLAND__` exposé par l'hôte (marche entre instances Vue).
-import { reactive, type Component } from "vue";
+import { reactive, type Component, type Ref } from "vue";
+import { locale as i18nLocale, registerMessages, translate, type MessageLoader } from "./i18n";
 
 export interface MediaState {
   title: string;
@@ -22,8 +23,9 @@ export interface ModalRequest {
   ui?: any[];
 }
 
-/** États du centre de l'île en idle — rendus par l'HÔTE (cohérence). Enrichi au fil des updates. */
-export type IdleState = "idle" | "playing" | "busy" | "recording";
+/** États SIMPLES du centre de l'île en idle (couleur du cercle) — rendus par l'HÔTE.
+ * Pour une viz riche (wave, sphère 3D…), monte un COMPOSANT via `idle.center`. */
+export type IdleState = "idle" | "recording";
 
 /** Raccourci conditionnel sur une extrémité de l'île en idle (icône OU texte court). */
 export interface IdleAction {
@@ -140,12 +142,27 @@ export interface IslandApi {
   };
   /** Contribue à l'île en idle (garde-fou côté hôte). */
   idle: {
-    /** Centre : un état (enum géré par l'hôte). `null` = retire la contribution. */
+    /** Centre : un état SIMPLE (couleur du cercle). `null` = retire la contribution. */
     state(state: IdleState | null, opts?: { priority?: number }): void;
+    /**
+     * Centre : un COMPOSANT custom monté à la place du cercle (viz riche — wave audio,
+     * sphère 3D d'une IA vocale…). Prime sur l'état simple. `null` = retire.
+     */
+    center(component: Component | null, opts?: { priority?: number }): void;
     /** Extrémité : un raccourci d'action (icône ou texte). `null` = retire. */
     action(slot: "left" | "right", action: IdleAction | null): void;
     /** Clic sur TOUTE l'île en idle → ouvre ton UI au lieu du launcher. `null` = retire. */
     tap(handler: (() => void) | null): void;
+  };
+  /** Traductions (partagées avec l'hôte) — namespacées par extension. Lazy : seule la
+   *  locale active est en mémoire. La langue suit celle d'Island (Réglages → Langue). */
+  i18n: {
+    /** Résout une clé de TON namespace. `{param}` interpolé depuis `params`. Réactif. */
+    t(key: string, params?: Record<string, unknown>): string;
+    /** Enregistre tes messages : `register(locale => import(\`./locales/${locale}.json\`))`. */
+    register(loader: (locale: string) => Record<string, string> | Promise<Record<string, string>>): void;
+    /** Locale active (réactive, lecture seule côté extension). */
+    readonly locale: Readonly<Ref<string>>;
   };
   /** Monte une vue de l'extension DANS l'île (slot view). */
   view: {
@@ -170,7 +187,8 @@ export interface IslandApi {
    * composant — idéal pour un lecteur vidéo / mini-outil. `open` renvoie l'id.
    */
   window: {
-    open(component: Component, opts?: { id?: string; title?: string; width?: number; height?: number; x?: number; y?: number; resizable?: boolean }): string;
+    /** `icon` = SVG/HTML (souvent une icône lucide) affiché dans la sphère quand la fenêtre est minimisée. */
+    open(component: Component, opts?: { id?: string; title?: string; icon?: string; width?: number; height?: number; x?: number; y?: number; resizable?: boolean }): string;
     close(id?: string): void;
     focus(id: string): void;
   };
@@ -246,6 +264,26 @@ export interface IslandApi {
     focus(id: number): Promise<void>;
     /** Helper : `cb` à chaque changement de fenêtre active (sonde `foreground`). Renvoie un stop. */
     onForegroundChanged(cb: (w: WindowInfo | null) => void, intervalMs?: number): () => void;
+  };
+  /**
+   * Terminaux PTY (ConPTY) + `exec` one-shot. ⚠ Requiert la permission `terminal` =
+   * CONFIANCE TOTALE (exécute des processus arbitraires). Pour des extensions de dev.
+   */
+  terminal: {
+    /** Démarre un terminal → id de session. Sortie via `onData`, fin via `onExit`. */
+    spawn(opts?: { cwd?: string; cmd?: string; args?: string[]; cols?: number; rows?: number }): Promise<string>;
+    /** Écrit dans le stdin (frappes xterm). */
+    write(id: string, data: string): void;
+    /** Redimensionne le PTY (cols/rows) — au resize de la fenêtre / xterm fit. */
+    resize(id: string, cols: number, rows: number): void;
+    /** Tue le process et libère la session. */
+    kill(id: string): void;
+    /** Commande one-shot avec CAPTURE (git branch/diff, docker ps…). Pas d'interactivité. */
+    exec(opts: { cmd: string; args?: string[]; cwd?: string }): Promise<{ code: number | null; stdout: string; stderr: string }>;
+    /** Sortie d'une session (base64, décode pour xterm). Filtre par `id`. Renvoie un désabonnement. */
+    onData(cb: (e: { id: string; b64: string }) => void): Promise<() => void>;
+    /** Fin d'une session (process terminé). Renvoie un désabonnement. */
+    onExit(cb: (e: { id: string }) => void): Promise<() => void>;
   };
   /** Presse-papiers (texte + image). Requiert la permission `clipboard`. */
   clipboard: {
@@ -331,10 +369,11 @@ interface Bridge {
   resizeView(size: { width?: number; height?: number; radius?: number }): void;
   openDrop(component: Component): void;
   closeDrop(): void;
-  openWindow(component: Component, opts?: { id?: string; title?: string; width?: number; height?: number; x?: number; y?: number; resizable?: boolean }): string;
+  openWindow(component: Component, opts?: { id?: string; title?: string; icon?: string; width?: number; height?: number; x?: number; y?: number; resizable?: boolean }): string;
   closeWindow(id?: string): void;
   focusWindow(id: string): void;
   setIdleState(key: string, state: IdleState | null, priority: number): void;
+  setIdleCenter(key: string, component: Component | null, priority: number): void;
   setIdleAction(key: string, action: ({ slot: "left" | "right" } & IdleAction) | null): void;
   setIdleTap(key: string, handler: (() => void) | null): void;
   setLauncherEntry(key: string, entry: { id: string; label: string; icon: string; onActivate: () => void } | null): void;
@@ -404,6 +443,8 @@ export function useIsland(extId: string = ""): IslandApi {
   ensureMedia(b);
   // Namespace propre à cette extension → pas de collision de clés idle entre extensions.
   const ns = "ext:" + Math.random().toString(36).slice(2, 8);
+  // Namespace i18n STABLE (clé de catalogue) : l'extension = son id, l'hôte = "host".
+  const i18nNs = extId || "host";
   const state = mediaState;
 
   const cached: IslandApi = {
@@ -417,8 +458,14 @@ export function useIsland(extId: string = ""): IslandApi {
     },
     idle: {
       state: (s, opts) => b.setIdleState(`${ns}:state`, s, opts?.priority ?? 10),
+      center: (c, opts) => b.setIdleCenter(`${ns}:center`, c, opts?.priority ?? 10),
       action: (slot, a) => b.setIdleAction(`${ns}:${slot}`, a ? { slot, ...a } : null),
       tap: (h) => b.setIdleTap(`${ns}:tap`, h),
+    },
+    i18n: {
+      t: (key, params) => translate(i18nNs, key, params),
+      register: (loader) => registerMessages(i18nNs, loader as MessageLoader),
+      locale: i18nLocale,
     },
     view: {
       open: (component, size) => b.openView(component, size),
@@ -519,6 +566,15 @@ export function useIsland(extId: string = ""): IslandApi {
         }, period);
         return () => clearInterval(t);
       },
+    },
+    terminal: {
+      spawn: (opts) => b.invoke<string>("pty_spawn", { extId, opts: opts ?? {} }),
+      write: (id, data) => void b.invoke("pty_write", { extId, id, data }),
+      resize: (id, cols, rows) => void b.invoke("pty_resize", { extId, id, cols, rows }),
+      kill: (id) => void b.invoke("pty_kill", { extId, id }),
+      exec: (opts) => b.invoke("pty_exec", { extId, opts }),
+      onData: (cb) => b.listen("pty://data", (e) => cb(e.payload)),
+      onExit: (cb) => b.listen("pty://exit", (e) => cb(e.payload)),
     },
     clipboard: {
       readText: () => b.invoke<string>("clipboard_read_text", { extId }),

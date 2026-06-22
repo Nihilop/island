@@ -74,16 +74,19 @@ export interface FloatWindow {
   id: string;
   component: Component;
   title?: string;
+  icon?: string; // SVG/HTML (souvent une icône lucide) → affiché dans la sphère minimisée
   x: number;
   y: number;
   width: number;
   height: number;
   resizable: boolean;
   z: number;
+  minimized: boolean; // rétractée en sphère à droite de l'île (cf. MinimizedDock)
 }
 export interface WindowOpts {
   id?: string;
   title?: string;
+  icon?: string;
   width?: number;
   height?: number;
   x?: number;
@@ -96,7 +99,7 @@ let winZ = 50;
 export function openWindow(component: Component, opts?: WindowOpts): string {
   const id = opts?.id ?? "win:" + Math.random().toString(36).slice(2, 8);
   const existing = floatWindows.value.find((w) => w.id === id);
-  if (existing) { existing.z = ++winZ; return id; } // déjà ouverte → au premier plan
+  if (existing) { existing.minimized = false; existing.z = ++winZ; return id; } // déjà ouverte → restaure + premier plan
   const width = opts?.width ?? 480;
   const height = opts?.height ?? 320;
   // Centrage sur la taille ÉCRAN (l'overlay passe plein écran de façon async à
@@ -104,14 +107,26 @@ export function openWindow(component: Component, opts?: WindowOpts): string {
   const x = opts?.x ?? Math.max(16, Math.round((window.screen.width - width) / 2));
   const y = opts?.y ?? Math.max(16, Math.round((window.screen.height - height) / 3));
   floatWindows.value.push({
-    id, component: markRaw(component), title: opts?.title, x, y, width, height,
-    resizable: opts?.resizable ?? false, z: ++winZ,
+    id, component: markRaw(component), title: opts?.title, icon: opts?.icon, x, y, width, height,
+    resizable: opts?.resizable ?? false, z: ++winZ, minimized: false,
   });
   return id;
 }
 export function closeWindow(id?: string) {
   floatWindows.value = id ? floatWindows.value.filter((w) => w.id !== id) : [];
 }
+/** Rétracte une fenêtre en sphère (à droite de l'île). */
+export function minimizeWindow(id: string) {
+  const w = floatWindows.value.find((x) => x.id === id);
+  if (w) w.minimized = true;
+}
+/** Restaure une fenêtre minimisée (au premier plan). */
+export function restoreWindow(id: string) {
+  const w = floatWindows.value.find((x) => x.id === id);
+  if (w) { w.minimized = false; w.z = ++winZ; }
+}
+/** Rectangle courant de l'île (publié par Island.vue) → ancre la barre des minimisées. */
+export const islandRect = ref<Rect | null>(null);
 export function focusWindow(id: string) {
   const w = floatWindows.value.find((x) => x.id === id);
   if (w) w.z = ++winZ;

@@ -1,11 +1,15 @@
 // Registre de l'île en mode idle.
-//  - CENTRE = un ÉTAT (enum géré par l'hôte → rendu cohérent/joli, API légère).
+//  - CENTRE = soit un ÉTAT simple (enum hôte → COULEUR du cercle, ex. recording),
+//    soit un COMPOSANT custom monté par une extension (viz complexe : wave Spotify,
+//    sphère ThreeJS d'une IA vocale…). Le composant prime sur le cercle coloré.
 //  - GAUCHE/DROITE = des ACTIONS (icône + onClick, raccourcis conditionnels libres).
 //
 // Garde-fou anti-race : clé par contributeur (borné), dédoublonnage, coalescing/frame.
-import { ref, computed } from "vue";
+import { ref, computed, markRaw, type Component } from "vue";
 
-export type IdleState = "idle" | "playing" | "busy" | "recording";
+// États SIMPLES liés aux services hôte → pilotent juste la couleur/forme du cercle central.
+// (Une viz riche passe par un composant via `idle.center`, pas par un état.)
+export type IdleState = "idle" | "recording";
 export interface IdleAction {
   slot: "left" | "right";
   icon?: string; // SVG (string)
@@ -17,7 +21,10 @@ export interface IdleAction {
 
 interface StateEntry { state: IdleState; priority: number }
 
+interface CenterEntry { component: Component; priority: number }
+
 const states = new Map<string, StateEntry>();
+const centers = new Map<string, CenterEntry>();
 const actions = new Map<string, IdleAction>();
 // Tap : si un contributeur enregistre un handler, un clic sur l'île en idle
 // l'appelle au lieu d'ouvrir le launcher (ex. ouvrir le contrôle d'enregistrement).
@@ -35,6 +42,15 @@ export function setIdleState(key: string, state: IdleState | null, priority = 10
   const prev = states.get(key);
   if (prev && prev.state === state && prev.priority === priority) return;
   states.set(key, { state, priority });
+  schedule();
+}
+
+// Composant central custom (viz d'extension). `null` = retire la contribution.
+export function setIdleCenter(key: string, component: Component | null, priority = 10) {
+  if (!component) { if (centers.delete(key)) schedule(); return; }
+  const prev = centers.get(key);
+  if (prev && prev.component === component && prev.priority === priority) return;
+  centers.set(key, { component: markRaw(component), priority });
   schedule();
 }
 
@@ -66,6 +82,14 @@ export const idleState = computed<IdleState>(() => {
   let best: StateEntry | undefined;
   for (const s of states.values()) if (!best || s.priority > best.priority) best = s;
   return best?.state ?? "idle";
+});
+
+/** Composant central custom résolu (plus haute priorité), ou null → cercle coloré par état. */
+export const idleCenter = computed<Component | null>(() => {
+  void tick.value;
+  let best: CenterEntry | undefined;
+  for (const c of centers.values()) if (!best || c.priority > best.priority) best = c;
+  return best?.component ?? null;
 });
 
 /** Actions résolues par extrémité — LISTE (cumulables), triées par priorité décroissante. */

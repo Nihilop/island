@@ -184,7 +184,7 @@ Deux entrées principales :
 | -------------- | ----- |
 | `ctx.launcher` | `register({label, icon, onActivate})` / `remove()` — entrée dans le launcher |
 | `ctx.view`     | `open(component, {width,height,radius,persistent})` / `close()` — monte une view dans l'île. `persistent: true` = reste ouverte malgré un clic ailleurs / perte de focus (ex. garder des stats visibles) ; sinon un clic hors de l'île la replie. |
-| `ctx.idle`     | `state()`, `action("left"\|"right", …)`, `tap()` — contribue à l'île en idle |
+| `ctx.idle`     | `state()` (couleur du cercle : `idle\|recording`), `center(component)` (monte une viz custom au centre — prime sur le cercle), `action("left"\|"right", …)`, `tap()` — contribue à l'île en idle |
 | `ctx.notify`   | `notify({title, body, icon, color, source, timeout, actions})` → bannière + historique |
 | `ctx.capture`  | `screenshot()`, `selectRegion()`, `showRegionOutline()`, `listDisplays()`… **L'enregistrement vidéo est agnostique** : `startRecording({ region, display, fps, encoder })` où `encoder = { extId, bin, args }` — l'extension fournit son propre binaire d'encodage (dans son dossier) + les args. L'hôte n'ajoute que l'entrée (frames brutes BGRA top-down, géométrie) et la sortie. `fetchBinary({ extId, url, dest, zipEntry? })` télécharge ce binaire dans le dossier de l'extension (progress via event `encoder://download`). Voir « Embarquer un binaire natif » ci-dessous. |
 | `ctx.shortcuts`| `register(accel, handler)` / `unregister(accel)` — raccourcis GLOBAUX |
@@ -244,6 +244,34 @@ L'hôte tourne avec `csp: null` → un `fetch()` standard vers une API externe
 fonctionne (si l'API renvoie du CORS). Pas besoin de plugin HTTP. Exemple : le
 meme fetché depuis `https://meme-api.com/gimme` (CORS `*`).
 
+### Traductions (i18n)
+
+L'i18n est **partagé** (une instance dans `@island/sdk`) : pas de vue-i18n par extension,
+et la langue suit celle d'Island (Réglages → Langue). Ton extension est **namespacée par
+son id** → pas de collision de clés.
+
+```ts
+// locales/en.json, locales/fr.json  → { "nowPlaying": "Now playing: {title}" }
+import en from "./locales/en.json";
+import fr from "./locales/fr.json";
+
+activate(ctx) {
+  // Register une MAP de locales (import statique). `t()` est réactif : la langue change
+  // → tes textes se retraduisent sans rien faire.
+  ctx.i18n.register((locale) => ({ en, fr }[locale] ?? en));
+
+  ctx.notify({ title: ctx.i18n.t("nowPlaying", { title: track }) });
+}
+```
+
+> ⚠️ **Embarque tes locales par IMPORT STATIQUE** (comme ci-dessus), pas via
+> `import('./locales/'+l+'.json')`. En **prod**, le `dist/` est chargé en **Blob URL** →
+> un import dynamique *relatif* ne résout pas. L'import statique bundle les JSON dans
+> `dist/index.mjs` → **embarqué dans le `.island` automatiquement** (le packager prend tout
+> `dist/`) et **prod-safe**. Pour des extensions à peu de texte, le coût est négligeable
+> même avec beaucoup de langues. (L'hôte, lui, lazy-load un chunk par langue — il n'est pas
+> chargé en Blob.)
+
 ## 5. Workflow de dev
 
 1. Créer le dossier dans `%APPDATA%\com.nihil.island\extensions\<id>\` avec les fichiers ci-dessus.
@@ -276,3 +304,4 @@ Un `.island` = zip de `manifest.json` + `dist/` (sans le source). Deux voies :
 - [ ] `index.ts` exporte `defineExtension` par défaut + importe `./tailwind.css`.
 - [ ] `pnpm build` produit `dist/index.mjs` + `dist/style.css`.
 - [ ] Couleurs via les tokens hôte (`text-foreground`, `bg-primary`…), pas en dur.
+- [ ] i18n (si textes) : locales en **import statique** + `ctx.i18n.register((l) => map[l])` (pas d'import dynamique relatif → casse en prod/Blob).

@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.6.4"
+version = "0.6.5"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -36,8 +36,9 @@ ureq = { version = "2", features = ["cookies"] } # HTTP natif côté hôte : té
 cookie_store = "0.21" # persistance du cookie-jar par extension (session conservée entre redémarrages)
 arboard = "3" # presse-papiers cross-platform (texte + image) exposé aux extensions
 keyring = { version = "3", features = ["windows-native"] } # secrets chiffrés (Windows Credential Manager ; apple/linux à ajouter au portage)
-base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers)
+base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers, flux PTY)
 png = "0.17" # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
+portable-pty = "0.8" # terminaux PTY (ConPTY sous Windows) exposés aux extensions (perm `terminal`)
 
 # Capture d'écran (Windows Graphics Capture, anti-cheat safe).
 [target.'cfg(windows)'.dependencies.windows-capture]

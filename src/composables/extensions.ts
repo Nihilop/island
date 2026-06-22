@@ -7,7 +7,7 @@ import { ref, markRaw, effectScope, type Component, type EffectScope } from "vue
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useIsland, type ExtensionDef, type ExtStorage, type ExtSecrets, type ExtensionContext } from "../sdk";
-import { setIdleState, setIdleAction, setIdleTap } from "./idle";
+import { setIdleState, setIdleCenter, setIdleAction, setIdleTap } from "./idle";
 import { setLauncherEntry, setLauncherProvider } from "./launcher";
 import { busEmit, busOn, busClear } from "./bus";
 import { registerShortcut, unregisterShortcut, unregisterShortcutsFor } from "./shortcuts";
@@ -81,6 +81,7 @@ function makeCtx(id: string): ExtensionContext {
   const api = useIsland(id);
   const idle = {
     state: (s: any, opts?: { priority?: number }) => setIdleState(`${id}:state`, s, opts?.priority ?? 10),
+    center: (c: any, opts?: { priority?: number }) => setIdleCenter(`${id}:center`, c, opts?.priority ?? 10),
     action: (slot: "left" | "right", a: any) => setIdleAction(`${id}:${slot}`, a ? { slot, ...a } : null),
     tap: (h: (() => void) | null) => setIdleTap(`${id}:tap`, h),
   };
@@ -188,6 +189,7 @@ function deactivateExtension(id: string) {
   try { void rec.def.deactivate?.(); } catch { /* noop */ }
   // Nettoyage de tout ce que l'extension a contribué.
   setIdleState(`${id}:state`, null);
+  setIdleCenter(`${id}:center`, null);
   setIdleAction(`${id}:left`, null);
   setIdleAction(`${id}:right`, null);
   setIdleTap(`${id}:tap`, null);

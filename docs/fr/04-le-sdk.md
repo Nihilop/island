@@ -27,7 +27,7 @@ const island = useIsland(EXT_ID);
 | `ctx.view`     | `open(component, opts)` / `close()` / `resize(size)` — monte/redimensionne une view dans l'île |
 | `ctx.drop`     | `open(component)` / `close()` — goutte (sous-slot d'une view) |
 | `ctx.window`   | `open(component, opts) → id` / `close(id?)` / `focus(id)` — panneau flottant draggable |
-| `ctx.idle`     | `state(s)`, `action("left"\|"right", a)`, `tap(handler)` — contribue à l'île au repos |
+| `ctx.idle`     | `state(s)` (couleur), `center(component)` (viz custom), `action("left"\|"right", a)`, `tap(handler)` — contribue à l'île au repos |
 | `ctx.notify`   | `notify(spec) → id` — bannière + historique ; `notifications.dismiss/clear` |
 | `ctx.media`    | `state` (réactif), `toggle/next/prev/seek/setVolume` — média natif *(perm `media`)* |
 | `ctx.capture`  | screenshot, enregistrement, sélection de zone… *(perm `capture`)* |
@@ -85,13 +85,17 @@ pour un lecteur ou un mini-outil.
 ## L'île au repos : `idle`
 
 ```ts
-ctx.idle.state("playing");                                   // statut au centre (null = retire)
+ctx.idle.state("recording");                                 // couleur du cercle central (null = retire)
+ctx.idle.center(MaViz);                                       // OU monte un composant au centre (null = retire)
 ctx.idle.action("right", { text: "00:12", color: "#ff453a" }); // raccourci à droite (icône OU texte)
 ctx.idle.tap(() => ctx.view.open(MaView));                    // clic sur toute l'île → ouvre ton UI
 ```
 
-- `state` : un enum géré par l'hôte (`idle | playing | busy | recording`), rendu
-  joliment. `null` retire ta contribution.
+- `state` : un **état simple** géré par l'hôte (`idle | recording`) = **couleur du cercle**
+  central. `null` retire ta contribution.
+- `center(component)` : monte un **composant custom** au centre (viz riche — wave audio,
+  sphère 3D d'une IA vocale…). **Prime** sur le cercle coloré. `null` retire. Fonctionne
+  comme `view.open` (composant Vue de ton extension monté dans l'île).
 - `action(slot, …)` : `slot` = `"left"` ou `"right"`. Une action **sans `onActivate`**
   est un affichage (ex. compteur) qui laisse passer le clic-île.
 - `tap(handler)` : intercepte le clic sur l'île au repos (au lieu d'ouvrir le launcher).

@@ -38,6 +38,7 @@ const PERM_LABELS: Record<string, string> = {
   apps: "⚠ Liste et lance les applications installées",
   input: "⚠ Simule des frappes clavier dans l'application active",
   windows: "⚠ Voit les fenêtres ouvertes (titres, app) et peut les activer",
+  terminal: "⚠⚠ Exécute des commandes / processus (terminal) — confiance totale",
 };
 
 const name = computed(() => manifest.value?.name ?? manifest.value?.id ?? "Extension");

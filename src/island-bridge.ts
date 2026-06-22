@@ -9,7 +9,7 @@ import {
   openWindow, closeWindow, focusWindow,
   type ModalSpec, type ViewSize, type Region, type WindowOpts,
 } from "./composables/overlay";
-import { setIdleState, setIdleAction, setIdleTap, type IdleAction } from "./composables/idle";
+import { setIdleState, setIdleCenter, setIdleAction, setIdleTap, type IdleAction } from "./composables/idle";
 import { setLauncherEntry, setLauncherProvider, type LauncherEntry, type LauncherProvider } from "./composables/launcher";
 import { registerShortcut, unregisterShortcut } from "./composables/shortcuts";
 import { post as postNotif, markRead, clearUnread, type NotifSpec } from "./composables/notifications";
@@ -32,6 +32,7 @@ export function installBridge() {
     closeWindow: (id?: string) => closeWindow(id),
     focusWindow: (id: string) => focusWindow(id),
     setIdleState: (key: string, state: IdleState | null, priority: number) => setIdleState(key, state, priority),
+    setIdleCenter: (key: string, component: Component | null, priority: number) => setIdleCenter(key, component, priority),
     setIdleAction: (key: string, action: IdleAction | null) => setIdleAction(key, action),
     setIdleTap: (key: string, handler: (() => void) | null) => setIdleTap(key, handler),
     setLauncherEntry: (key: string, entry: LauncherEntry | null) => setLauncherEntry(key, entry),

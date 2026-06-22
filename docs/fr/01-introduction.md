@@ -41,8 +41,9 @@ composant Vue réel dans `index.ts`.
 Au-delà des surfaces, une extension **contribue** à l'île sans la « posséder » :
 
 - **`launcher`** — une entrée (label + icône) dans le lanceur de l'île.
-- **`idle`** — un statut au centre (`playing`, `recording`…) et/ou des raccourcis aux
-  extrémités quand l'île est au repos ; un *tap* sur l'île ouvre ton UI.
+- **`idle`** — au centre : un état simple (`recording`… = couleur) **ou** un composant
+  custom (`idle.center` — viz riche) ; et/ou des raccourcis aux extrémités quand l'île est
+  au repos ; un *tap* sur l'île ouvre ton UI.
 - **`notify`** — une notification (bannière + historique).
 
 Plusieurs extensions coexistent : leurs contributions sont cumulées et nettoyées

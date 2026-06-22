@@ -82,7 +82,7 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClassNameW, GetForegroundWindow, GetWindowRect,
+        GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, GWL_STYLE, WS_MAXIMIZE,
     };
 
     let hwnd = GetForegroundWindow();
@@ -95,6 +95,13 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
     let n = GetClassNameW(hwnd, &mut cls);
     let class = String::from_utf16_lossy(&cls[..n as usize]);
     if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd") {
+        return false;
+    }
+
+    // Une fenêtre MAXIMISÉE n'est PAS du plein écran (jeu/vidéo). Sans ce filtre, une app
+    // maximisée (Spotify…) avec barre des tâches en auto-masquage couvre tout le moniteur
+    // (rcWork == rcMonitor) → faux positif → l'île se cachait en changeant de titre.
+    if (GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_MAXIMIZE.0) != 0 {
         return false;
     }
 

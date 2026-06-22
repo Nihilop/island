@@ -5,13 +5,15 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalSize, PhysicalPosition } from "@tauri-apps/api/window";
-import { idleState, idleActions, idleTap } from "../composables/idle";
+import { idleState, idleCenter, idleActions, idleTap } from "../composables/idle";
 import { hasProviders, launcherCells, loadBuiltins } from "../composables/launcher";
 import {
   setHitRegion, activeView, activeViewSize, activeViewPersistent, activeViewSafeZone, closeView, dropContent, closeDrop,
-  modalSpec, floatWindows, selecting, regionOutline, type SafeZone,
+  modalSpec, floatWindows, selecting, regionOutline, islandRect, type SafeZone,
 } from "../composables/overlay";
 import { DEV, devPin, installDevShortcuts, devRestore } from "../composables/dev";
+import { theme, islandAccent } from "../composables/islandTheme";
+import IslandSurface from "./IslandSurface.vue";
 import NotifCard from "./NotifCard.vue";
 import Launcher from "./Launcher.vue";
 import { stack as notifStack, unread, unreadCount, lastPosted, setDnd as setNotifDnd, pauseStack, resumeStack, markRead, clearUnread, type Notif } from "../composables/notifications";
@@ -82,7 +84,36 @@ const dropEl = ref<HTMLElement>();
 const wrapEl = ref<HTMLElement>();
 const contentEl = ref<HTMLElement>();
 
+// --- Mesure du CENTRE idle : l'île se dimensionne autour du contenu central réel
+// (point, ou composant `idle.center` d'une extension qui peut faire 100px+). Le centre
+// reste absolument centré ; seule la largeur/hauteur de l'île dérive de cette mesure. ---
+const centerEl = ref<HTMLElement>();
+const centerW = ref(8);
+const centerH = ref(8);
+let centerRO: ResizeObserver | undefined;
+function measureCenter() {
+  const el = centerEl.value;
+  if (!el) return;
+  centerW.value = el.offsetWidth;
+  centerH.value = el.offsetHeight;
+}
+watch(centerEl, (el) => {
+  centerRO?.disconnect();
+  if (el) { centerRO = new ResizeObserver(measureCenter); centerRO.observe(el); measureCenter(); }
+});
+
 const contentVisible = computed(() => phase.value === "stable" || phase.value === "enter");
+
+// Style racine : ancrage (espace sous le bord haut, selon le LAYOUT) + couleur d'accent
+// (override --primary dans toute l'île, valeur indépendante du layout). Anim/contenu inchangés.
+const rootStyle = computed(() => {
+  const s: Record<string, string> = { paddingTop: theme.value.anchor === "topbar" ? "0px" : "8px" };
+  if (islandAccent.value) s["--primary"] = islandAccent.value;
+  return s;
+});
+
+// L'île est-elle « ouverte » (déployée) ou au repos ? → pilote les tailles topbar + le surface.
+const islandOpen = computed(() => format.value !== "idle" || showStack.value);
 
 // Mode de zone haute ACTIF selon le format courant (cf. SafeZone). Pilote d'un seul
 // endroit : la poignée de collapse, la réserve de padding, et le scrim.
@@ -96,6 +127,8 @@ const safeZone = computed<SafeZone>(() => {
 });
 
 function islandDims(): [number, number, number] {
+  // Taille TOUJOURS pilotée par le contenu (idem flottant) — le thème ne change que le
+  // chrome (ancrage + congés), jamais la taille. Donc topbar s'adapte au contenu comme le reste.
   if (showStack.value) return [372, stackHeight.value, 26]; // pile de notifications
   if (format.value === "notifcenter") {
     const n = Math.min(unread.value.length || 1, NOTIF_MAX);
@@ -114,13 +147,15 @@ function islandDims(): [number, number, number] {
   // idle
   if (dnd.value) return hovered.value ? [110, 36, 18] : [34, 34, 17];
   const a = idleActions.value;
-  // Largeur basée sur le côté le plus chargé → réservation symétrique → le centre
-  // (absolu) reste centré quoi qu'il arrive ; l'île grandit avec les actions.
+  // Réserve SYMÉTRIQUE par côté (mini = marge) → le centre reste centré même si un côté
+  // a plus d'icônes ; l'île grandit avec les actions.
   const maxSide = Math.max(a.left.length, a.right.length + (unreadCount.value ? 1 : 0));
-  const stateActive = idleState.value !== "idle";
-  if (!stateActive && maxSide === 0) return [120, 38, 19];
-  const w = (stateActive ? 56 : 24) + 2 * (14 + maxSide * 28);
-  return [Math.min(340, w), 38, 19];
+  const sideReserve = Math.max(16, 14 + maxSide * 28);
+  // Le CENTRE dicte sa taille (mesurée) : l'île l'enveloppe → un composant large ne
+  // déborde plus. Plancher = la pilule idle confortable (120×38) ; plafond large.
+  const w = Math.min(720, Math.max(120, centerW.value + 2 * sideReserve));
+  const h = Math.max(38, centerH.value + 16);
+  return [w, h, Math.round(h / 2)];
 }
 const wrapStyle = computed(() => {
   const [w, h, r] = islandDims();
@@ -145,7 +180,8 @@ const monW = Math.round(window.screen.width * (window.devicePixelRatio || 1));
 const monH = Math.round(window.screen.height * (window.devicePixelRatio || 1));
 
 function needsFullscreen(): boolean {
-  return modalSpec.value !== null || floatWindows.value.length > 0 || selecting.value || !!regionOutline.value;
+  // Une fenêtre MINIMISÉE (sphère) ne force pas le plein écran.
+  return modalSpec.value !== null || floatWindows.value.some((w) => !w.minimized) || selecting.value || !!regionOutline.value;
 }
 
 interface Box { x: number; y: number; w: number; h: number }
@@ -250,6 +286,7 @@ function publishRegion() {
   const r = el.getBoundingClientRect();
   const extra = dropOpen.value ? 120 : 8;
   const rect = { x: Math.round(r.left - 6), y: Math.round(r.top - 4), w: Math.round(r.width + 12), h: Math.round(r.height + extra) };
+  islandRect.value = rect; // ancre la barre des fenêtres minimisées
   const key = `${rect.x},${rect.y},${rect.w},${rect.h}`;
   if (key !== lastRegion) { lastRegion = key; setHitRegion("island", rect); }
 }
@@ -299,11 +336,11 @@ onMounted(async () => {
     if (!focused) autoDismiss();
   });
 });
-onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); });
+onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); centerRO?.disconnect(); });
 </script>
 
 <template>
-  <div class="relative z-1 flex h-screen items-start justify-center bg-transparent pt-2 pointer-events-none select-none">
+  <div class="relative z-1 flex h-screen items-start justify-center bg-transparent pointer-events-none select-none" :style="rootStyle">
     <svg width="0" height="0" class="absolute">
       <defs>
         <filter id="goo">
@@ -330,7 +367,7 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); })
       @mouseleave="peekHideSoon"
     >
       <div class="goo" :class="{ dropping: dropOpen }">
-        <div class="absolute inset-0 rounded-(--r) bg-background shadow-[0_8px_24px_rgba(0,0,0,0.4),inset_0_0_0_0.5px_rgba(255,255,255,0.07)]"></div>
+        <IslandSurface :open="islandOpen" />
         <div class="drop-bg" :class="{ wide: dropWide }" :style="dropWide ? { width: dropW + 'px' } : {}"></div>
       </div>
 
@@ -380,12 +417,10 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); })
               </template>
             </div>
 
-            <!-- Centre : état géré par l'hôte, toujours au centre -->
-            <div class="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center">
-              <div v-if="idleState === 'playing'" class="wave flex h-5 items-center gap-[3px] text-foreground">
-                <span></span><span></span><span></span><span></span><span></span><span></span>
-              </div>
-              <div v-else-if="idleState === 'busy'" class="busy flex items-center gap-1"><span></span><span></span><span></span></div>
+            <!-- Centre : composant custom d'une extension (viz riche) sinon cercle coloré par état.
+                 Mesuré (ResizeObserver) → l'île se dimensionne autour. -->
+            <div ref="centerEl" class="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center">
+              <component v-if="idleCenter" :is="idleCenter" />
               <div v-else-if="idleState === 'recording'" class="rec m-auto h-2 w-2 rounded-full bg-[#ef4444]"></div>
               <div v-else class="dot m-auto h-2 w-2 rounded-full bg-primary"></div>
             </div>
@@ -488,10 +523,4 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); })
   100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
 }
 @keyframes breathe { 0%,100%{opacity:.5;transform:scale(.85)} 50%{opacity:1;transform:scale(1.15)} }
-.wave span { width: 3px; background: currentColor; border-radius: 2px; animation: wave 1s ease-in-out infinite; }
-.wave span:nth-child(1){animation-delay:0s}.wave span:nth-child(2){animation-delay:.18s}.wave span:nth-child(3){animation-delay:.36s}.wave span:nth-child(4){animation-delay:.12s}.wave span:nth-child(5){animation-delay:.3s}.wave span:nth-child(6){animation-delay:.22s}
-@keyframes wave { 0%,100%{height:5px} 50%{height:20px} }
-.busy span { width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); animation: busy 1.2s ease-in-out infinite; }
-.busy span:nth-child(2){animation-delay:.15s}.busy span:nth-child(3){animation-delay:.3s}
-@keyframes busy { 0%,100%{opacity:.3;transform:translateY(0)} 40%{opacity:1;transform:translateY(-3px)} }
 </style>
