@@ -26,7 +26,7 @@ const island = useIsland(EXT_ID);
 | `ctx.launcher` | `register({label, icon, onActivate})` / `remove()` — entrée dans le lanceur ; `provider({onQuery})` / `removeProvider()` — alimente la **recherche** du lanceur (palette extensible) |
 | `ctx.view`     | `open(component, opts)` / `close()` / `resize(size)` — monte/redimensionne une view dans l'île |
 | `ctx.drop`     | `open(component)` / `close()` — goutte (sous-slot d'une view) |
-| `ctx.window`   | `open(component, opts) → id` / `close(id?)` / `focus(id)` — panneau flottant draggable |
+| `ctx.window`   | `open(component, {title,icon,…}) → id` / `close(id?)` / `focus(id)` — panneau flottant draggable (réductible en sphère via `icon`) |
 | `ctx.idle`     | `state(s)` (couleur), `center(component)` (viz custom), `action("left"\|"right", a)`, `tap(handler)` — contribue à l'île au repos |
 | `ctx.notify`   | `notify(spec) → id` — bannière + historique ; `notifications.dismiss/clear` |
 | `ctx.media`    | `state` (réactif), `toggle/next/prev/seek/setVolume` — média natif *(perm `media`)* |
@@ -34,6 +34,7 @@ const island = useIsland(EXT_ID);
 | `ctx.system`   | `stats()`, `battery()`, `online()`, `volume()/setVolume/setMuted`, `idleMs()/onUserIdle()` *(perm `system`)* |
 | `ctx.windows`  | `foreground()`, `list()`, `focus(id)`, `onForegroundChanged(cb)` — fenêtres du bureau *(⚠ perm `windows`)* |
 | `ctx.shortcuts`| `register(accel, handler)` / `unregister(accel)` — raccourcis **globaux** |
+| `ctx.terminal` | `spawn/write/resize/kill/exec/onData/onExit` — terminaux PTY (xterm) + exec one-shot *(⚠⚠ perm `terminal`, confiance maximale)* |
 | `ctx.storage`  | `get/set/delete/keys` — store clé→valeur persistant, isolé par extension |
 | `ctx.secrets`  | `get/set/delete` — coffre **chiffré** (tokens d'API…), isolé par extension |
 | `ctx.clipboard`| `readText/writeText/readImage/writeImage` — presse-papiers *(perm `clipboard`)* |
@@ -74,13 +75,30 @@ Un sous-slot pour un mini-contenu annexe (ex. un slider de volume sous un lecteu
 ### `window` — panneau flottant draggable
 
 ```ts
-const id = ctx.window.open(MonOutil, { title: "Lecteur", width: 480, height: 270, resizable: true });
+const ICON = "<svg …>…</svg>"; // SVG/lucide
+const id = ctx.window.open(MonOutil, { title: "Lecteur", icon: ICON, width: 480, height: 270, resizable: true });
 ctx.window.focus(id);
 ctx.window.close(id);
 ```
 
-Un panneau libre (barre minimale + croix), déplaçable, indépendant de l'île — idéal
-pour un lecteur ou un mini-outil.
+Un panneau libre (barre minimale : **réduire − / fermer ✕**), déplaçable, indépendant
+de l'île — idéal pour un lecteur, un terminal ou un mini-outil.
+
+- **`icon`** : affiché dans la **sphère** quand l'utilisateur **minimise** la fenêtre.
+  Les fenêtres réduites apparaissent en petites sphères **à droite de l'île** ; un clic
+  sur la sphère **restaure** la fenêtre.
+
+### `terminal` — terminaux PTY (perm `terminal`)
+
+```ts
+const id = await ctx.terminal.spawn({ cwd: "/home/moi/projet", cols: 80, rows: 24 });
+ctx.terminal.onData(({ id: i, b64 }) => { if (i === id) term.write(atob(b64)); }); // → xterm.js
+term.onData((d) => ctx.terminal.write(id, d));
+const { stdout } = await ctx.terminal.exec({ cmd: "git", args: ["status"], cwd }); // one-shot capturé
+```
+
+⚠⚠ **Confiance maximale** (exécute des processus arbitraires). À rendre avec **xterm.js**
+(bundlé dans l'extension). Détails complets dans `docs/sdk-services.md` (section `terminal`).
 
 ## L'île au repos : `idle`
 

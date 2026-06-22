@@ -217,6 +217,31 @@ await ctx.shortcuts.unregister("Ctrl+Shift+Space");
 
 ---
 
+### `terminal` — Terminaux PTY & exec
+
+```ts
+// Terminal interactif (à brancher sur xterm.js) :
+const id = await ctx.terminal.spawn({ cwd: "C:/dev/projet", cols: 80, rows: 24 });
+const off = await ctx.terminal.onData(({ id: i, b64 }) => { if (i === id) term.write(atob(b64)); });
+term.onData((d) => ctx.terminal.write(id, d));   // frappes → stdin
+ctx.terminal.resize(id, cols, rows);             // au resize / xterm fit
+ctx.terminal.kill(id);                           // tue le process
+await ctx.terminal.onExit(({ id }) => { /* process terminé */ });
+
+// Commande one-shot CAPTURÉE (git, docker…) :
+const { code, stdout, stderr } = await ctx.terminal.exec({ cmd: "git", args: ["-C", path, "status"] });
+```
+
+- **Méthodes** : `spawn(opts)→id`, `write(id,data)`, `resize(id,cols,rows)`, `kill(id)`,
+  `exec({cmd,args?,cwd?})→{code,stdout,stderr}`, `onData(cb)`, `onExit(cb)`. La sortie
+  PTY arrive en **base64** (binaire/ANSI safe) via `onData` ; à décoder pour xterm.
+- **Confiance** : ⚠⚠ **MAXIMALE** — exécute des **processus arbitraires** (équivalent
+  exécution de code). À n'accorder qu'à des extensions de **confiance** (outils de dev).
+  Affichée en évidence à l'install.
+- **OS** : cross-platform (crate `portable-pty` → ConPTY sous Windows).
+
+---
+
 ## Récapitulatif « quelle permission pour quel besoin »
 
 - Lire l'écran / enregistrer → **`capture`** (+ **`native-encoder`** si tu embarques
@@ -227,6 +252,7 @@ await ctx.shortcuts.unregister("Ctrl+Shift+Space");
 - Appeler une API web avec session cookie → **`network`**.
 - Persister des réglages → **`storage`**.
 - Raccourci clavier global → **`shortcuts`**.
+- Lancer des processus / terminal interactif → **`terminal`** (⚠⚠ confiance maximale).
 
 Les contributions purement UI (`launcher`, `idle`, `view`, `drop`, `window`, `notify`)
 ne demandent **aucune** permission backend.

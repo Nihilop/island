@@ -183,11 +183,13 @@ Deux entrées principales :
 | Domaine        | Usage |
 | -------------- | ----- |
 | `ctx.launcher` | `register({label, icon, onActivate})` / `remove()` — entrée dans le launcher |
-| `ctx.view`     | `open(component, {width,height,radius,persistent})` / `close()` — monte une view dans l'île. `persistent: true` = reste ouverte malgré un clic ailleurs / perte de focus (ex. garder des stats visibles) ; sinon un clic hors de l'île la replie. |
+| `ctx.view`     | `open(component, {width,height,radius,persistent})` / `close()` / `resize({width,height})` — monte une view dans l'île. `persistent: true` = reste ouverte malgré un clic ailleurs / perte de focus (ex. garder des stats visibles) ; sinon un clic hors de l'île la replie. |
+| `ctx.window`   | `open(component, {id,title,icon,width,height,resizable})→id` / `close(id?)` / `focus(id)` — fenêtre flottante draggable. **`icon`** (SVG/lucide) = affiché dans la sphère quand l'utilisateur **minimise** la fenêtre (les minimisées apparaissent en sphères à droite de l'île, clic = restaure). |
 | `ctx.idle`     | `state()` (couleur du cercle : `idle\|recording`), `center(component)` (monte une viz custom au centre — prime sur le cercle), `action("left"\|"right", …)`, `tap()` — contribue à l'île en idle |
 | `ctx.notify`   | `notify({title, body, icon, color, source, timeout, actions})` → bannière + historique |
 | `ctx.capture`  | `screenshot()`, `selectRegion()`, `showRegionOutline()`, `listDisplays()`… **L'enregistrement vidéo est agnostique** : `startRecording({ region, display, fps, encoder })` où `encoder = { extId, bin, args }` — l'extension fournit son propre binaire d'encodage (dans son dossier) + les args. L'hôte n'ajoute que l'entrée (frames brutes BGRA top-down, géométrie) et la sortie. `fetchBinary({ extId, url, dest, zipEntry? })` télécharge ce binaire dans le dossier de l'extension (progress via event `encoder://download`). Voir « Embarquer un binaire natif » ci-dessous. |
 | `ctx.shortcuts`| `register(accel, handler)` / `unregister(accel)` — raccourcis GLOBAUX |
+| `ctx.terminal` | ⚠⚠ **perm `terminal` (confiance maximale)** : `spawn({cwd,cmd,args,cols,rows})→id`, `write(id,data)`, `resize(id,cols,rows)`, `kill(id)`, `exec({cmd,args,cwd})→{code,stdout,stderr}`, `onData`/`onExit` — terminaux PTY (xterm) + commandes one-shot. Voir `docs/sdk-services.md`. |
 | `ctx.system`   | `stats()` → `{cpu, cores[], memUsed, memTotal}` |
 | `ctx.storage`  | `get/set/delete/keys` — store clé→valeur persistant, isolé par extension |
 | `ctx.invoke`   | `invoke(cmd, args)` — accès brut aux commandes hôte (échappatoire) |

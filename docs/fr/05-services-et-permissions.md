@@ -164,6 +164,20 @@ await useIsland(EXT_ID).input.typeText("texte tapé dans l'app active");
   (text-expander, collage automatique…). Affichée en évidence à l'install.
 - **OS** : Windows.
 
+### `terminal` — terminaux PTY & exec
+
+```ts
+const id = await useIsland(EXT_ID).terminal.spawn({ cwd, cols: 80, rows: 24 }); // → xterm.js
+const { stdout } = await useIsland(EXT_ID).terminal.exec({ cmd: "git", args: ["status"], cwd });
+```
+
+- **Méthodes** : `spawn/write/resize/kill/exec/onData/onExit`. Sortie PTY en base64 (à
+  décoder pour xterm). `exec` = commande one-shot capturée (git, docker…).
+- **Commandes** : `pty_spawn`, `pty_write`, `pty_resize`, `pty_kill`, `pty_exec`.
+- **Confiance** : ⚠⚠ **MAXIMALE** — exécute des **processus arbitraires** (≈ exécution de
+  code). À n'accorder qu'à des extensions de confiance (outils de dev). En évidence à l'install.
+- **OS** : cross-platform (crate `portable-pty` → ConPTY sous Windows).
+
 ### `bus`, `speak` (sans permission backend)
 
 - **`bus`** (`island.bus.emit/on`) : pub/sub **entre extensions** (composition). Choisis
@@ -185,6 +199,8 @@ Tous cross-platform.
 - CPU/RAM → **`system`**. · Lecture/volume du média → **`media`**.
 - Lister/lancer des apps → **`apps`** (⚠). · API web avec session cookie → **`network`**.
 - Persister des réglages → **`storage`**. · Raccourci global → **`shortcuts`**.
+- Voir/activer les fenêtres du bureau → **`windows`** (⚠). · Taper dans l'app active → **`input`** (⚠).
+- Lancer des processus / terminal interactif → **`terminal`** (⚠⚠ confiance maximale).
 
 Les contributions purement UI (`launcher`, `idle`, `view`, `drop`, `window`, `notify`)
 ne demandent **aucune** permission backend.

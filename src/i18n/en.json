@@ -18,5 +18,14 @@
   "general.lang.title": "Language",
   "general.lang.desc": "Interface language",
   "lang.fr": "Français",
-  "lang.en": "English"
+  "lang.en": "English",
+  "general.updates.title": "Updates",
+  "general.updates.current": "Version {v}",
+  "updates.check": "Check",
+  "updates.checking": "Checking…",
+  "updates.uptodate": "up to date",
+  "updates.available": "v{v} available",
+  "updates.install": "Install",
+  "updates.installing": "Installing…",
+  "updates.error": "check failed"
 }

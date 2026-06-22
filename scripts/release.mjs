@@ -52,9 +52,14 @@ try {
   }
 
   console.log(`Version actuelle : ${cur}`);
-  const suggested = bump(cur, "patch");
-  const ans = (await rl.question(`Nouvelle version (X.Y.Z, ou patch/minor/major) [${suggested}] : `)).trim();
-  const next = !ans ? suggested : ["patch", "minor", "major"].includes(ans) ? bump(cur, ans) : ans;
+
+  // Niveau de bump depuis les ARGS : rien = patch (cas courant), --minor, --major.
+  // Un semver explicite (ex. `1.2.0`) en argument l'emporte sur tout.
+  const args = process.argv.slice(2);
+  const explicit = args.find((a) => SEMVER.test(a));
+  const kind = args.includes("--major") ? "major" : args.includes("--minor") ? "minor" : "patch";
+  const next = explicit ?? bump(cur, kind);
+  console.log(`Bump : ${explicit ? "explicite" : kind}`);
 
   if (!SEMVER.test(next)) {
     console.error(`✗ « ${next} » n'est pas un semver valide (X.Y.Z).`);

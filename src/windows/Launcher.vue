@@ -9,7 +9,7 @@ import {
 } from "../composables/launcher";
 
 defineProps<{ dnd: boolean }>();
-const emit = defineEmits<{ close: []; toggleDnd: [] }>();
+const emit = defineEmits<{ close: []; toggleDnd: []; openNotifs: [] }>();
 
 const searchEl = ref<HTMLInputElement>();
 let queryTimer: number | undefined;
@@ -23,6 +23,7 @@ watch(query, (q) => {
 function onAction(c: LauncherCell) {
   if (c.kind === "settings") invoke("open_settings").catch(() => {});
   else if (c.kind === "dnd") emit("toggleDnd");
+  else if (c.kind === "notifs") emit("openNotifs");
   else if (c.kind === "entry" || c.kind === "result") { c.onActivate?.(); resetLauncherQuery(); } // action de l'extension
 }
 // Entrée = 1er résultat ; Échap = vide le champ puis referme.

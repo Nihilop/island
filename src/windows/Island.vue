@@ -132,7 +132,8 @@ function islandDims(): [number, number, number] {
   if (showStack.value) return [372, stackHeight.value, 26]; // pile de notifications
   if (format.value === "notifcenter") {
     const n = Math.min(unread.value.length || 1, NOTIF_MAX);
-    return [372, n * NOTIF_CARD + (n - 1) * NOTIF_GAP + 12, 26];
+    const header = unread.value.length ? 30 : 0; // barre « Tout fermer »
+    return [372, n * NOTIF_CARD + (n - 1) * NOTIF_GAP + 12 + header, 26];
   }
   if (format.value === "view") {
     const s = activeViewSize.value;
@@ -397,7 +398,7 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); ce
           @mouseenter="pauseStack"
           @mouseleave="resumeStack"
         >
-          <NotifCard v-for="n in notifStack" :key="n.id" :notif="n" @click.stop="onNotifClick(n)" />
+          <NotifCard v-for="n in notifStack" :key="n.id" :notif="n" @click.stop="onNotifClick(n)" @close="markRead(n.id)" />
         </TransitionGroup>
 
         <!-- IDLE : centre ABSOLUMENT centré ; les slots s'étendent aux bords -->
@@ -443,14 +444,20 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); ce
         </div>
 
         <!-- LAUNCHER : recherche (si provider) + grille extensions/natifs -->
-        <Launcher v-else-if="format === 'launcher'" :dnd="dnd" @close="collapseToIdle" @toggle-dnd="onToggleDnd" />
+        <Launcher v-else-if="format === 'launcher'" :dnd="dnd" @close="collapseToIdle" @toggle-dnd="onToggleDnd" @open-notifs="openCenter" />
 
         <!-- CENTRE de notifications : liste des non-lues (lues = retirées pour de bon) -->
-        <div v-else-if="format === 'notifcenter'" class="relative h-full w-full" @click.stop>
-          <div v-if="!unread.length" class="grid h-full w-full place-items-center text-[12px] text-muted-foreground">Aucune notification</div>
-          <TransitionGroup v-else name="ncard" tag="div" class="nlist relative flex h-full w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden p-1.5 [scrollbar-width:thin]">
-            <NotifCard v-for="n in unread" :key="n.id" :notif="n" @click.stop="onNotifClick(n)" />
-          </TransitionGroup>
+        <div v-else-if="format === 'notifcenter'" class="flex h-full w-full flex-col" @click.stop>
+          <div v-if="!unread.length" class="grid flex-1 place-items-center text-[12px] text-muted-foreground">Aucune notification</div>
+          <template v-else>
+            <div class="flex flex-none items-center justify-between px-3 pt-2 pb-1">
+              <span class="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Notifications</span>
+              <button class="rounded-md px-2 py-0.5 text-[11px] text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground" @click.stop="clearUnread">Tout fermer</button>
+            </div>
+            <TransitionGroup name="ncard" tag="div" class="nlist relative flex min-h-0 w-full flex-1 flex-col gap-1.5 overflow-y-auto overflow-x-hidden p-1.5 [scrollbar-width:thin]">
+              <NotifCard v-for="n in unread" :key="n.id" :notif="n" @click.stop="onNotifClick(n)" @close="markRead(n.id)" />
+            </TransitionGroup>
+          </template>
         </div>
 
         <!-- VIEW : la surface de l'extension active -->
