@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { useIntersectionObserver, useEventListener } from '@vueuse/core';
 import { cn } from "@/lib/utils"
 
@@ -128,10 +128,8 @@ function scrollIntoView() {
     keyboardNav.value = false;
 }
 
-// Trigger scroll when selectedIndex changes
-onMounted(() => {
-    scrollIntoView();
-});
+// Trigger scroll when selectedIndex changes (navigation clavier).
+watch(selectedIndex, () => scrollIntoView());
 
 onBeforeUnmount(() => {
     // Cleanup handled by VueUse
@@ -160,7 +158,5 @@ onBeforeUnmount(() => {
             <div class="pointer-events-none absolute bottom-0 inset-x-0 h-25 bg-linear-to-t from-background to-transparent transition-opacity duration-300"
                 :style="{ opacity: bottomGradientOpacity }"></div>
         </template>
-        <!-- Trigger scroll into view -->
-        <span v-if="scrollIntoView" class="hidden"></span>
     </div>
 </template>
