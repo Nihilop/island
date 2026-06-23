@@ -205,12 +205,51 @@ juste après `ctx.view.open(...)`, puis `inputEl.focus()` au montage → la frap
 dans le champ. Quand l'overlay perd le focus (clic ailleurs), l'île se referme toute
 seule. C'est ce que fait l'extension **Flow** (launcher).
 
-### Lancer des applications (`apps`)
+### Lancer des applications & chercher des fichiers (`apps`)
 
-Permission `"apps"` → l'hôte expose `invoke("list_apps", { extId })` (raccourcis du
-menu Démarrer → `[{ name, path }]`) et `invoke("launch_path", { extId, path })`
-(ShellExecute). Même palier de confiance que `native-encoder` (peut lancer des
-exécutables) → affiché à l'install. Exemple complet : extension **Flow**.
+Permission `"apps"`. L'hôte expose :
+
+- `invoke("list_apps", { extId })` → `[{ name, path }]` : apps **Win32 (menu Démarrer)
+  + UWP/Store + jeux Steam** (le `path` sert au lancement ET à l'icône).
+- `invoke("launch_path", { extId, path })` (ShellExecute) et
+  `invoke("launch_admin", { extId, path })` (**élévation UAC**).
+- `invoke("app_icons", { extId, paths })` → icônes PNG (data-URL).
+- `invoke("search_files", { extId, query, roots, limit })` → `[{ name, path, isDir }]` :
+  **Everything** (voidtools) si présent → tout-disque ; sinon **index maison** des `roots`
+  (défaut : Bureau / Documents / Téléchargements).
+- `invoke("files_engine", { extId })` → `boolean` : Everything détecté (à afficher dans tes réglages).
+
+Même palier de confiance que `native-encoder` (peut lancer des exécutables, avec
+élévation) → affiché à l'install. Exemple complet : extension **Flow**.
+
+### Composants UI prêts à l'emploi
+
+Le SDK ré-exporte des composants du design system (mêmes tokens que l'hôte, dark/light
+auto) : `Button`, `Switch`, `Progress`, `Kbd`/`KbdGroup`, la famille `Select…`, et le
+**menu contextuel** `ContextMenu` / `ContextMenuTrigger` / `ContextMenuContent` /
+`ContextMenuItem` (clic droit, basé sur reka-ui).
+
+```vue
+<script setup>
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from "@island/sdk";
+const rootEl = ref();
+</script>
+<template>
+  <div ref="rootEl">
+    <ContextMenu>
+      <ContextMenuTrigger as-child><button>…</button></ContextMenuTrigger>
+      <ContextMenuContent :collision-boundary="rootEl">
+        <ContextMenuItem @select="copier()">Copier</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  </div>
+</template>
+```
+
+⚠️ **Dans une view de l'île**, passe `:collision-boundary` = l'élément racine de ta view.
+La zone interactive de l'overlay se limite à la **boîte de l'île** (cf.
+[perf-overlay-freeze](perf-overlay-freeze.md)) : un menu portalisé qui déborde la boîte
+ne serait pas cliquable. Le `collisionBoundary` l'y maintient.
 
 ### Safe-zone des views
 

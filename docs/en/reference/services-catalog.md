@@ -124,17 +124,22 @@ const m = island.media.state; // reactive (title/artist/playback) — FREE TO RE
 - **Trust**: standard. Without the permission: no-op (volume read = `-1`).
 - **OS**: Windows (SMTC + WASAPI volume).
 
-### `apps` — List & launch applications
+### `apps` — Launch applications & search files
 
 ```ts
-const apps = await island.invoke("list_apps", { extId: EXT_ID });
-await island.invoke("launch_path", { extId: EXT_ID, path });
-const icons = await island.invoke("app_icons", { extId: EXT_ID, paths });
+const apps  = await island.invoke("list_apps",    { extId: EXT_ID });               // Win32 + UWP + Steam
+await         island.invoke("launch_path",  { extId: EXT_ID, path });               // ShellExecute (open)
+await         island.invoke("launch_admin", { extId: EXT_ID, path });               // UAC elevation (runas)
+const icons = await island.invoke("app_icons",    { extId: EXT_ID, paths });         // PNG icons (data-URL)
+const files = await island.invoke("search_files", { extId: EXT_ID, query, roots, limit }); // [{ name, path, isDir }]
+const hasEverything = await island.invoke("files_engine", { extId: EXT_ID });        // Everything detected?
 ```
 
-- **Commands**: `list_apps`, `launch_path`, `app_icons`.
-- **Trust**: ⚠ **high** — can launch installed programs.
-- **OS**: Windows (Start Menu `.lnk` shortcuts + ShellExecute).
+- **Commands**: `list_apps`, `launch_path`, `launch_admin`, `app_icons`, `search_files`, `files_engine`.
+- **`list_apps`**: **Win32** apps (Start Menu) **+ UWP/Store + Steam games** (shell *AppsFolder* enumeration + Steam manifests).
+- **`search_files`**: file/folder search, **hybrid engine** — *Everything* (voidtools) if running → instant whole-disk; otherwise a **home-grown index** of the given `roots` (default: Desktop / Documents / Downloads).
+- **Trust**: ⚠ **high** — can launch installed programs (and **elevated** via `launch_admin`).
+- **OS**: Windows.
 
 ### `network` — Native HTTP with a cookie-jar
 

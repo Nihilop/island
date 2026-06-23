@@ -125,17 +125,22 @@ const m = island.media.state; // réactif (titre/artiste/lecture) — LECTURE LI
 - **Confiance** : standard. Sans permission : no-op (volume lu = `-1`).
 - **OS** : Windows (SMTC + volume WASAPI).
 
-### `apps` — Lister & lancer des applications
+### `apps` — Lancer des applications & chercher des fichiers
 
 ```ts
-const apps = await island.invoke("list_apps", { extId: EXT_ID });
-await island.invoke("launch_path", { extId: EXT_ID, path });
-const icons = await island.invoke("app_icons", { extId: EXT_ID, paths });
+const apps  = await island.invoke("list_apps",    { extId: EXT_ID });               // Win32 + UWP + Steam
+await         island.invoke("launch_path",  { extId: EXT_ID, path });               // ShellExecute (open)
+await         island.invoke("launch_admin", { extId: EXT_ID, path });               // élévation UAC (runas)
+const icons = await island.invoke("app_icons",    { extId: EXT_ID, paths });         // icônes PNG (data-URL)
+const files = await island.invoke("search_files", { extId: EXT_ID, query, roots, limit }); // [{ name, path, isDir }]
+const hasEverything = await island.invoke("files_engine", { extId: EXT_ID });        // Everything détecté ?
 ```
 
-- **Commandes** : `list_apps`, `launch_path`, `app_icons`.
-- **Confiance** : ⚠ **élevée** — peut lancer des programmes installés.
-- **OS** : Windows (raccourcis `.lnk` du menu Démarrer + ShellExecute).
+- **Commandes** : `list_apps`, `launch_path`, `launch_admin`, `app_icons`, `search_files`, `files_engine`.
+- **`list_apps`** : applications **Win32** (menu Démarrer) **+ UWP/Store + jeux Steam** (énumération du dossier shell *AppsFolder* + manifestes Steam).
+- **`search_files`** : recherche fichiers/dossiers, **moteur hybride** — *Everything* (voidtools) s'il tourne → tout le disque instantané ; sinon **index maison** des `roots` fournies (défaut : Bureau / Documents / Téléchargements).
+- **Confiance** : ⚠ **élevée** — peut lancer des programmes installés (et avec **élévation** via `launch_admin`).
+- **OS** : Windows.
 
 ### `network` — HTTP natif avec cookie-jar
 

@@ -204,12 +204,51 @@ from games). If your view has an `<input>`, call `ctx.invoke("overlay_focus")` r
 overlay loses focus (a click elsewhere), the island collapses by itself. That's what the
 **Flow** extension (launcher) does.
 
-### Launching applications (`apps`)
+### Launching applications & searching files (`apps`)
 
-The `"apps"` permission → the host exposes `invoke("list_apps", { extId })` (Start Menu
-shortcuts → `[{ name, path }]`) and `invoke("launch_path", { extId, path })` (ShellExecute).
-Same trust level as `native-encoder` (can launch executables) → shown at install. Full
-example: the **Flow** extension.
+The `"apps"` permission. The host exposes:
+
+- `invoke("list_apps", { extId })` → `[{ name, path }]`: **Win32 (Start Menu) + UWP/Store
+  + Steam games** (`path` is used both to launch and to fetch the icon).
+- `invoke("launch_path", { extId, path })` (ShellExecute) and
+  `invoke("launch_admin", { extId, path })` (**UAC elevation**).
+- `invoke("app_icons", { extId, paths })` → PNG icons (data-URL).
+- `invoke("search_files", { extId, query, roots, limit })` → `[{ name, path, isDir }]`:
+  **Everything** (voidtools) if present → whole-disk; otherwise a **home-grown index** of
+  the given `roots` (default: Desktop / Documents / Downloads).
+- `invoke("files_engine", { extId })` → `boolean`: Everything detected (to show in your settings).
+
+Same trust level as `native-encoder` (can launch executables, with elevation) → shown at
+install. Full example: the **Flow** extension.
+
+### Ready-made UI components
+
+The SDK re-exports design-system components (same tokens as the host, auto dark/light):
+`Button`, `Switch`, `Progress`, `Kbd`/`KbdGroup`, the `Select…` family, and the
+**context menu** `ContextMenu` / `ContextMenuTrigger` / `ContextMenuContent` /
+`ContextMenuItem` (right-click, built on reka-ui).
+
+```vue
+<script setup>
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from "@island/sdk";
+const rootEl = ref();
+</script>
+<template>
+  <div ref="rootEl">
+    <ContextMenu>
+      <ContextMenuTrigger as-child><button>…</button></ContextMenuTrigger>
+      <ContextMenuContent :collision-boundary="rootEl">
+        <ContextMenuItem @select="copy()">Copy</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  </div>
+</template>
+```
+
+⚠️ **Inside an island view**, pass `:collision-boundary` = your view's root element. The
+overlay's interactive area is limited to the **island box** (see
+[perf-overlay-freeze](perf-overlay-freeze.md)): a portaled menu that overflows the box
+wouldn't be clickable. `collisionBoundary` keeps it inside.
 
 ### View safe-zone
 
