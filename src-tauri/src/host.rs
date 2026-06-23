@@ -81,27 +81,40 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
+    use windows::Win32::UI::Shell::{
+        SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE,
+        QUNS_RUNNING_D3D_FULL_SCREEN,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, GWL_STYLE, WS_MAXIMIZE,
+        GetClassNameW, GetForegroundWindow, GetWindowRect,
     };
 
+    // Signal OFFICIEL de Windows — celui que le système utilise lui-même pour décider de
+    // masquer les notifications. Un jeu / une app PLEIN ÉCRAN (exclusif OU borderless) met
+    // l'état à BUSY / D3D_FULL_SCREEN / PRESENTATION ; un bureau normal — Y COMPRIS une app
+    // MAXIMISÉE (Spotify) barre des tâches auto-masquée — reste à ACCEPTS_NOTIFICATIONS.
+    // C'est ce qui distingue de façon fiable « jeu borderless » de « fenêtre maximisée »,
+    // là où la seule géométrie (couvre le moniteur) donnait un faux positif sur Spotify et,
+    // après le filtre WS_MAXIMIZE, un faux négatif sur les jeux borderless (ex. Guild Wars 2).
+    let state = match SHQueryUserNotificationState() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if !(state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE) {
+        return false;
+    }
+
+    // L'état système confirme un plein écran ; on s'assure que c'est bien la fenêtre de
+    // premier plan (pas notre overlay, pas le shell) et qu'elle couvre RÉELLEMENT son
+    // moniteur (sinon : plein écran sur un AUTRE moniteur pendant qu'on bosse → on reste).
     let hwnd = GetForegroundWindow();
     if hwnd.0.is_null() || hwnd.0 as isize == overlay_hwnd {
         return false;
     }
-
-    // Exclure le bureau / la barre des tâches.
     let mut cls = [0u16; 256];
     let n = GetClassNameW(hwnd, &mut cls);
     let class = String::from_utf16_lossy(&cls[..n as usize]);
     if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd") {
-        return false;
-    }
-
-    // Une fenêtre MAXIMISÉE n'est PAS du plein écran (jeu/vidéo). Sans ce filtre, une app
-    // maximisée (Spotify…) avec barre des tâches en auto-masquage couvre tout le moniteur
-    // (rcWork == rcMonitor) → faux positif → l'île se cachait en changeant de titre.
-    if (GetWindowLongW(hwnd, GWL_STYLE) as u32 & WS_MAXIMIZE.0) != 0 {
         return false;
     }
 

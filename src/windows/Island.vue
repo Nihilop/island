@@ -30,15 +30,19 @@ const dnd = ref(false);
 // et ressort quand on survole le bord haut de l'écran ---
 const hiddenFs = ref(false); // une app plein écran est au premier plan
 const peek = ref(false); // l'utilisateur survole le bord haut → on ressort
-const slidUp = computed(() => hiddenFs.value && !peek.value);
+// L'île se rétracte hors écran (« tuck ») dans 2 cas : app plein écran (auto-hide) OU
+// mode DnD (choix utilisateur : DnD rentre dans le bord plutôt que d'afficher une
+// pastille). Le DnD ne se rétracte qu'en IDLE → launcher/view/notifs restent accessibles.
+const tucked = computed(() => hiddenFs.value || (dnd.value && format.value === "idle"));
+const slidUp = computed(() => tucked.value && !peek.value);
 let peekTimer = 0;
 function peekShow() {
-  if (!hiddenFs.value) return;
+  if (!tucked.value) return;
   window.clearTimeout(peekTimer);
   peek.value = true;
 }
 function peekHideSoon() {
-  if (!hiddenFs.value) return;
+  if (!tucked.value) return;
   window.clearTimeout(peekTimer);
   peekTimer = window.setTimeout(() => (peek.value = false), 250);
 }
@@ -302,9 +306,9 @@ watch(activeView, (v) => {
 watch(dropContent, (c) => { if (c) openDropAnim(); else closeDropAnim(); });
 // Île rétractée : une fine bande en haut capte la souris (désactive le click-through
 // là) pour pouvoir la faire ressortir au survol.
-watch(hiddenFs, (h) => {
+watch(tucked, (h) => {
   setHitRegion("fs-peek", h ? { x: 0, y: 0, w: window.innerWidth, h: 6 } : null);
-});
+}, { immediate: true });
 // Quitter le centre de notifs = on les a lues → elles disparaissent pour de bon.
 watch(format, (f, prev) => { if (prev === "notifcenter" && f !== "notifcenter") clearUnread(); });
 // Centre vidé (toutes effacées une à une) → on referme.
@@ -352,7 +356,7 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); ce
     </svg>
 
     <!-- Auto-hide : zone de survol (bord haut) + petit indice quand l'île est rétractée -->
-    <div v-if="hiddenFs" class="fixed top-0 left-0 right-0 h-1.5 pointer-events-auto" @mouseenter="peekShow" @mouseleave="peekHideSoon"></div>
+    <div v-if="tucked" class="fixed top-0 left-0 right-0 h-1.5 pointer-events-auto" @mouseenter="peekShow" @mouseleave="peekHideSoon"></div>
     <div v-if="slidUp" class="fixed top-[3px] left-1/2 h-1 w-10 -translate-x-1/2 rounded-full pointer-events-none bg-white/[0.22] transition-opacity duration-300"></div>
 
     <!-- Gouttelette DND : tombe sous l'île à l'arrivée d'une notif (sans déranger) -->
