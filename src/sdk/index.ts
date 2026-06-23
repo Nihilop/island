@@ -22,5 +22,13 @@ export {
     SelectScrollUpButton,
     SelectSeparator,
     SelectTrigger,
-    SelectValue 
+    SelectValue
 } from "./ui/select"
+
+export {
+    ContextMenu,
+    ContextMenuTrigger,
+    ContextMenuContent,
+    ContextMenuItem,
+    ContextMenuSeparator,
+} from "./ui/context-menu"

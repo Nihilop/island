@@ -451,7 +451,7 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); ce
         <Launcher v-else-if="format === 'launcher'" :dnd="dnd" @close="collapseToIdle" @toggle-dnd="onToggleDnd" @open-notifs="openCenter" />
 
         <!-- CENTRE de notifications : liste des non-lues (lues = retirées pour de bon) -->
-        <div v-else-if="format === 'notifcenter'" class="flex h-full w-full flex-col" @click.stop>
+        <div v-else-if="format === 'notifcenter'" class="flex h-[calc(100%+7px)] w-full flex-col" @click.stop>
           <div v-if="!unread.length" class="grid flex-1 place-items-center text-[12px] text-muted-foreground">Aucune notification</div>
           <template v-else>
             <div class="flex flex-none items-center justify-between px-3 pt-2 pb-1">

@@ -24,4 +24,10 @@ export const SelectSeparator = s.SelectSeparator;
 export const SelectTrigger = s.SelectTrigger;
 export const SelectValue = s.SelectValue;
 
+export const ContextMenu = s.ContextMenu;
+export const ContextMenuTrigger = s.ContextMenuTrigger;
+export const ContextMenuContent = s.ContextMenuContent;
+export const ContextMenuItem = s.ContextMenuItem;
+export const ContextMenuSeparator = s.ContextMenuSeparator;
+
 export default s;

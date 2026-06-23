@@ -6,23 +6,47 @@ use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "windows")]
+mod files;
 
-/// Une application indexée (raccourci du menu Démarrer).
+/// Une application indexée (Win32 / UWP / jeu Steam).
 #[derive(serde::Serialize)]
 pub struct AppEntry {
     name: String,
     path: String,
 }
 
-/// Liste les applications installées. Gated par la permission `apps`.
+/// Un fichier ou dossier trouvé par la recherche.
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
+/// Liste les applications installées (Win32 + UWP + Steam). Gated par la permission `apps`.
+/// COM requis (énumération AppsFolder) → travail sur un thread bloquant dédié.
 #[tauri::command]
-pub fn list_apps(app: AppHandle, ext_id: String) -> Result<Vec<AppEntry>, String> {
+pub async fn list_apps(app: AppHandle, ext_id: String) -> Result<Vec<AppEntry>, String> {
     if !crate::ext::ext_has_permission(&app, &ext_id, "apps") {
         return Err("apps: permission « apps » requise".into());
     }
     #[cfg(target_os = "windows")]
     {
-        Ok(windows::list_apps())
+        tauri::async_runtime::spawn_blocking(|| {
+            use ::windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
+            let apps = windows::list_apps();
+            unsafe {
+                CoUninitialize();
+            }
+            apps
+        })
+        .await
+        .map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -46,6 +70,66 @@ pub fn launch_path(app: AppHandle, ext_id: String, path: String) -> Result<(), S
     {
         let _ = path;
         Err("apps: Windows uniquement".into())
+    }
+}
+
+/// Lance une app / un fichier **en administrateur** (UAC). Gated `apps`.
+#[tauri::command]
+pub fn launch_admin(app: AppHandle, ext_id: String, path: String) -> Result<(), String> {
+    if !crate::ext::ext_has_permission(&app, &ext_id, "apps") {
+        return Err("apps: permission « apps » requise".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows::launch_admin(&path)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err("apps: Windows uniquement".into())
+    }
+}
+
+/// Recherche fichiers/dossiers (Everything si dispo, sinon index maison des `roots`).
+/// Gated `apps`. Travail sur un thread bloquant (scan FS / pompe IPC).
+#[tauri::command]
+pub async fn search_files(
+    app: AppHandle,
+    ext_id: String,
+    query: String,
+    roots: Vec<String>,
+    limit: Option<usize>,
+) -> Result<Vec<FileEntry>, String> {
+    if !crate::ext::ext_has_permission(&app, &ext_id, "apps") {
+        return Err("apps: permission « apps » requise".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let limit = limit.unwrap_or(20).clamp(1, 50);
+        tauri::async_runtime::spawn_blocking(move || files::search(&query, roots, limit))
+            .await
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (query, roots, limit);
+        Ok(Vec::new())
+    }
+}
+
+/// Statut du moteur de recherche fichiers (pour les réglages) : Everything détecté ?
+#[tauri::command]
+pub fn files_engine(app: AppHandle, ext_id: String) -> Result<bool, String> {
+    if !crate::ext::ext_has_permission(&app, &ext_id, "apps") {
+        return Err("apps: permission « apps » requise".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Ok(files::everything_available())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
     }
 }
 
