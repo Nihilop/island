@@ -35,7 +35,6 @@ sysinfo = "0.32"
 ureq = { version = "2", features = ["cookies"] } # HTTP natif côté hôte : téléchargement de binaires + client cookie-jar par extension (comme dio/cookie_jar de Flutter)
 cookie_store = "0.21" # persistance du cookie-jar par extension (session conservée entre redémarrages)
 arboard = "3" # presse-papiers cross-platform (texte + image) exposé aux extensions
-keyring = { version = "3", features = ["windows-native"] } # secrets chiffrés (Windows Credential Manager ; apple/linux à ajouter au portage)
 base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers, flux PTY)
 png = "0.17" # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
 portable-pty = "0.8" # terminaux PTY (ConPTY sous Windows) exposés aux extensions (perm `terminal`)
@@ -44,8 +43,9 @@ portable-pty = "0.8" # terminaux PTY (ConPTY sous Windows) exposés aux extensio
 [target.'cfg(windows)'.dependencies.windows-capture]
 version = "1"
 
-# Contrôleur média natif (Windows uniquement) : SMTC + volume via session audio.
+# Secrets chiffrés (`keyring`) — coffre natif par OS.
 [target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] } # Credential Manager
 winreg = "0.52"
 windows = { version = "0.61", features = [
   "Foundation",
@@ -67,4 +67,12 @@ windows = { version = "0.61", features = [
   "Win32_Graphics_Gdi",
   "Win32_UI_Shell",
 ] }
+
+# Secrets : Keychain (macOS) / Secret Service (Linux). Permet au crate de compiler
+# hors Windows ; le reste des services natifs reste à porter (cf. docs/internal/multi-os.md).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 

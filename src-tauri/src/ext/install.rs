@@ -161,11 +161,16 @@ pub fn install_island(app: AppHandle, path: String) -> Result<String, String> {
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-        let name = entry.name().to_string();
-        if name.contains("..") {
-            continue; // garde-fou path traversal
+        // `enclosed_name` confine l'entrée au dossier : rejette absolu / `..` / lettre de
+        // lecteur / UNC. (Le simple `contains("..")` laissait passer les chemins ABSOLUS,
+        // qui via `PathBuf::join` écrivaient HORS du dossier d'extension → write arbitraire.)
+        let out = match entry.enclosed_name() {
+            Some(rel) => dir.join(rel),
+            None => continue, // entrée hostile → ignorée
+        };
+        if !out.starts_with(&dir) {
+            continue; // défense en profondeur
         }
-        let out = dir.join(&name);
         if entry.is_dir() {
             let _ = std::fs::create_dir_all(&out);
         } else {

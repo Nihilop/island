@@ -26,3 +26,9 @@ dist-ssr
 # VitePress
 docs/.vitepress/dist
 docs/.vitepress/cache
+
+# Audit de sécurité / notes locales — JAMAIS poussées (dépôt public)
+*.local.md
+
+# Docs INTERNES — local uniquement, jamais publiées (dépôt public + GitHub Pages)
+docs/internal/
