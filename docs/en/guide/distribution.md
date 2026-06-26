@@ -16,6 +16,31 @@ Two ways:
 - **Manually**: zip `manifest.json` + `dist/` at the root of the archive, with an `.island`
   extension.
 
+## Signing an extension (optional, recommended)
+
+At install time, the consent screen shows a **trust badge**: 🟢 *Signed by a trusted
+publisher*, 🟠 *Unsigned*, or 🔴 *Invalid signature*. Signing is **advisory**: an unsigned
+extension still installs (at the user's own risk), but a signed one is reassuring.
+
+Island uses detached **[minisign](https://jedisct1.github.io/minisign/) signatures** (same
+mechanism as the updater).
+
+```bash
+# 1. Generate your key pair ONCE (keep the private key SECRET, out of the repo).
+minisign -G -p island-ext.pub -s island-ext.key
+
+# 2. Sign the package → produces `my-extension.island.minisig`.
+minisign -S -s island-ext.key -m my-extension.island
+
+# 3. Distribute the `.minisig` NEXT TO the `.island` (same folder, same base name).
+#    Island automatically looks for `<package>.island.minisig` at install time.
+```
+
+> **"Trusted" badge**: the 🟢 status only appears if the **public key** that signed is the one
+> **embedded in the Island build** (`EXT_TRUSTED_PUBKEY`). For first-party extensions, sign
+> with the maintainer's key. A signature from an unknown key → 🔴 *invalid*; no `.minisig` →
+> 🟠 *unsigned*. In both cases the install still works (advisory).
+
 ## Installing
 
 - **Double-click** an `.island` (if the file association is enabled) → an install modal
@@ -41,6 +66,7 @@ Settings.
       gitignored.
 - [ ] `pnpm build` up to date → `dist/index.mjs` + `dist/style.css` present.
 - [ ] Tested enabling/disabling at runtime (Settings → Extensions) with no console error.
+- [ ] (optional) Package **signed**: `<package>.island.minisig` shipped next to the `.island`.
 
 ## Next
 

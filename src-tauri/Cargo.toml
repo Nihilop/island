@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.7.0"
+version = "0.7.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -38,6 +38,7 @@ arboard = "3" # presse-papiers cross-platform (texte + image) exposé aux extens
 base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers, flux PTY)
 png = "0.17" # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
 portable-pty = "0.8" # terminaux PTY (ConPTY sous Windows) exposés aux extensions (perm `terminal`)
+minisign-verify = "0.2" # vérif (pure Rust) de la signature minisign des paquets .island
 
 # Capture d'écran (Windows Graphics Capture, anti-cheat safe).
 [target.'cfg(windows)'.dependencies.windows-capture]

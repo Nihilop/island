@@ -291,9 +291,15 @@ function publishRegion() {
   const r = el.getBoundingClientRect();
   const extra = dropOpen.value ? 120 : 8;
   const rect = { x: Math.round(r.left - 6), y: Math.round(r.top - 4), w: Math.round(r.width + 12), h: Math.round(r.height + extra) };
-  islandRect.value = rect; // ancre la barre des fenêtres minimisées
   const key = `${rect.x},${rect.y},${rect.w},${rect.h}`;
-  if (key !== lastRegion) { lastRegion = key; setHitRegion("island", rect); }
+  // Ne réassigne QUE si la géométrie a vraiment changé : sinon `islandRect` (réassigné à
+  // chaque frame par cette boucle rAF) ferait churner les watchers qui en dépendent
+  // (MinimizedDock) → `set_hit_regions` publié ~60×/s pour rien.
+  if (key !== lastRegion) {
+    lastRegion = key;
+    islandRect.value = rect; // ancre la barre des fenêtres minimisées
+    setHitRegion("island", rect);
+  }
 }
 let raf = 0;
 function tick() { publishRegion(); raf = requestAnimationFrame(tick); }

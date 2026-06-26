@@ -125,6 +125,22 @@ const m = island.media.state; // réactif (titre/artiste/lecture) — LECTURE LI
 - **Confiance** : standard. Sans permission : no-op (volume lu = `-1`).
 - **OS** : Windows (SMTC + volume WASAPI).
 
+### `audio` — Capture audio (micro / son système)
+
+```ts
+const island = useIsland(EXT_ID);
+const id = await island.audio.record("both");      // "mic" | "system" | "both"
+// … plus tard …
+const tracks = await island.audio.stop(id);        // [{ path, sampleRate, channels, pcm, source }]
+```
+
+- **Méthodes** : `record(source) → id`, `stop(id) → AudioTrack[]`. L'hôte écrit du **PCM
+  brut** par piste ; l'extension décode/convertit/transcrit (ex. ffmpeg → WAV → whisper).
+- **Commandes** : `audio_record_start`, `audio_record_stop`.
+- **Confiance** : ⚠ **élevée** — capte le micro et/ou le son du système (donnée sensible).
+- **OS** : Windows (WASAPI : loopback `eRender` pour le système, `eCapture` pour le micro).
+  Couche **partagée** avec `capture` (mux vidéo) ; mac/linux (CoreAudio / PipeWire) à venir.
+
 ### `apps` — Lancer des applications & chercher des fichiers
 
 ```ts

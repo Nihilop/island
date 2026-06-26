@@ -17,6 +17,32 @@ Deux voies :
 - **Manuellement** : zippe `manifest.json` + `dist/` à la racine de l'archive, extension
   `.island`.
 
+## Signer une extension (optionnel, recommandé)
+
+À l'installation, l'écran de consentement affiche un **badge de confiance** : 🟢 *Signée par
+un éditeur de confiance*, 🟠 *Non signée*, ou 🔴 *Signature invalide*. La signature est
+**advisory** : une extension non signée s'installe quand même (à la responsabilité de
+l'utilisateur), mais une extension signée rassure.
+
+Island utilise des **signatures détachées [minisign](https://jedisct1.github.io/minisign/)**
+(même mécanisme que l'updater).
+
+```bash
+# 1. Générer ta paire de clés UNE FOIS (garde la clé privée SECRÈTE, hors du dépôt).
+minisign -G -p island-ext.pub -s island-ext.key
+
+# 2. Signer le paquet → produit `mon-extension.island.minisig`.
+minisign -S -s island-ext.key -m mon-extension.island
+
+# 3. Distribue le `.minisig` À CÔTÉ du `.island` (même dossier, même nom de base).
+#    Island cherche automatiquement `<paquet>.island.minisig` à l'installation.
+```
+
+> **Badge « de confiance »** : le statut 🟢 n'apparaît que si la **clé publique** qui a signé
+> est celle **embarquée dans le build d'Island** (`EXT_TRUSTED_PUBKEY`). Pour les extensions
+> first-party, signe avec la clé du mainteneur. Une signature d'une clé inconnue → 🔴 *invalide* ;
+> pas de `.minisig` → 🟠 *non signée*. Dans les deux cas l'install reste possible (advisory).
+
 ## Installer
 
 - **Double-clic** sur un `.island` (si l'association de fichiers est active) → une modal
@@ -44,6 +70,7 @@ per-utilisateur, sans admin) → le double-clic fonctionne. Un bouton **« Assoc
       `binaries/` est gitignore.
 - [ ] `pnpm build` à jour → `dist/index.mjs` + `dist/style.css` présents.
 - [ ] Testé activé/désactivé à chaud (Réglages → Extensions) sans erreur console.
+- [ ] (optionnel) Paquet **signé** : `<paquet>.island.minisig` joint au `.island`.
 
 ## Et après
 

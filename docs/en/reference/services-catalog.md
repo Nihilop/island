@@ -124,6 +124,22 @@ const m = island.media.state; // reactive (title/artist/playback) — FREE TO RE
 - **Trust**: standard. Without the permission: no-op (volume read = `-1`).
 - **OS**: Windows (SMTC + WASAPI volume).
 
+### `audio` — Audio capture (microphone / system sound)
+
+```ts
+const island = useIsland(EXT_ID);
+const id = await island.audio.record("both");      // "mic" | "system" | "both"
+// … later …
+const tracks = await island.audio.stop(id);        // [{ path, sampleRate, channels, pcm, source }]
+```
+
+- **Methods**: `record(source) → id`, `stop(id) → AudioTrack[]`. The host writes **raw PCM**
+  per track; the extension decodes/converts/transcribes (e.g. ffmpeg → WAV → whisper).
+- **Commands**: `audio_record_start`, `audio_record_stop`.
+- **Trust**: ⚠ **high** — captures the microphone and/or system sound (sensitive data).
+- **OS**: Windows (WASAPI: `eRender` loopback for system, `eCapture` for the mic). **Shared**
+  layer with `capture` (video mux); macOS/Linux (CoreAudio / PipeWire) to come.
+
 ### `apps` — Launch applications & search files
 
 ```ts

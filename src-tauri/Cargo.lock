@@ -2145,6 +2145,7 @@ dependencies = [
  "base64 0.22.1",
  "cookie_store",
  "keyring",
+ "minisign-verify",
  "notify",
  "notify-debouncer-mini",
  "png 0.17.16",

@@ -87,6 +87,8 @@ pub fn run() {
             services::capture::capture_stop_recording,
             services::capture::capture_is_recording,
             services::capture::ext_fetch_binary,
+            services::audio::audio_record_start,
+            services::audio::audio_record_stop,
             services::media::media_toggle,
             services::media::media_next,
             services::media::media_prev,

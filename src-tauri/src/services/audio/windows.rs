@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator,
-    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    eCapture, eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
+    MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
@@ -43,28 +43,40 @@ impl AudioCapture {
     }
 }
 
-/// Démarre la capture loopback vers `pcm_path`. Ne bloque pas (thread dédié).
+/// Démarre la capture loopback (son système) vers `pcm_path`. Ne bloque pas.
 pub fn start_capture(pcm_path: String) -> AudioCapture {
+    start_capture_source(pcm_path, false)
+}
+
+/// Démarre la capture vers `pcm_path` : `mic=true` → entrée micro (`eCapture`),
+/// `mic=false` → son système (loopback `eRender`). Ne bloque pas (thread dédié).
+pub fn start_capture_source(pcm_path: String, mic: bool) -> AudioCapture {
     let stop = Arc::new(AtomicBool::new(false));
     let format = Arc::new(Mutex::new(None));
     let stop_t = stop.clone();
     let fmt_t = format.clone();
     let handle = std::thread::spawn(move || {
-        if let Err(e) = run(&pcm_path, &stop_t, &fmt_t) {
-            eprintln!("audio loopback: {e}");
+        if let Err(e) = run(&pcm_path, &stop_t, &fmt_t, mic) {
+            eprintln!("audio capture ({}): {e}", if mic { "mic" } else { "loopback" });
         }
     });
     AudioCapture { stop, handle: Some(handle), format }
 }
 
-fn run(pcm_path: &str, stop: &AtomicBool, fmt_out: &Mutex<Option<AudioFormat>>) -> Result<(), String> {
+fn run(pcm_path: &str, stop: &AtomicBool, fmt_out: &Mutex<Option<AudioFormat>>, mic: bool) -> Result<(), String> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
 
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
-        // eRender + loopback = on capte ce qui est JOUÉ (son système).
-        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).map_err(|e| e.to_string())?;
+        // mic → eCapture (entrée micro, pas de flag loopback) ;
+        // sinon → eRender + loopback (on capte ce qui est JOUÉ = son système).
+        let (dataflow, stream_flags) = if mic {
+            (eCapture, 0)
+        } else {
+            (eRender, AUDCLNT_STREAMFLAGS_LOOPBACK)
+        };
+        let device = enumerator.GetDefaultAudioEndpoint(dataflow, eConsole).map_err(|e| e.to_string())?;
         let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(|e| e.to_string())?;
 
         let pwfx = client.GetMixFormat().map_err(|e| e.to_string())?;
@@ -79,7 +91,7 @@ fn run(pcm_path: &str, stop: &AtomicBool, fmt_out: &Mutex<Option<AudioFormat>>) 
         }
 
         client
-            .Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, 0, 0, pwfx, None)
+            .Initialize(AUDCLNT_SHAREMODE_SHARED, stream_flags, 0, 0, pwfx, None)
             .map_err(|e| e.to_string())?;
         let capture: IAudioCaptureClient = client.GetService().map_err(|e| e.to_string())?;
         client.Start().map_err(|e| e.to_string())?;

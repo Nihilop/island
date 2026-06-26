@@ -231,18 +231,41 @@ fn download_binary(
     if let Some(suffix) = zip_entry {
         let file = std::fs::File::open(&tmp).map_err(|e| e.to_string())?;
         let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-        let mut idx = None;
-        for i in 0..zip.len() {
-            let name = zip.by_index(i).map_err(|e| e.to_string())?.name().replace('\\', "/");
-            if name.ends_with(suffix) {
-                idx = Some(i);
-                break;
+        if suffix == "*" {
+            // Extrait TOUT le zip dans `dest` (traité comme un DOSSIER) — pour un binaire
+            // multi-fichiers (exe + DLLs, ex. whisper.cpp). `enclosed_name` confine.
+            std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+            for i in 0..zip.len() {
+                let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+                let Some(rel) = entry.enclosed_name() else { continue };
+                let out = dest.join(rel);
+                if !out.starts_with(dest) {
+                    continue;
+                }
+                if entry.is_dir() {
+                    let _ = std::fs::create_dir_all(&out);
+                } else {
+                    if let Some(p) = out.parent() {
+                        let _ = std::fs::create_dir_all(p);
+                    }
+                    let mut f = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+                    std::io::copy(&mut entry, &mut f).map_err(|e| e.to_string())?;
+                }
             }
+        } else {
+            let mut idx = None;
+            for i in 0..zip.len() {
+                let name = zip.by_index(i).map_err(|e| e.to_string())?.name().replace('\\', "/");
+                if name.ends_with(suffix) {
+                    idx = Some(i);
+                    break;
+                }
+            }
+            let i = idx.ok_or("téléchargement: entrée introuvable dans le zip")?;
+            let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+            let mut out = std::fs::File::create(dest).map_err(|e| e.to_string())?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
         }
-        let i = idx.ok_or("téléchargement: entrée introuvable dans le zip")?;
-        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
-        let mut out = std::fs::File::create(dest).map_err(|e| e.to_string())?;
-        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(&tmp);
     } else {
         std::fs::rename(&tmp, dest).map_err(|e| e.to_string())?;

@@ -54,7 +54,7 @@ function endDrag() {
   <div
     v-for="w in visible"
     :key="w.id"
-    class="fixed flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl pointer-events-auto select-none"
+    class="winpop fixed flex flex-col overflow-hidden rounded-xl border bg-background shadow-2xl pointer-events-auto select-none"
     :style="{ left: w.x + 'px', top: w.y + 'px', width: w.width + 'px', height: w.height + 'px', zIndex: w.z }"
     @pointerdown="focusWindow(w.id)"
   >
@@ -74,3 +74,16 @@ function endDrag() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Pop d'ouverture : INVISIBLE le temps que l'overlay passe plein écran (resize async) — la
+   fenêtre est en coords ÉCRAN, donc mal placée tant que le webview n'est pas en (0,0). Le
+   délai masque ce saut, puis elle apparaît en fondu à la bonne position. */
+.winpop {
+  animation: winpop 0.2s cubic-bezier(0.34, 1.3, 0.5, 1) 0.09s both;
+}
+@keyframes winpop {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+</style>

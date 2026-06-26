@@ -84,6 +84,15 @@ export interface SysStats {
   memTotal: number;
 }
 
+/** Une piste audio enregistrée (PCM brut écrit par l'hôte). */
+export interface AudioTrack {
+  path: string; // fichier PCM brut
+  sampleRate: number;
+  channels: number;
+  pcm: "f32le" | "s16le" | ""; // format des échantillons
+  source: "mic" | "system";
+}
+
 /** Une fenêtre du bureau (conscience des fenêtres). */
 export interface WindowInfo {
   id: number; // handle natif opaque
@@ -228,6 +237,16 @@ export interface IslandApi {
     selectRegion(): Promise<Region | null>;
     /** Affiche un contour persistant sur une zone (ex. pendant un record). `null` = retire. */
     showRegionOutline(region: Region | null): void;
+  };
+  /**
+   * Capture audio (micro et/ou son système). Requiert la permission `audio`. L'hôte écrit
+   * du PCM brut ; l'extension décode/convertit/transcrit (cf. format de chaque piste).
+   */
+  audio: {
+    /** Démarre un enregistrement (`source` = micro, son système, ou les deux) → id. */
+    record(source: "mic" | "system" | "both"): Promise<string>;
+    /** Arrête l'enregistrement `id` → pistes PCM produites (chemin + format). */
+    stop(id: string): Promise<AudioTrack[]>;
   };
   /** Raccourcis clavier GLOBAUX. Rien n'est enregistré tant qu'on n'appelle pas register. */
   shortcuts: {
@@ -520,6 +539,10 @@ export function useIsland(extId: string = ""): IslandApi {
       pickFolder: () => b.pickFolder(),
       selectRegion: () => b.selectRegion(),
       showRegionOutline: (r) => b.showRegionOutline(r),
+    },
+    audio: {
+      record: (source) => b.invoke<string>("audio_record_start", { extId, source }),
+      stop: (id) => b.invoke<AudioTrack[]>("audio_record_stop", { extId, recordingId: id }),
     },
     shortcuts: {
       register: (accel, h) => b.registerShortcut(`${ns}:${accel}`, accel, h),

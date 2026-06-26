@@ -7,6 +7,34 @@ use tauri::{AppHandle, Emitter, Manager};
 use super::sanitize;
 use super::storage::{read_store, write_store};
 
+// Pubkey minisign de confiance pour les EXTENSIONS (domaine distinct de l'updater).
+// ⚠️ À REMPLIR avec ta clé publique (`island-ext.pub`, la ligne `RW...`). Vide = aucune
+// clé configurée → tout est rapporté « non signé » (advisory : on prévient, on ne bloque pas).
+const EXT_TRUSTED_PUBKEY: &str = "";
+
+/// Statut de signature d'un `.island` (signature détachée `<paquet>.island.minisig`) :
+/// `"trusted"` (signé par la clé de confiance) · `"unsigned"` (pas de .minisig / pas de clé
+/// configurée) · `"invalid"` (signature présente mais ne vérifie pas). ADVISORY : informatif,
+/// ne bloque jamais l'install (cf. SECURITY-AUDIT — responsabilité utilisateur).
+fn verify_island_signature(path: &str) -> &'static str {
+    let sig_str = match std::fs::read_to_string(format!("{path}.minisig")) {
+        Ok(s) => s,
+        Err(_) => return "unsigned", // pas de signature jointe
+    };
+    let pk = match minisign_verify::PublicKey::from_base64(EXT_TRUSTED_PUBKEY) {
+        Ok(k) => k,
+        Err(_) => return "unsigned", // aucune clé de confiance configurée → non vérifiable
+    };
+    let data = match std::fs::read(path) {
+        Ok(d) => d,
+        Err(_) => return "invalid",
+    };
+    match minisign_verify::Signature::decode(&sig_str) {
+        Ok(sig) if pk.verify(&data, &sig, false).is_ok() => "trusted",
+        _ => "invalid",
+    }
+}
+
 fn read_manifest_from_island(path: &str) -> Result<serde_json::Value, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
@@ -60,7 +88,13 @@ fn zip_add_dir(
 /// Empaquette une extension installée (manifest.json + dist/) en `.island` vers
 /// `out_path`. L'app ne COMPILE pas : elle zippe le build déjà produit.
 #[tauri::command]
-pub fn pack_extension(app: AppHandle, id: String, out_path: String) -> Result<(), String> {
+pub fn pack_extension(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    id: String,
+    out_path: String,
+) -> Result<(), String> {
+    super::require_window(&window, "settings")?;
     let base = app
         .path()
         .app_config_dir()
@@ -129,22 +163,31 @@ pub fn list_installed(app: AppHandle) -> Vec<InstalledExt> {
     out
 }
 
-/// Ouvre la fenêtre d'installation avec les infos du paquet.
-#[tauri::command]
-pub fn open_install(app: AppHandle, path: String) -> Result<(), String> {
-    let manifest = read_manifest_from_island(&path)?;
+/// Logique d'ouverture de la fenêtre d'installation (appelée par la commande ET par le
+/// handler argv côté Rust — d'où la fonction interne, sans garde de provenance).
+fn show_install_window(app: &AppHandle, path: &str) -> Result<(), String> {
+    let manifest = read_manifest_from_island(path)?;
+    let signature = verify_island_signature(path);
     if let Some(w) = app.get_webview_window("install") {
         w.show().map_err(|e| e.to_string())?;
         w.set_focus().map_err(|e| e.to_string())?;
-        w.emit("install://open", serde_json::json!({ "manifest": manifest, "path": path }))
+        w.emit("install://open", serde_json::json!({ "manifest": manifest, "path": path, "signature": signature }))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
+/// Ouvre la fenêtre d'installation avec les infos du paquet. Réservée à la fenêtre `settings`.
+#[tauri::command]
+pub fn open_install(window: tauri::WebviewWindow, app: AppHandle, path: String) -> Result<(), String> {
+    super::require_window(&window, "settings")?;
+    show_install_window(&app, &path)
+}
+
 /// Extrait le .island dans `%APPDATA%/island/extensions/<id>/` et l'active.
 #[tauri::command]
-pub fn install_island(app: AppHandle, path: String) -> Result<String, String> {
+pub fn install_island(window: tauri::WebviewWindow, app: AppHandle, path: String) -> Result<String, String> {
+    super::require_window(&window, "install")?;
     let manifest = read_manifest_from_island(&path)?;
     let id = manifest.get("id").and_then(|v| v.as_str()).ok_or("manifeste sans 'id'")?.to_string();
     let dir = app
@@ -182,6 +225,10 @@ pub fn install_island(app: AppHandle, path: String) -> Result<String, String> {
             std::fs::write(&out, buf).map_err(|e| e.to_string())?;
         }
     }
+
+    // FIGE les permissions consenties (source de vérité hors d'atteinte de l'ext) — fait
+    // ICI, avant que l'extension ne tourne jamais → non falsifiable a posteriori.
+    super::snapshot_perms(&app, &id, &manifest);
 
     // Active l'extension (si une liste explicite existe ; sinon "tout activé" l'inclut déjà).
     let mut m = read_store(&app, "__app__");
@@ -257,7 +304,8 @@ fn register_island_assoc(app: &AppHandle) -> Result<(), String> {
 
 /// Bouton « Associer les .island » (Réglages) / appel manuel.
 #[tauri::command]
-pub fn register_file_association(app: AppHandle) -> Result<(), String> {
+pub fn register_file_association(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
+    super::require_window(&window, "settings")?;
     #[cfg(target_os = "windows")]
     {
         register_island_assoc(&app)
@@ -274,13 +322,15 @@ pub fn register_file_association(app: AppHandle) -> Result<(), String> {
 static PENDING_INSTALL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 #[tauri::command]
-pub fn take_pending_install() -> Result<Option<serde_json::Value>, String> {
+pub fn take_pending_install(window: tauri::WebviewWindow) -> Result<Option<serde_json::Value>, String> {
+    super::require_window(&window, "install")?;
     let path = match PENDING_INSTALL.lock().unwrap_or_else(|p| p.into_inner()).take() {
         Some(p) => p,
         None => return Ok(None),
     };
     let manifest = read_manifest_from_island(&path)?;
-    Ok(Some(serde_json::json!({ "manifest": manifest, "path": path })))
+    let signature = verify_island_signature(&path);
+    Ok(Some(serde_json::json!({ "manifest": manifest, "path": path, "signature": signature })))
 }
 
 /// Repère un `.island` dans l'argv et déclenche la modal d'install.
@@ -291,7 +341,7 @@ pub(crate) fn handle_island_argv(app: &AppHandle, argv: &[String], running: bool
         return;
     };
     if running {
-        let _ = open_install(app.clone(), path.clone());
+        let _ = show_install_window(app, path);
     } else {
         *PENDING_INSTALL.lock().unwrap_or_else(|p| p.into_inner()) = Some(path.clone());
         if let Some(w) = app.get_webview_window("install") {

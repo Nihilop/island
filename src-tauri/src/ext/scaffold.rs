@@ -50,7 +50,13 @@ pub struct ScaffoldResult {
 
 /// Crée une nouvelle extension depuis un template dans le dossier des extensions.
 #[tauri::command]
-pub fn scaffold_extension(app: AppHandle, name: String, template: String) -> Result<ScaffoldResult, String> {
+pub fn scaffold_extension(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    name: String,
+    template: String,
+) -> Result<ScaffoldResult, String> {
+    super::require_window(&window, "create")?;
     // On retire ce qui casserait un littéral JSON/TS, on garde accents & espaces.
     let name = name.replace(['"', '\\', '`', '\n', '\r'], "");
     let name = name.trim();
@@ -87,7 +93,8 @@ pub fn scaffold_extension(app: AppHandle, name: String, template: String) -> Res
 
 /// Ouvre la fenêtre de création d'extension.
 #[tauri::command]
-pub fn open_create(app: AppHandle) -> Result<(), String> {
+pub fn open_create(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
+    super::require_window(&window, "settings")?;
     if let Some(w) = app.get_webview_window("create") {
         w.show().map_err(|e| e.to_string())?;
         w.set_focus().map_err(|e| e.to_string())?;

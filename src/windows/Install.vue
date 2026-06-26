@@ -22,6 +22,8 @@ const manifest = ref<Manifest | null>(null);
 const path = ref<string>("");
 const progress = ref(0);
 const errorMsg = ref("");
+// Statut de signature du paquet (advisory) : "trusted" | "unsigned" | "invalid".
+const signature = ref<string>("unsigned");
 
 // Libellés lisibles pour les permissions déclarées dans le manifeste.
 const PERM_LABELS: Record<string, string> = {
@@ -32,6 +34,7 @@ const PERM_LABELS: Record<string, string> = {
   launcher: "Raccourci dans le lanceur",
   shortcuts: "Raccourcis clavier globaux",
   capture: "Capture d'écran / enregistrement vidéo",
+  audio: "⚠ Capture le son (micro et/ou son système)",
   clipboard: "Lecture / écriture du presse-papiers",
   network: "Accès réseau",
   "native-encoder": "⚠ Exécute un programme natif (encodeur vidéo)",
@@ -44,6 +47,16 @@ const PERM_LABELS: Record<string, string> = {
 const name = computed(() => manifest.value?.name ?? manifest.value?.id ?? "Extension");
 const perms = computed(() => manifest.value?.permissions ?? []);
 const initial = computed(() => name.value.charAt(0).toUpperCase());
+
+// Badge de confiance (signature minisign du paquet). ADVISORY : informatif, n'empêche pas
+// l'install — c'est la responsabilité de l'utilisateur d'installer une ext non signée.
+const sig = computed(() => {
+  switch (signature.value) {
+    case "trusted": return { label: "Signée par un éditeur de confiance", cls: "bg-emerald-500/10 text-emerald-600", ok: true };
+    case "invalid": return { label: "Signature invalide — méfiance", cls: "bg-destructive/10 text-destructive", ok: false };
+    default: return { label: "Extension non signée — installe-la à tes risques", cls: "bg-amber-500/10 text-amber-600", ok: false };
+  }
+});
 
 // La carte morphe sa taille entre les étapes (espace autour = fenêtre transparente).
 const cardSize = computed(() => {
@@ -91,16 +104,17 @@ async function doInstall() {
   }
 }
 
-function openFor(p: { manifest: Manifest; path: string }) {
+function openFor(p: { manifest: Manifest; path: string; signature?: string }) {
   manifest.value = p.manifest;
   path.value = p.path;
+  signature.value = p.signature ?? "unsigned";
   reset();
 }
 onMounted(async () => {
   // App déjà lancée : double-clic → l'hôte émet directement.
-  listen<{ manifest: Manifest; path: string }>("install://open", (e) => openFor(e.payload));
+  listen<{ manifest: Manifest; path: string; signature?: string }>("install://open", (e) => openFor(e.payload));
   // Double-clic AU DÉMARRAGE : la webview n'écoutait pas encore → on récupère le pending.
-  const pending = await invoke<{ manifest: Manifest; path: string } | null>("take_pending_install").catch(() => null);
+  const pending = await invoke<{ manifest: Manifest; path: string; signature?: string } | null>("take_pending_install").catch(() => null);
   if (pending) openFor(pending);
 });
 </script>
@@ -160,6 +174,13 @@ onMounted(async () => {
           <p v-if="manifest?.description" class="mt-4 text-[13px] leading-relaxed text-foreground/70">
             {{ manifest.description }}
           </p>
+
+          <!-- Badge de confiance (signature du paquet) — advisory -->
+          <div class="mt-4 flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium" :class="sig.cls">
+            <svg v-if="sig.ok" viewBox="0 0 24 24" class="h-4 w-4 flex-none"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3 4 6v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4"/></svg>
+            <svg v-else viewBox="0 0 24 24" class="h-4 w-4 flex-none"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <span>{{ sig.label }}</span>
+          </div>
 
           <div class="mt-4 flex-1">
             <div class="text-[11px] font-medium uppercase tracking-wide text-foreground/40">Autorisations</div>

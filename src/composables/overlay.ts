@@ -163,12 +163,19 @@ export function showRegionOutline(r: Region | null) {
 // quand la fenêtre overlay laisse passer les clics.
 const regions = reactive<Record<string, Rect | null>>({});
 let scheduled = false;
+let lastSent = "";
 function publish() {
   if (scheduled) return;
   scheduled = true;
   requestAnimationFrame(() => {
     scheduled = false;
     const list = Object.values(regions).filter((r): r is Rect => !!r);
+    // N'envoie au natif QUE si l'union des régions a réellement changé : des watchers
+    // (île, dock…) peuvent rappeler setHitRegion à chaque frame avec la MÊME valeur → ici
+    // on dédoublonne → plus de flood d'`set_hit_regions`.
+    const sig = JSON.stringify(list);
+    if (sig === lastSent) return;
+    lastSent = sig;
     invoke("set_hit_regions", { regions: list }).catch(() => {});
   });
 }
