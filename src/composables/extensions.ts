@@ -225,7 +225,9 @@ async function reconcile() {
 async function onDistChanged(dir: string) {
   await loadInstalled();
   const ins = installed.find((i) => i.dir === dir);
-  if (!ins) return;
+  // Live-reload réservé aux extensions EN DÉVELOPPEMENT (source/package.json présent).
+  // Un client n'a que manifest+dist (jamais rebuildé) → aucun reload, aucune accumulation.
+  if (!ins || !ins.dev) return;
   if (active.has(ins.id)) deactivateExtension(ins.id);
   await reconcile();
 }

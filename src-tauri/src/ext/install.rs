@@ -380,17 +380,27 @@ pub(crate) fn start_dist_watcher(app: AppHandle) {
                 Ok(e) => e,
                 Err(_) => continue,
             };
-            // Racines d'extension (enfant direct de base) dont un fichier `dist/` a bougé.
+            // Racines d'extension (enfant direct de base) dont le `dist/` DIRECT a bougé.
             let mut dirs: std::collections::HashSet<std::path::PathBuf> = Default::default();
             for ev in events {
-                if !ev.path.components().any(|c| c.as_os_str() == "dist") {
-                    continue; // on ne réagit qu'aux changements du build, pas de la source
+                // On ne réagit QU'au `dist/` direct de l'extension (rel = <ext>/dist/…).
+                // Surtout PAS à `node_modules/**/dist` : sinon l'indexeur Windows ou un
+                // antivirus qui touche node_modules déclenche des reloads en boucle →
+                // fuite mémoire (chaque reload empile un module ES jamais évincé).
+                let rel = match ev.path.strip_prefix(&base) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let mut comps = rel.components();
+                let root = match comps.next() {
+                    Some(c) => c,
+                    None => continue,
+                };
+                let is_top_dist = comps.next().map_or(false, |c| c.as_os_str() == "dist");
+                if !is_top_dist {
+                    continue;
                 }
-                if let Ok(rel) = ev.path.strip_prefix(&base) {
-                    if let Some(first) = rel.components().next() {
-                        dirs.insert(base.join(first));
-                    }
-                }
+                dirs.insert(base.join(root.as_os_str()));
             }
             for dir in dirs {
                 let _ = app.emit("ext://changed", serde_json::json!({ "dir": dir.to_string_lossy() }));
