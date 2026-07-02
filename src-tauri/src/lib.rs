@@ -74,6 +74,7 @@ pub fn run() {
             services::system::system_volume,
             services::system::system_set_volume,
             services::system::system_set_muted,
+            services::system::system_power,
             services::net::http_fetch,
             services::apps::list_apps,
             services::apps::launch_path,

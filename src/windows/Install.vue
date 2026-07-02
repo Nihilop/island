@@ -29,6 +29,7 @@ const signature = ref<string>("unsigned");
 const PERM_LABELS: Record<string, string> = {
   media: "Contrôle des médias (lecture, volume)",
   system: "Lecture des statistiques système (CPU, RAM)",
+  power: "⚠ Éteint, redémarre, met en veille ou verrouille le PC",
   storage: "Stockage local de réglages",
   idle: "Affichage d'un statut sur l'île",
   launcher: "Raccourci dans le lanceur",

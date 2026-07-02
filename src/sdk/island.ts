@@ -84,6 +84,9 @@ export interface SysStats {
   memTotal: number;
 }
 
+/** Action d'alimentation (cf. `system.power`). Requiert la permission `power`. */
+export type PowerAction = "shutdown" | "restart" | "sleep" | "hibernate" | "lock" | "logoff";
+
 /** Une piste audio enregistrée (PCM brut écrit par l'hôte). */
 export interface AudioTrack {
   path: string; // fichier PCM brut
@@ -272,6 +275,11 @@ export interface IslandApi {
      * Sonde `idleMs()` périodiquement. Renvoie une fonction d'arrêt.
      */
     onUserIdle(ms: number, onIdle: () => void, onActive?: () => void): () => void;
+    /**
+     * Action d'alimentation. Requiert la permission DÉDIÉE `power` (fort impact).
+     * `action` : "shutdown" | "restart" | "sleep" | "hibernate" | "lock" | "logoff".
+     */
+    power(action: PowerAction): Promise<void>;
   };
   /** Conscience des fenêtres du bureau. Requiert la permission `windows`. */
   windows: {
@@ -558,6 +566,7 @@ export function useIsland(extId: string = ""): IslandApi {
       volume: () => b.invoke<{ level: number; muted: boolean } | null>("system_volume", { extId }),
       setVolume: (level) => b.invoke<void>("system_set_volume", { extId, level }),
       setMuted: (muted) => b.invoke<void>("system_set_muted", { extId, muted }),
+      power: (action) => b.invoke<void>("system_power", { extId, action }),
       idleMs: () => b.invoke<number>("system_idle_ms", { extId }),
       onUserIdle: (ms, onIdle, onActive) => {
         let idle = false;

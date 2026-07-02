@@ -156,3 +156,20 @@ pub fn system_set_muted(app: AppHandle, ext_id: String, muted: bool) -> Result<(
         Err("system: Windows uniquement".into())
     }
 }
+
+/// Action d'alimentation : `shutdown` | `restart` | `sleep` | `hibernate` | `lock` | `logoff`.
+/// Gardé par la permission DÉDIÉE `power` (éteindre/redémarrer = fort impact → consentement
+/// explicite, séparé de `system`).
+#[tauri::command]
+pub fn system_power(app: AppHandle, ext_id: String, action: String) -> Result<(), String> {
+    crate::ext::require_perm!(&app, &ext_id, "power");
+    #[cfg(target_os = "windows")]
+    {
+        windows::power(&action)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = action;
+        Err("power: Windows uniquement".into())
+    }
+}

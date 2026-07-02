@@ -92,3 +92,28 @@ pub fn set_muted(muted: bool) -> Result<(), String> {
     .join()
     .unwrap_or_else(|_| Err("system: thread mute".into()))
 }
+
+/// Action d'alimentation via les outils système Windows. `CREATE_NO_WINDOW` évite le flash
+/// d'une console. (sleep : SetSuspendState — met en veille, ou hiberne si l'hibernation est
+/// activée sur la machine.)
+pub fn power(action: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let (prog, args): (&str, &[&str]) = match action {
+        "shutdown" => ("shutdown", &["/s", "/t", "0"]),
+        "restart" => ("shutdown", &["/r", "/t", "0"]),
+        "logoff" => ("shutdown", &["/l"]),
+        "hibernate" => ("shutdown", &["/h"]),
+        "lock" => ("rundll32.exe", &["user32.dll,LockWorkStation"]),
+        "sleep" => ("rundll32.exe", &["powrprof.dll,SetSuspendState", "0,1,0"]),
+        other => return Err(format!("action d'alimentation inconnue : {other}")),
+    };
+    Command::new(prog)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
