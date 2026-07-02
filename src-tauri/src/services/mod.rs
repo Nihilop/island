@@ -13,6 +13,7 @@ pub mod input;
 pub mod media;
 pub mod net;
 pub mod pty;
+pub mod reserved;
 pub mod secrets;
 pub mod system;
 pub mod tts;

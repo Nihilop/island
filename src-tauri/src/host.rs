@@ -85,8 +85,9 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
         SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE,
         QUNS_RUNNING_D3D_FULL_SCREEN,
     };
+    use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetClassNameW, GetForegroundWindow, GetWindowRect,
+        GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
     };
 
     // Signal OFFICIEL de Windows — celui que le système utilise lui-même pour décider de
@@ -109,6 +110,16 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
     // moniteur (sinon : plein écran sur un AUTRE moniteur pendant qu'on bosse → on reste).
     let hwnd = GetForegroundWindow();
     if hwnd.0.is_null() || hwnd.0 as isize == overlay_hwnd {
+        return false;
+    }
+    // Exclut TOUTE fenêtre de NOTRE processus (overlay compris) : quand la view d'une
+    // extension s'ouvre, l'overlay passe plein écran et devient premier plan → sans ça il
+    // était pris pour un « jeu plein écran » et le raccourci (ex. touche Win de Flow) était
+    // coupé/rétabli en boucle. Le test hwnd seul ne suffit pas (hwnd de premier plan ≠ hwnd
+    // capturé au démarrage selon le focus).
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if pid == GetCurrentProcessId() {
         return false;
     }
     let mut cls = [0u16; 256];

@@ -545,8 +545,11 @@ export function useIsland(extId: string = ""): IslandApi {
       stop: (id) => b.invoke<AudioTrack[]>("audio_record_stop", { extId, recordingId: id }),
     },
     shortcuts: {
-      register: (accel, h) => b.registerShortcut(`${ns}:${accel}`, accel, h),
-      unregister: (accel) => b.unregisterShortcut(`${ns}:${accel}`),
+      // Clé préfixée par l'extId (stable) : permet le cleanup au unload
+      // (`unregisterShortcutsFor("<id>:")`) ET de router les touches réservées
+      // (touche Win) vers l'hôte avec la bonne identité (permission).
+      register: (accel, h) => b.registerShortcut(`${extId || ns}:${accel}`, accel, h),
+      unregister: (accel) => b.unregisterShortcut(`${extId || ns}:${accel}`),
     },
     system: {
       stats: () => b.invoke<SysStats>("system_stats", { extId }),

@@ -104,6 +104,7 @@ pub fn run() {
             services::secrets::secret_delete,
             services::tts::tts_speak,
             services::input::input_type_text,
+            services::reserved::reserved_key_set,
             services::windows::window_foreground,
             services::windows::window_list,
             services::windows::window_focus,
