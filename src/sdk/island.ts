@@ -457,6 +457,21 @@ function ensureMedia(b: Bridge) {
 // automatiquement l'extId pour que l'hôte vérifie la permission déclarée au manifeste.
 const apiCache = new Map<string, IslandApi>();
 
+// GARDE-FOU listeners : chaque `on()` d'une extension est tracé par extId → nettoyage
+// FORCÉ au unload (l'effectScope ne stoppe QUE les effets Vue, pas les listeners Tauri).
+// Un `on()` ré-abonné en boucle sans désabonnement = fuite qui empile les handlers et
+// fait grimper le CPU sur la durée → on alerte au-delà d'un seuil.
+const extListeners = new Map<string, Array<() => void>>();
+const LISTENER_WARN = 100;
+export function cleanupExtListeners(extId: string) {
+  const arr = extListeners.get(extId);
+  if (!arr) return;
+  for (const un of arr) {
+    try { un(); } catch { /* noop */ }
+  }
+  extListeners.delete(extId);
+}
+
 /**
  * Accès à l'API Island. `extId` = identité de l'extension : à fournir pour les services
  * gardés par une permission (capture, system, media, network) — l'hôte vérifie alors le
@@ -660,7 +675,23 @@ export function useIsland(extId: string = ""): IslandApi {
       typeText: (text) => b.invoke<void>("input_type_text", { extId, text }),
     },
     invoke: (cmd, args) => b.invoke(cmd, args),
-    on: (event, cb) => b.listen(event, (e) => cb(e.payload)),
+    on: (event, cb) => {
+      const p = b.listen(event, (e) => cb(e.payload));
+      // Trace l'abonnement pour le nettoyer au unload (garde-fou anti-fuite).
+      if (extId) {
+        let arr = extListeners.get(extId);
+        if (!arr) {
+          arr = [];
+          extListeners.set(extId, arr);
+        }
+        if (arr.length === LISTENER_WARN) {
+          console.warn(`[island] extension « ${extId} » : ${LISTENER_WARN}+ listeners actifs — fuite probable (abonnement en boucle sans désabonnement ?).`);
+        }
+        const owned = arr;
+        p.then((un) => owned.push(un)).catch(() => {});
+      }
+      return p;
+    },
   };
   apiCache.set(extId, cached);
   return cached;

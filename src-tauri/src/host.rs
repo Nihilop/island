@@ -4,6 +4,60 @@
 
 use tauri::{AppHandle, Manager};
 
+/// GARDE-FOU MÉMOIRE : Island surveille sa PROPRE conso (process principal + process
+/// enfants du webview) et se récupère si ça dérape — pour ne JAMAIS dégrader la machine
+/// du client, même si une extension fuit. Toutes les 20 s : somme la mémoire de l'arbre
+/// de process ; au seuil HAUT, émet `island://reclaim` → le front recharge l'overlay AU
+/// REPOS (récupère la mémoire JS accumulée ; le storage persiste). Cross-OS (sysinfo).
+pub(crate) fn start_memory_watchdog(app: AppHandle) {
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+    use tauri::Emitter;
+
+    const WARN_MB: u64 = 500;
+    const HARD_MB: u64 = 900;
+    let me = std::process::id();
+
+    std::thread::spawn(move || {
+        let mut sys = System::new();
+        let mut warned = false;
+        let mut last_reclaim_mb: u64 = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(20));
+            sys.refresh_processes(ProcessesToUpdate::All, true);
+
+            // Ensemble transitif : notre process + tous ses descendants (webview & co).
+            let mut tree = std::collections::HashSet::new();
+            tree.insert(Pid::from_u32(me));
+            loop {
+                let before = tree.len();
+                for (pid, p) in sys.processes() {
+                    if let Some(parent) = p.parent() {
+                        if tree.contains(&parent) {
+                            tree.insert(*pid);
+                        }
+                    }
+                }
+                if tree.len() == before {
+                    break;
+                }
+            }
+            let bytes: u64 = tree.iter().filter_map(|pid| sys.process(*pid)).map(|p| p.memory()).sum();
+            let mb = bytes / (1024 * 1024);
+
+            if mb >= HARD_MB && mb > last_reclaim_mb + 100 {
+                last_reclaim_mb = mb;
+                eprintln!("[island/watchdog] mémoire {mb} Mo ≥ {HARD_MB} → récupération (reload overlay au repos)");
+                let _ = app.emit("island://reclaim", mb);
+            } else if mb >= WARN_MB && !warned {
+                warned = true;
+                eprintln!("[island/watchdog] ⚠ mémoire élevée : {mb} Mo (une extension fuit peut-être)");
+            } else if mb < WARN_MB {
+                warned = false;
+            }
+        }
+    });
+}
+
 /// Ouvre (et met au premier plan) la fenêtre de réglages.
 #[tauri::command]
 pub fn open_settings(app: AppHandle) -> Result<(), String> {

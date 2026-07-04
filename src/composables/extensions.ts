@@ -7,6 +7,7 @@ import { ref, markRaw, effectScope, type Component, type EffectScope } from "vue
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useIsland, type ExtensionDef, type ExtStorage, type ExtSecrets, type ExtensionContext } from "../sdk";
+import { cleanupExtListeners } from "../sdk/island";
 import { setIdleState, setIdleCenter, setIdleAction, setIdleTap } from "./idle";
 import { setLauncherEntry, setLauncherProvider } from "./launcher";
 import { busEmit, busOn, busClear } from "./bus";
@@ -196,6 +197,7 @@ function deactivateExtension(id: string) {
   setLauncherEntry(`${id}:launcher`, null);
   setLauncherProvider(`${id}:launcher`, null);
   busClear(id); // retire les abonnements bus de l'extension
+  cleanupExtListeners(id); // retire les listeners Tauri (on()) — non stoppés par l'effectScope
   for (const k of rec.surfaceKeys) surfaces.delete(k);
   rec.cssEl?.remove(); // retire la feuille de style injectée
   void unregisterShortcutsFor(`${id}:`); // retire les raccourcis globaux de l'extension

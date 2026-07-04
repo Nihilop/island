@@ -87,17 +87,27 @@ pub fn start(app: AppHandle) {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
         let mut last_title = String::new();
+        // Gestionnaire SMTC obtenu UNE FOIS puis réutilisé (au lieu d'un `RequestAsync`
+        // par poll = ~1 alloc WinRT toutes les 700 ms). Retry paresseux tant qu'absent.
+        let mut mgr: Option<Manager> = None;
         loop {
+            if mgr.is_none() {
+                mgr = Manager::RequestAsync().ok().and_then(|op| op.get().ok());
+            }
             match rx.recv_timeout(Duration::from_millis(700)) {
                 Ok(c) => {
-                    run_ctl(c);
-                    if let Some(u) = read_update(&mut last_title) {
-                        let _ = app.emit("media://update", u);
+                    if let Some(m) = mgr.as_ref() {
+                        run_ctl(m, c);
+                        if let Some(u) = read_update(m, &mut last_title) {
+                            let _ = app.emit("media://update", u);
+                        }
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(u) = read_update(&mut last_title) {
-                        let _ = app.emit("media://update", u);
+                    if let Some(m) = mgr.as_ref() {
+                        if let Some(u) = read_update(m, &mut last_title) {
+                            let _ = app.emit("media://update", u);
+                        }
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -148,15 +158,9 @@ pub fn set_volume(level: f32) {
 
 // --- SMTC -------------------------------------------------------------------
 
-/// Session média ACTIVE selon l'OS (peu importe l'app). C'est la notion système de
-/// « l'app média courante » — on ne privilégie aucune application.
-fn current_session() -> Option<Session> {
-    let mgr = Manager::RequestAsync().ok()?.get().ok()?;
-    mgr.GetCurrentSession().ok()
-}
-
-fn run_ctl(c: Ctl) {
-    if let Some(s) = current_session() {
+// Session média ACTIVE selon l'OS (peu importe l'app), depuis le gestionnaire mis en cache.
+fn run_ctl(mgr: &Manager, c: Ctl) {
+    if let Ok(s) = mgr.GetCurrentSession() {
         let _ = match c {
             Ctl::Toggle => s.TryTogglePlayPauseAsync().and_then(|o| o.get()),
             Ctl::Next => s.TrySkipNextAsync().and_then(|o| o.get()),
@@ -168,8 +172,7 @@ fn run_ctl(c: Ctl) {
     }
 }
 
-fn read_update(last_title: &mut String) -> Option<MediaUpdate> {
-    let mgr = Manager::RequestAsync().ok()?.get().ok()?;
+fn read_update(mgr: &Manager, last_title: &mut String) -> Option<MediaUpdate> {
     let session = match mgr.GetCurrentSession().ok() {
         Some(s) => s,
         None => {

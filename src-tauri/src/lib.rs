@@ -51,6 +51,9 @@ pub fn run() {
             // Auto-hide : détecte une app en plein écran → l'île se rétracte.
             host::start_fullscreen_monitor(app.handle().clone());
 
+            // Garde-fou mémoire : Island surveille sa conso et se récupère si ça dérape.
+            host::start_memory_watchdog(app.handle().clone());
+
             // Zone de notification : ouvrir Réglages / quitter Island.
             host::build_tray(app.handle())?;
 
