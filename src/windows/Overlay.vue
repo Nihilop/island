@@ -13,12 +13,16 @@ import { loadExtensions } from "../composables/extensions";
 import { selecting, regionOutline, activeView, modalSpec } from "../composables/overlay";
 import { initNotifications } from "../composables/notifications";
 import { initIslandTheme } from "../composables/islandTheme";
+import { initPresence } from "../composables/presence";
+import { initLayout } from "../composables/islandLayout";
 import { checkForUpdate } from "../composables/updater";
 
 onMounted(() => {
   loadExtensions();
   initNotifications();
   initIslandTheme(); // charge le thème de l'île persisté + suit les changements (Réglages)
+  initPresence(); // présence physique (AppBar) : applique + suspend en jeu plein écran
+  initLayout(); // décalage horizontal persistant de l'île (mode édition)
   // Vérif de mise à jour peu après le démarrage (silencieuse s'il n'y a rien).
   window.setTimeout(() => void checkForUpdate(), 4000);
 

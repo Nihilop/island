@@ -4,6 +4,7 @@
 // = pas enregistrée = absente du launcher.
 import { ref, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { enterEdit } from "./islandLayout";
 
 export interface LauncherEntry {
   id: string;
@@ -87,14 +88,18 @@ const builtinActions = ref<LauncherCell[]>([]);
 const providerResults = ref<LauncherCell[]>([]);
 
 /** Charge les actions natives (Réglages, DND…) — appelé une fois au démarrage. */
+const MOVE_ICON = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M8 7l-4 5 4 5M16 7l4 5-4 5M4 12h16'/></svg>";
+
 export async function loadBuiltins() {
   // « Notifications » : accès au centre depuis le launcher (≠ la cloche, toujours dispo).
   const notifs: LauncherCell = { id: "notifs", label: "Notifications", icon: ICONS.bell, kind: "notifs" };
+  // « Déplacer l'île » : entre en mode édition (glisser-déposer horizontal).
+  const move: LauncherCell = { id: "move-island", label: "Déplacer l'île", icon: MOVE_ICON, kind: "entry", onActivate: () => enterEdit() };
   try {
     const list = await invoke<LauncherCell[]>("list_launcher");
-    builtinActions.value = [...list.map((a) => ({ ...a, icon: ICONS[a.icon] || "" })), notifs];
+    builtinActions.value = [...list.map((a) => ({ ...a, icon: ICONS[a.icon] || "" })), notifs, move];
   } catch {
-    builtinActions.value = [notifs];
+    builtinActions.value = [notifs, move];
   }
 }
 

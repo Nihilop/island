@@ -11,6 +11,7 @@ import {
 } from "@island/sdk";
 import { discoverManifests, getEnabled, setEnabled } from "../composables/extensions";
 import { islandTheme, setIslandTheme, initIslandTheme, islandAccent, setIslandAccent, type IslandTheme } from "../composables/islandTheme";
+import { physicalPresence, setPhysicalPresence, loadPresence } from "../composables/presence";
 import { t } from "../composables/i18n";
 import { updateState, checkForUpdate, applyUpdate } from "../composables/updater";
 import { getVersion } from "@tauri-apps/api/app";
@@ -91,6 +92,7 @@ async function pickAndInstall() {
 
 onMounted(async () => {
   initIslandTheme(); // charge le style de l'île persisté + suit les changements cross-fenêtre
+  loadPresence(); // charge l'état de la présence physique (bandeau réservé)
   getVersion().then((v) => (version.value = v)).catch(() => {});
   await loadRows();
   // Une install (modal) émet ext://reload → on rafraîchit la liste sans recharger la page.
@@ -153,6 +155,13 @@ onMounted(async () => {
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div class="flex items-center justify-between gap-4 py-3.5 border-b">
+            <div>
+              <div class="text-[14px]">Présence physique</div>
+              <div class="text-[12px] opacity-50 mt-0.5">Réserve un bandeau en haut : l'île reste visible même sous les fenêtres maximisées</div>
+            </div>
+            <Switch :model-value="physicalPresence" @update:model-value="setPhysicalPresence" />
           </div>
           <div class="flex items-center justify-between gap-4 py-3.5 border-b">
             <div>

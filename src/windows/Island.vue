@@ -4,6 +4,7 @@
 // view (monte une surface d'extension) · + un sous-slot "goutte" dans une view.
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, PhysicalSize, PhysicalPosition } from "@tauri-apps/api/window";
 import { idleState, idleCenter, idleActions, idleTap } from "../composables/idle";
 import { hasProviders, launcherCells, loadBuiltins } from "../composables/launcher";
@@ -13,6 +14,8 @@ import {
 } from "../composables/overlay";
 import { DEV, devPin, installDevShortcuts, devRestore } from "../composables/dev";
 import { theme, islandAccent } from "../composables/islandTheme";
+import { reassertSignal } from "../composables/presence";
+import { islandOffsetX, editMode, setOffsetX, exitEdit } from "../composables/islandLayout";
 import IslandSurface from "./IslandSurface.vue";
 import NotifCard from "./NotifCard.vue";
 import Launcher from "./Launcher.vue";
@@ -113,6 +116,20 @@ const contentVisible = computed(() => phase.value === "stable" || phase.value ==
 const rootStyle = computed(() => {
   const s: Record<string, string> = { paddingTop: theme.value.anchor === "topbar" ? "0px" : "8px" };
   if (islandAccent.value) s["--primary"] = islandAccent.value;
+  // --w (largeur animable) porté ICI → l'île (enfant) en hérite pour sa largeur, ET on
+  // calcule la POSITION d'ouverture par clamp() à partir de cette --w interpolée.
+  s["--w"] = islandDims()[0] + "px";
+  // Position horizontale « collision-aware » : bord gauche visé = clamp(centre − w/2, marge,
+  // écran − marge − w) ; translateX = ce bord − (bord gauche « naturel » = centre boîte − w/2).
+  // → centré loin des bords, épingle le bord touché près d'un bord (ouvre vers l'intérieur).
+  const dpr = window.devicePixelRatio || 1;
+  const sw = window.screen.width;
+  const marg = 8;
+  const cx = sw / 2 + islandOffsetX.value; // centre idle (CSS)
+  const bc = (boxTarget.value.x + boxTarget.value.w / 2) / dpr; // centre de la boîte (CSS)
+  // clamp(MIN, VALEUR VISÉE, MAX) : bord gauche visé = cx − w/2, borné à [marge, écran − marge − w].
+  s.transform =
+    `translateX(calc(clamp(${marg}px, calc(${cx}px - var(--w) / 2), calc(${sw - marg}px - var(--w))) - ${bc}px + var(--w) / 2))`;
   return s;
 });
 
@@ -163,8 +180,9 @@ function islandDims(): [number, number, number] {
   return [w, h, Math.round(h / 2)];
 }
 const wrapStyle = computed(() => {
-  const [w, h, r] = islandDims();
-  return { "--w": w + "px", "--h": h + "px", "--r": r + "px" };
+  const [, h, r] = islandDims();
+  // --w est porté par le ROOT (pour le calcul de position) ; l'île en hérite pour sa largeur.
+  return { "--h": h + "px", "--r": r + "px" };
 });
 
 // --- Empreinte de la fenêtre overlay (anti-gel des autres apps) ----------------------
@@ -174,7 +192,8 @@ const wrapStyle = computed(() => {
 // saut), et on ne repasse PLEIN ÉCRAN que quand une surface le réclame : modal (fond),
 // fenêtre flottante, sélection de zone, contour d'enregistrement.
 const win = getCurrentWindow();
-const BOX_W = 900; // CSS px — assez large pour la plus grande vue + halo
+const MAX_ISLAND_W = 780; // CSS px — largeur MAX prévue de l'île → dimensionne la boîte
+const PAD = 60; // CSS px — marge autour (halo/ombre + jeu d'animation)
 const BOX_H = 760; // CSS px — assez haut pour vue + goutte + pile de notifs
 // Géométrie du moniteur en pixels PHYSIQUES, mesurée de façon SYNCHRONE (window.screen ;
 // le moniteur principal est à l'origine 0,0). Pas de dépendance à primaryMonitor() qui
@@ -185,17 +204,27 @@ const monW = Math.round(window.screen.width * (window.devicePixelRatio || 1));
 const monH = Math.round(window.screen.height * (window.devicePixelRatio || 1));
 
 function needsFullscreen(): boolean {
-  // Une fenêtre MINIMISÉE (sphère) ne force pas le plein écran.
-  return modalSpec.value !== null || floatWindows.value.some((w) => !w.minimized) || selecting.value || !!regionOutline.value;
+  // Une fenêtre MINIMISÉE (sphère) ne force pas le plein écran. Le MODE ÉDITION passe aussi
+  // plein écran → repère stable pour dragger + tous les events souris captés.
+  return editMode.value || modalSpec.value !== null || floatWindows.value.some((w) => !w.minimized) || selecting.value || !!regionOutline.value;
 }
 
 interface Box { x: number; y: number; w: number; h: number }
 const boxTarget = computed<Box>(() => {
   if (needsFullscreen()) return { x: monX, y: monY, w: monW, h: monH };
   const dpr = window.devicePixelRatio || 1;
-  const w = Math.min(monW, Math.round(BOX_W * dpr));
+  const sw = window.screen.width; // CSS
+  const marg = 8;
+  const cx = sw / 2 + islandOffsetX.value; // centre idle (CSS)
+  const maxW = Math.min(MAX_ISLAND_W, sw - 2 * marg);
+  // Boîte STABLE quel que soit le format (dimensionnée pour la largeur MAX), positionnée
+  // pour que l'île max rentre à l'écran → l'île morphe DEDANS via CSS (collision par clamp),
+  // sans que la fenêtre ne saute à chaque changement de format.
+  const finalLeftMax = Math.min(Math.max(cx - maxW / 2, marg), sw - marg - maxW);
+  const bl = Math.max(0, finalLeftMax - PAD);
+  const br = Math.min(sw, finalLeftMax + maxW + PAD);
   const h = Math.min(monH, Math.round(BOX_H * dpr));
-  return { x: monX + Math.round((monW - w) / 2), y: monY, w, h };
+  return { x: monX + Math.round(bl * dpr), y: monY, w: Math.round((br - bl) * dpr), h };
 });
 
 let lastBoxArea = -1;
@@ -217,6 +246,19 @@ watch(boxTarget, (b) => {
   if (b.w * b.h >= lastBoxArea) applyBox(b);
   else boxShrinkTimer = window.setTimeout(() => applyBox(b), 460);
 }, { immediate: true });
+
+// Après une (dé)réservation AppBar, Windows peut avoir poussé l'overlay hors du bandeau
+// réservé → on re-FORCE sa position (l'île reste TOUJOURS fixe en haut, jamais soumise à
+// la réservation). Retries pour battre le reflow asynchrone du système.
+function reassertBox() {
+  lastBoxKey = ""; // court-circuite le garde « même position »
+  applyBox(boxTarget.value);
+}
+watch(reassertSignal, () => {
+  reassertBox();
+  window.setTimeout(reassertBox, 130);
+  window.setTimeout(reassertBox, 340);
+});
 
 // --- Orchestrateur d'animation (exit -> morph -> enter, sans chevauchement) ---
 function afterTransition(el: HTMLElement | undefined, props: string[], fallback: number) {
@@ -254,17 +296,53 @@ function collapseToIdle() {
 // Fermeture AUTOMATIQUE (clic hors de l'île / perte de focus) : une view marquée
 // `persistent` y résiste (elle ne se ferme qu'au « Retour » ou via view.close()).
 function autoDismiss() {
+  if (editMode.value) { exitEdit(); return; } // clic-dehors / perte focus → termine l'édition
   if (DEV && devPin.value) return; // dev : île épinglée → ne se referme pas (cf. composables/dev)
   if (activeView.value && activeViewPersistent.value) return;
   collapseToIdle();
 }
 function onWrapClick() {
+  if (editMode.value) return; // en édition, le clic sert au drag (pointer), pas au launcher
   if (format.value === "idle") {
     // Si une extension a posé un handler de tap (ex. enregistrement en cours),
     // le clic ouvre SON UI au lieu du launcher.
     if (idleTap.value) idleTap.value();
     else setFormat("launcher");
   } else if (format.value === "launcher") collapseToIdle();
+}
+
+// --- Déplacement horizontal (mode édition) : drag de l'île dans la boîte plein écran ---
+let dragging = false;
+let grabDx = 0; // écart curseur ↔ centre de l'île à la prise (px CSS)
+function onDragStart(e: PointerEvent) {
+  if (!editMode.value) return;
+  dragging = true;
+  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  grabDx = e.clientX - (window.innerWidth / 2 + islandOffsetX.value);
+  e.preventDefault();
+}
+function onDragMove(e: PointerEvent) {
+  if (!dragging) return;
+  let off = e.clientX - grabDx - window.innerWidth / 2;
+  const half = islandDims()[0] / 2;
+  const max = Math.max(0, window.innerWidth / 2 - 8 - half);
+  off = Math.max(-max, Math.min(max, off));
+  // Aimantation aux repères (centre / quarts / tiers) : plus agréable au placement.
+  for (const g of editGuides.value) if (Math.abs(off - g) < 14) { off = g; break; }
+  setOffsetX(off);
+}
+// Repères verticaux affichés en mode édition (offset px CSS depuis le centre).
+const editGuides = computed(() => {
+  const sw = window.innerWidth || window.screen.width;
+  return [0, sw / 4, -sw / 4, sw / 3, -sw / 3];
+});
+function onDragEnd(e: PointerEvent) {
+  if (!dragging) return;
+  dragging = false;
+  (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+}
+function onEditKey(e: KeyboardEvent) {
+  if (editMode.value && (e.key === "Escape" || e.key === "Enter")) { e.preventDefault(); exitEdit(); }
 }
 // DND basculé depuis une cellule native du launcher → bascule + referme.
 function onToggleDnd() { dnd.value = !dnd.value; collapseToIdle(); }
@@ -322,6 +400,9 @@ watch(unreadCount, (c) => { if (c === 0 && format.value === "notifcenter") colla
 // DND : pas de bannière (le centre le sait) + une gouttelette discrète à l'arrivée.
 watch(dnd, (v) => setNotifDnd(v), { immediate: true });
 watch(lastPosted, (n) => { if (n && dnd.value) triggerDrop(n); });
+// Mode édition : on REPLIE en idle (on déplace l'île fermée, pas la version ouverte) +
+// on prend le focus clavier (pour Échap/Entrée).
+watch(editMode, (on) => { if (on) { collapseToIdle(); invoke("overlay_focus").catch(() => {}); } });
 
 let unfocus: (() => void) | undefined;
 let uninstallDev: (() => void) | undefined;
@@ -346,12 +427,13 @@ onMounted(async () => {
   unfocus = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
     if (!focused) autoDismiss();
   });
+  window.addEventListener("keydown", onEditKey);
 });
-onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); centerRO?.disconnect(); });
+onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); centerRO?.disconnect(); window.removeEventListener("keydown", onEditKey); });
 </script>
 
 <template>
-  <div class="relative z-1 flex h-screen items-start justify-center bg-transparent pointer-events-none select-none" :style="rootStyle">
+  <div class="isle-root relative z-1 flex h-screen items-start justify-center bg-transparent pointer-events-none select-none" :class="{ 'to-idle': !islandOpen }" :style="rootStyle">
     <svg width="0" height="0" class="absolute">
       <defs>
         <filter id="goo">
@@ -365,15 +447,35 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); ce
     <div v-if="tucked" class="fixed top-0 left-0 right-0 h-1.5 pointer-events-auto" @mouseenter="peekShow" @mouseleave="peekHideSoon"></div>
     <div v-if="slidUp" class="fixed top-[3px] left-1/2 h-1 w-10 -translate-x-1/2 rounded-full pointer-events-none bg-white/[0.22] transition-opacity duration-300"></div>
 
+    <!-- Mode édition : grille de repères (centre / quarts / tiers) -->
+    <div v-if="editMode" class="fixed inset-0 z-0 pointer-events-none">
+      <div
+        v-for="g in editGuides"
+        :key="g"
+        class="absolute top-0 bottom-0 w-px"
+        :class="g === 0 ? 'bg-white/30' : 'bg-white/12'"
+        :style="{ left: `calc(50% + ${g}px)` }"
+      ></div>
+    </div>
+
+    <!-- Mode édition : indice de déplacement (texte seul ; l'overlay ignore le curseur ici) -->
+    <div v-if="editMode" class="fixed bottom-10 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/75 px-4 py-2 text-[12.5px] text-white/90 pointer-events-none backdrop-blur-sm">
+      Glissez l'île pour la déplacer — Échap ou cliquez ailleurs pour terminer
+    </div>
+
     <!-- Gouttelette DND : tombe sous l'île à l'arrivée d'une notif (sans déranger) -->
     <div v-if="dndDrop && dnd" :key="dndDrop.id" class="dnddrop absolute left-1/2 top-[34px] h-2.5 w-2.5 rounded-full pointer-events-none shadow-[0_0_6px_rgba(0,0,0,0.25)]" :style="{ background: dndDrop.color }"></div>
 
     <div
       ref="wrapEl"
       class="wrap"
-      :class="['sz-' + safeZone, { up: slidUp }]"
+      :class="['sz-' + safeZone, { up: slidUp, 'to-idle': !islandOpen, 'editing': editMode }]"
       :style="wrapStyle"
       @click="onWrapClick"
+      @pointerdown="onDragStart"
+      @pointermove="onDragMove"
+      @pointerup="onDragEnd"
+      @pointercancel="onDragEnd"
       @mouseenter="peekShow"
       @mouseleave="peekHideSoon"
     >
@@ -489,9 +591,25 @@ onUnmounted(() => { cancelAnimationFrame(raf); unfocus?.(); uninstallDev?.(); ce
 .wrap {
   @apply relative w-(--w) h-(--h) rounded-(--r) cursor-pointer pointer-events-auto!;
   --safe-top: 14px;
-  transition: width 0.55s cubic-bezier(0.34, 1.4, 0.42, 1), height 0.55s cubic-bezier(0.34, 1.4, 0.42, 1), border-radius 0.45s ease, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+  /* On anime `--r` (pas `border-radius`) → arrondi barre + congés inversés du même rayon.
+     La LARGEUR (`--w`) est animée sur le ROOT (@property, pour le clamp de position) ; la
+     largeur de l'île `width: var(--w)` la suit donc SANS transition ici. Hauteur/--r/transform
+     restent transitionnés ici (transform = translateY de `.up`). */
+  transition: height 0.55s cubic-bezier(0.34, 1.4, 0.42, 1), --r 0.45s ease, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .wrap.up { transform: translateY(calc(-100% - 18px)); } /* rétractée hors écran */
+/* La largeur animable `--w` est portée par le root (l'île en hérite). Ressort à l'ouverture,
+   courbe SANS overshoot à la fermeture (sinon l'ouverture « collision » sous-tire aux bords). */
+.isle-root { transition: --w 0.55s cubic-bezier(0.34, 1.4, 0.42, 1); }
+.isle-root.to-idle { transition: --w 0.48s cubic-bezier(0.33, 0, 0.2, 1); }
+.wrap.editing { cursor: grab; }
+.wrap.editing:active { cursor: grabbing; }
+/* FERMETURE (retour à idle) : courbe SANS overshoot → la boîte ne passe jamais SOUS sa
+   taille finale, donc les congés inversés (::before/::after) ne dépassent plus de la barre
+   au « boing ». L'ouverture, elle, garde son ressort (règle .wrap ci-dessus). */
+.wrap.to-idle {
+  transition: height 0.48s cubic-bezier(0.33, 0, 0.2, 1), --r 0.4s ease, transform 0.42s cubic-bezier(0.4, 0, 0.2, 1);
+}
 
 /* Gouttelette DND : layout en classes ; ici seulement l'animation (collée à ses
    keyframes, car Vue renomme les @keyframes scoped → l'animation doit rester ici). */

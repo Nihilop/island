@@ -24,7 +24,9 @@ const topbar = computed(() => theme.value.anchor === "topbar");
    Pseudo-éléments masqués → non exprimable en classe. */
 .topbar::before,
 .topbar::after {
-  content: ""; position: absolute; top: 0; width: var(--r); height: var(--r);
+  /* width = --r + 1px : le congé chevauche la barre de ~1px (même couleur) → aucun
+     liseré/raccord visible au rendu, même en pleine animation. */
+  content: ""; position: absolute; top: 0; width: calc(var(--r) + 1px); height: var(--r);
   background: var(--background);
 }
 .topbar::before {

@@ -41,6 +41,9 @@ pub fn run() {
                 #[cfg(target_os = "windows")]
                 overlay::start_click_through(overlay.clone());
             }
+            // Fenêtre porteuse de la présence physique (AppBar) — sur le thread principal.
+            #[cfg(target_os = "windows")]
+            overlay::init_appbar();
 
             // Contrôleur média natif (SMTC) — une des API exposées aux extensions.
             services::media::start(app.handle().clone());
@@ -66,6 +69,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             overlay::set_hit_regions,
             overlay::overlay_focus,
+            overlay::set_physical_presence,
             launcher::list_launcher,
             host::open_settings,
             host::reveal_path,
