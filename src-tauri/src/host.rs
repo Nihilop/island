@@ -13,8 +13,9 @@ pub(crate) fn start_memory_watchdog(app: AppHandle) {
     use sysinfo::{Pid, ProcessesToUpdate, System};
     use tauri::Emitter;
 
-    const WARN_MB: u64 = 500;
-    const HARD_MB: u64 = 900;
+    // En build DEBUG (pnpm tauri dev), le webview embarque Vite/HMR/source-maps → le
+    // footprint normal est 2-3× la prod → on monte les seuils pour ne pas crier au loup.
+    let (warn_mb, hard_mb): (u64, u64) = if cfg!(debug_assertions) { (1400, 2400) } else { (500, 900) };
     let me = std::process::id();
 
     std::thread::spawn(move || {
@@ -44,14 +45,14 @@ pub(crate) fn start_memory_watchdog(app: AppHandle) {
             let bytes: u64 = tree.iter().filter_map(|pid| sys.process(*pid)).map(|p| p.memory()).sum();
             let mb = bytes / (1024 * 1024);
 
-            if mb >= HARD_MB && mb > last_reclaim_mb + 100 {
+            if mb >= hard_mb && mb > last_reclaim_mb + 100 {
                 last_reclaim_mb = mb;
-                eprintln!("[island/watchdog] mémoire {mb} Mo ≥ {HARD_MB} → récupération (reload overlay au repos)");
+                eprintln!("[island/watchdog] mémoire {mb} Mo ≥ {hard_mb} → récupération (reload overlay au repos)");
                 let _ = app.emit("island://reclaim", mb);
-            } else if mb >= WARN_MB && !warned {
+            } else if mb >= warn_mb && !warned {
                 warned = true;
                 eprintln!("[island/watchdog] ⚠ mémoire élevée : {mb} Mo (une extension fuit peut-être)");
-            } else if mb < WARN_MB {
+            } else if mb < warn_mb {
                 warned = false;
             }
         }

@@ -57,10 +57,18 @@ impl GraphicsCaptureApiHandler for Shot {
         ctrl: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
         match self.region {
-            // crop : (start_w, start_h, end_w, end_h) en pixels physiques
-            Some(r) => frame
-                .buffer_crop(r.x, r.y, r.x + r.w, r.y + r.h)?
-                .save_as_image(&self.path, ImageFormat::Png)?,
+            // crop : (start_w, start_h, end_w, end_h) en px physiques, CLAMPÉ au cadre réel
+            // (une zone près d'un bord déborderait sinon → erreur de crop).
+            Some(r) => {
+                let (fw, fh) = { let fb = frame.buffer()?; (fb.width(), fb.height()) };
+                let x = r.x.min(fw.saturating_sub(1));
+                let y = r.y.min(fh.saturating_sub(1));
+                let w = r.w.min(fw - x).max(1);
+                let h = r.h.min(fh - y).max(1);
+                frame
+                    .buffer_crop(x, y, x + w, y + h)?
+                    .save_as_image(&self.path, ImageFormat::Png)?
+            }
             None => frame.save_as_image(&self.path, ImageFormat::Png)?,
         }
         ctrl.stop(); // une seule frame suffit pour un screenshot
@@ -150,9 +158,20 @@ impl GraphicsCaptureApiHandler for Recorder {
         // dans le bon sens pour ffmpeg (-f rawvideo) → aucun flip (sinon à l'envers).
         let (bytes, w, h) = match self.region {
             Some(r) => {
-                let mut b = frame.buffer_crop(r.x, r.y, r.x + r.w, r.y + r.h)?;
-                let (w, h) = (b.width(), b.height());
-                (b.as_nopadding_buffer()?.to_vec(), w, h)
+                // CLAMPE la zone au cadre réel de la frame + dimensions PAIRES : une sélection
+                // près d'un bord (fréquent pour une zone « bureau ») déborde sinon → crop
+                // clampé à une largeur IMPAIRE → libx264 refuse → MP4 vide (moov sans piste).
+                let (fw, fh) = { let fb = frame.buffer()?; (fb.width(), fb.height()) };
+                let x = r.x.min(fw.saturating_sub(2));
+                let y = r.y.min(fh.saturating_sub(2));
+                let w = (r.w.min(fw - x)) & !1;
+                let h = (r.h.min(fh - y)) & !1;
+                if w < 2 || h < 2 {
+                    return Ok(()); // zone dégénérée → on saute cette frame
+                }
+                let mut b = frame.buffer_crop(x, y, x + w, y + h)?;
+                let (bw, bh) = (b.width(), b.height());
+                (b.as_nopadding_buffer()?.to_vec(), bw, bh)
             }
             None => {
                 let mut b = frame.buffer()?;
@@ -369,8 +388,12 @@ pub fn stop_recording() -> Result<String, String> {
     let (audio, mux) = (rec.audio.take(), rec.mux.take());
     if let (Some(audio), Some(mux)) = (audio, mux) {
         let fmt = audio.stop(); // attend la fin d'écriture + renvoie le format réel
-        if let Some(f) = fmt {
+        // Audio VIDE (rien ne jouait sur le bureau → PCM ~0) : muxer avec ce flux tronquait
+        // la vidéo à 0 frame (`-shortest`). On garde alors la VIDÉO SEULE (elle est valide).
+        let pcm_len = std::fs::metadata(&mux.temp_pcm).map(|m| m.len()).unwrap_or(0);
+        if let (Some(f), true) = (fmt, pcm_len >= 4096) {
             // 2ᵉ passe : mux vidéo (copy, pas de ré-encodage) + PCM système → final.
+            // PAS de `-shortest` : un audio plus court ne doit JAMAIS tronquer la vidéo.
             let mut args: Vec<String> = vec![
                 "-y".into(),
                 "-i".into(), mux.temp_video.clone(),
@@ -387,7 +410,6 @@ pub fn stop_recording() -> Result<String, String> {
             } else {
                 args.extend(mux.audio_args.iter().cloned());
             }
-            args.push("-shortest".into());
             args.push(rec.path.clone());
 
             let status = Command::new(&mux.bin)
@@ -398,19 +420,19 @@ pub fn stop_recording() -> Result<String, String> {
                 .creation_flags(CREATE_NO_WINDOW)
                 .status();
 
-            let ok = status.map(|s| s.success()).unwrap_or(false) && std::path::Path::new(&rec.path).exists();
+            // Succès ET fichier NON trivial (sinon on récupère la vidéo seule).
+            let ok = status.map(|s| s.success()).unwrap_or(false)
+                && std::fs::metadata(&rec.path).map(|m| m.len() > 1024).unwrap_or(false);
             if ok {
                 let _ = std::fs::remove_file(&mux.temp_video);
             } else {
-                // Mux raté : on récupère AU MOINS la vidéo (sans son).
                 let _ = std::fs::rename(&mux.temp_video, &rec.path);
             }
-            let _ = std::fs::remove_file(&mux.temp_pcm);
         } else {
-            // Capture audio KO : on garde la vidéo seule.
+            // Pas d'audio exploitable → vidéo seule (valide).
             let _ = std::fs::rename(&mux.temp_video, &rec.path);
-            let _ = std::fs::remove_file(&mux.temp_pcm);
         }
+        let _ = std::fs::remove_file(&mux.temp_pcm);
     }
     Ok(rec.path)
 }

@@ -53,9 +53,6 @@ pub fn set_key(app: &AppHandle, key: &str, enabled: bool) -> Result<(), String> 
     if !key.eq_ignore_ascii_case("super") && !key.eq_ignore_ascii_case("win") {
         return Err(format!("touche réservée inconnue : {key}"));
     }
-    // Marqueur de build : si tu vois cette ligne dans la console `pnpm tauri dev`, c'est
-    // que le NOUVEAU binaire tourne (sinon tu testes un ancien build / process fantôme).
-    eprintln!("[island/reserved] set_key key={key} enabled={enabled} (build=chefkeys-v4)");
     let _ = APP.set(app.clone());
     WIN_ENABLED.store(enabled, Ordering::SeqCst);
     if !enabled {
