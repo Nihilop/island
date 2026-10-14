@@ -10,6 +10,12 @@ use tauri::AppHandle;
 #[cfg(target_os = "windows")]
 mod windows;
 
+/// Volume principal (niveau, muet), pour les outils intégrés.
+#[cfg(target_os = "windows")]
+pub(crate) fn master_volume() -> Option<(f32, bool)> {
+    windows::volume()
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SysStats {

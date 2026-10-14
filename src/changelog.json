@@ -1,0 +1,19 @@
+[
+  {
+    "version": "2.0.0-alpha.0",
+    "date": "2026-10-13",
+    "highlight": true,
+    "items": {
+      "fr": [
+        "Nouveau notch : forme collée au bord de l'écran, ouverture au survol, dock d'outils.",
+        "Glisse le notch pour le déplacer, épingle-le, ou passe en mode focus (triple-clic pour sortir).",
+        "Réglages intégrés au notch, raccourci d'ouverture configurable."
+      ],
+      "en": [
+        "New notch: shape attached to the screen edge, opens on hover, tool dock.",
+        "Drag the notch to move it, pin it, or switch to focus mode (triple-click to exit).",
+        "Settings built into the notch, configurable open shortcut."
+      ]
+    }
+  }
+]

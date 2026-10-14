@@ -1,0 +1,22 @@
+{
+  "id": "dev.island.github",
+  "name": "GitHub",
+  "version": "0.1.0",
+  "author": "Island",
+  "description": "Revues demandées, PR ouvertes et état de la CI, dans le notch.",
+  "icon": "icons/github.svg",
+  "main": "dist/main.js",
+  "permissions": ["network:api.github.com", "secrets", "notifications"],
+  "contributes": {
+    "tools": [{ "id": "inbox", "title": "GitHub", "icon": "icons/github.svg", "view": "dist/inbox.html", "size": [560, 340] }],
+    "live": [{ "id": "status", "tool": "inbox" }],
+    "launcher": [{ "id": "repos", "prefix": "gh", "title": "GitHub" }],
+    "commands": [{ "id": "refresh", "title": "GitHub : rafraîchir", "shortcut": "Control+Alt+G" }],
+    "settings": [
+      { "key": "token", "type": "secret", "label": "Jeton d'accès", "help": "Jeton GitHub (fine-grained, lecture des PR et des statuts)" },
+      { "key": "interval", "type": "select", "label": "Rafraîchissement", "default": "5", "options": [{ "value": "2", "label": "2 min" }, { "value": "5", "label": "5 min" }, { "value": "15", "label": "15 min" }] },
+      { "key": "notify", "type": "switch", "label": "Notifications", "help": "Nouvelle revue demandée, CI échouée", "default": true }
+    ]
+  },
+  "locales": { "fr": "locales/fr.json", "en": "locales/en.json" }
+}

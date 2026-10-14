@@ -1,3 +1,4 @@
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @import "tailwindcss";
@@ -5,6 +6,10 @@
 @import "tw-animate-css";
 
 @import "shadcn-vue/tailwind.css";
+
+/* Tokens du notch : DOIT être importé ici (même compilation Tailwind) pour que ses
+   @theme / @utility génèrent les classes (bg-fill-1, text-label-3, type-body…). */
+@import "./design/tokens.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -59,79 +64,115 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Thème shadcn calé sur le notch : fond noir, blancs à opacités échelonnées (label / fill),
+   rouge système pour le destructif. Sombre par défaut : `:root` et `.dark` portent les
+   mêmes valeurs ; le clair vit sous `:root.light` (cf. src/notch/theme.ts). */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.527 0.154 150.069);
-    --primary-foreground: oklch(0.982 0.018 155.826);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.871 0.15 154.449);
-    --chart-2: oklch(0.723 0.219 149.579);
-    --chart-3: oklch(0.627 0.194 149.214);
-    --chart-4: oklch(0.527 0.154 150.069);
-    --chart-5: oklch(0.448 0.119 151.328);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.627 0.194 149.214);
-    --sidebar-primary-foreground: oklch(0.982 0.018 155.826);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --background: #000;
+    --foreground: rgb(255 255 255 / 0.96);
+    --card: rgb(255 255 255 / 0.06);
+    --card-foreground: rgb(255 255 255 / 0.96);
+    --popover: #1c1c1e;
+    --popover-foreground: rgb(255 255 255 / 0.96);
+    --primary: rgb(255 255 255 / 0.96);
+    --primary-foreground: #000;
+    --secondary: rgb(255 255 255 / 0.1);
+    --secondary-foreground: rgb(255 255 255 / 0.96);
+    --muted: rgb(255 255 255 / 0.06);
+    --muted-foreground: rgb(255 255 255 / 0.34);
+    --accent: rgb(255 255 255 / 0.1);
+    --accent-foreground: rgb(255 255 255 / 0.96);
+    --destructive: #ff453a;
+    --border: rgb(255 255 255 / 0.08);
+    --input: rgb(255 255 255 / 0.1);
+    --ring: rgb(255 255 255 / 0.16);
+    --chart-1: #30d158;
+    --chart-2: #419cff;
+    --chart-3: #ff9f0a;
+    --chart-4: #ff453a;
+    --chart-5: #ffd60a;
+    --radius: 0.75rem;
+    --sidebar: #000;
+    --sidebar-foreground: rgb(255 255 255 / 0.96);
+    --sidebar-primary: rgb(255 255 255 / 0.96);
+    --sidebar-primary-foreground: #000;
+    --sidebar-accent: rgb(255 255 255 / 0.1);
+    --sidebar-accent-foreground: rgb(255 255 255 / 0.96);
+    --sidebar-border: rgb(255 255 255 / 0.08);
+    --sidebar-ring: rgb(255 255 255 / 0.16);
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.448 0.119 151.328);
-    --primary-foreground: oklch(0.982 0.018 155.826);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.871 0.15 154.449);
-    --chart-2: oklch(0.723 0.219 149.579);
-    --chart-3: oklch(0.627 0.194 149.214);
-    --chart-4: oklch(0.527 0.154 150.069);
-    --chart-5: oklch(0.448 0.119 151.328);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.723 0.219 149.579);
-    --sidebar-primary-foreground: oklch(0.982 0.018 155.826);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --background: #000;
+    --foreground: rgb(255 255 255 / 0.96);
+    --card: rgb(255 255 255 / 0.06);
+    --card-foreground: rgb(255 255 255 / 0.96);
+    --popover: #1c1c1e;
+    --popover-foreground: rgb(255 255 255 / 0.96);
+    --primary: rgb(255 255 255 / 0.96);
+    --primary-foreground: #000;
+    --secondary: rgb(255 255 255 / 0.1);
+    --secondary-foreground: rgb(255 255 255 / 0.96);
+    --muted: rgb(255 255 255 / 0.06);
+    --muted-foreground: rgb(255 255 255 / 0.34);
+    --accent: rgb(255 255 255 / 0.1);
+    --accent-foreground: rgb(255 255 255 / 0.96);
+    --destructive: #ff453a;
+    --border: rgb(255 255 255 / 0.08);
+    --input: rgb(255 255 255 / 0.1);
+    --ring: rgb(255 255 255 / 0.16);
+    --chart-1: #30d158;
+    --chart-2: #419cff;
+    --chart-3: #ff9f0a;
+    --chart-4: #ff453a;
+    --chart-5: #ffd60a;
+    --radius: 0.75rem;
+    --sidebar: #000;
+    --sidebar-foreground: rgb(255 255 255 / 0.96);
+    --sidebar-primary: rgb(255 255 255 / 0.96);
+    --sidebar-primary-foreground: #000;
+    --sidebar-accent: rgb(255 255 255 / 0.1);
+    --sidebar-accent-foreground: rgb(255 255 255 / 0.96);
+    --sidebar-border: rgb(255 255 255 / 0.08);
+    --sidebar-ring: rgb(255 255 255 / 0.16);
+}
+
+/* Thème clair : miroir des tokens du notch (src/design/tokens.css, `:root.light`).
+   Spécificité (0,2,0) → l'emporte sur `.dark`. */
+:root.light {
+    --background: #f5f5f7;
+    --foreground: rgb(0 0 0 / 0.88);
+    --card: rgb(0 0 0 / 0.045);
+    --card-foreground: rgb(0 0 0 / 0.88);
+    --popover: #ffffff;
+    --popover-foreground: rgb(0 0 0 / 0.88);
+    --primary: rgb(0 0 0 / 0.88);
+    --primary-foreground: #fff;
+    --secondary: rgb(0 0 0 / 0.075);
+    --secondary-foreground: rgb(0 0 0 / 0.88);
+    --muted: rgb(0 0 0 / 0.045);
+    --muted-foreground: rgb(0 0 0 / 0.36);
+    --accent: rgb(0 0 0 / 0.075);
+    --accent-foreground: rgb(0 0 0 / 0.88);
+    --destructive: #ff3b30;
+    --border: rgb(0 0 0 / 0.08);
+    --input: rgb(0 0 0 / 0.075);
+    --ring: rgb(0 0 0 / 0.12);
+    --chart-1: #28b14c;
+    --chart-2: #007aff;
+    --chart-3: #ff9500;
+    --chart-4: #ff3b30;
+    --chart-5: #f2b600;
+    --sidebar: #f5f5f7;
+    --sidebar-foreground: rgb(0 0 0 / 0.88);
+    --sidebar-primary: rgb(0 0 0 / 0.88);
+    --sidebar-primary-foreground: #fff;
+    --sidebar-accent: rgb(0 0 0 / 0.075);
+    --sidebar-accent-foreground: rgb(0 0 0 / 0.88);
+    --sidebar-border: rgb(0 0 0 / 0.08);
+    --sidebar-ring: rgb(0 0 0 / 0.12);
 }
 
 @layer base {
@@ -142,6 +183,8 @@
     body {
         @apply bg-background text-foreground;
         @apply font-sans;
+        /* Base 14 px (les vues du notch utilisent les utilitaires type-*). */
+        @apply text-sm;
     }
 
     button:not(:disabled),

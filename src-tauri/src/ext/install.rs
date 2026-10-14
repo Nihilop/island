@@ -354,6 +354,7 @@ pub(crate) fn handle_island_argv(app: &AppHandle, argv: &[String], running: bool
 /// Surveille `%APPDATA%/<identifier>/extensions/` et émet `ext://changed { dir }`
 /// quand un fichier d'un dossier `dist/` change (= une extension a été rebuildée).
 /// Le front recharge alors cette extension (live-reload du `pnpm dev`).
+#[allow(dead_code)] // v2 : gelé avec le loader
 pub(crate) fn start_dist_watcher(app: AppHandle) {
     use notify::RecursiveMode;
     use notify_debouncer_mini::new_debouncer;

@@ -1,74 +1,82 @@
 <script setup lang="ts">
-// Fenêtre overlay unique (transparente, plein écran) : héberge l'île et la modal
-// comme composants d'une même app Vue. Le click-through est géré nativement
-// (poll GetCursorPos côté Rust + régions publiées par chaque surface).
-import { onMounted, computed } from "vue";
+// Fenêtre overlay = fenêtre fixe du notch (760 × 560, haut-centre). v2 : le loader
+// d'extensions est gelé (cf. docs/internal/v2-migration.md) ; Island.vue, la modal et
+// les fenêtres flottantes ne sont plus montés.
+import { onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import Island from "./Island.vue";
-import Modal from "./Modal.vue";
-import FloatWindows from "./FloatWindows.vue";
-import MinimizedDock from "./MinimizedDock.vue";
-import RegionSelect from "./RegionSelect.vue";
-import { loadExtensions } from "../composables/extensions";
-import { selecting, regionOutline, activeView, modalSpec } from "../composables/overlay";
-import { initNotifications } from "../composables/notifications";
-import { initIslandTheme } from "../composables/islandTheme";
-import { initPresence } from "../composables/presence";
-import { initLayout } from "../composables/islandLayout";
-import { checkForUpdate } from "../composables/updater";
+import Notch from "../notch/Notch.vue";
+import { state } from "../notch/state";
+import { registerBuiltinTools } from "../tools/builtin";
+
+import { loadSettings, settings } from "../notch/settings";
+import { initTheme } from "../notch/theme";
+import { startAutoUpdate } from "../composables/updater";
+import { initChangelog } from "../composables/changelog";
+import { initNowPlaying } from "../tools/media/store";
+import { initVault } from "../tools/vault/store";
+import { initTimer } from "../tools/timer/store";
+import { initWeather } from "../tools/weather/store";
+import { initClipboard } from "../tools/clipboard/store";
+import { initShelf } from "../tools/shelf/store";
+import { initDrop } from "../notch/drop";
+import { initHardware } from "../tools/system/store";
+import { initPresentation } from "../notch/presentation";
+import { initDiscord } from "../tools/discord/store";
+import { initGaming } from "../tools/system/gaming";
+import { initAsk } from "../tools/ask/store";
+import { initHello } from "../notch/hello";
+import { initNotifs } from "../tools/notifications/store";
+import { initLauncher } from "../launcher/store";
+import { initExtensions } from "../extensions/runtime";
+import { registerExtensionTools } from "../extensions/tools";
+import { registerExtensionSlots } from "../extensions/slots";
+import "../extensions/settings";
+
+registerBuiltinTools();
+
+// Le notch se monte une fois les réglages chargés (raccourci, outils, style…).
+const ready = ref(false);
+loadSettings().finally(() => {
+  ready.value = true;
+  initTheme();
+  startAutoUpdate(() => settings.autoUpdate);
+  initHello();
+  initNotifs();
+  initLauncher();
+  void initExtensions(registerExtensionTools, registerExtensionSlots);
+  watch(
+    () => settings.vaultTimeout,
+    (seconds) => invoke("vault_set_timeout", { seconds }).catch(() => {}),
+    { immediate: true },
+  );
+});
+initChangelog();
+initNowPlaying();
+initVault();
+initTimer();
+initWeather();
+initClipboard();
+initShelf();
+initDrop();
+initHardware();
+initPresentation();
+initDiscord();
+initGaming();
+initAsk();
 
 onMounted(() => {
-  loadExtensions();
-  initNotifications();
-  initIslandTheme(); // charge le thème de l'île persisté + suit les changements (Réglages)
-  initPresence(); // présence physique (AppBar) : applique + suspend en jeu plein écran
-  initLayout(); // décalage horizontal persistant de l'île (mode édition)
-  // Vérif de mise à jour peu après le démarrage (silencieuse s'il n'y a rien).
-  window.setTimeout(() => void checkForUpdate(), 4000);
 
   // Garde-fou mémoire : si le watchdog Rust signale une conso trop haute, on recharge
-  // l'overlay AU REPOS (rien d'ouvert) → repart propre, réactive les extensions, storage
-  // conservé. Jamais pendant une interaction (view/modal/sélection ouverte).
+  // l'overlay AU REPOS (notch fermé) → repart propre.
   listen<number>("island://reclaim", (e) => {
-    if (activeView.value || modalSpec.value || selecting.value) return; // occupé → on attend le prochain tick
+    if (state.value !== "closed") return; // occupé → on attend le prochain tick
     console.warn(`[island] récupération mémoire (${e.payload} Mo) — rechargement de l'overlay`);
     location.reload();
   });
 });
-
-// Le contour est stocké en px PHYSIQUES → on reconvertit en CSS px (÷ dpr).
-const outlineStyle = computed(() => {
-  const r = regionOutline.value;
-  if (!r) return null;
-  const dpr = window.devicePixelRatio || 1;
-  return {
-    left: r.x / dpr + "px",
-    top: r.y / dpr + "px",
-    width: r.w / dpr + "px",
-    height: r.h / dpr + "px",
-  };
-});
 </script>
 
 <template>
-  <Island />
-  <FloatWindows />
-  <MinimizedDock />
-  <div class="fixed inset-0 w-screen h-screen overflow-hidden bg-transparent">
-    <Modal />
-  </div>
-  <RegionSelect v-if="selecting" />
-  <div
-    v-if="outlineStyle"
-    class="pointer-events-none fixed z-[9998] rounded-[2px] border-2 border-[#ff453a] shadow-[0_0_0_1px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(0,0,0,0.3)] animate-[outline-pulse_1.6s_ease-in-out_infinite]"
-    :style="outlineStyle"
-  ></div>
+  <Notch v-if="ready" />
 </template>
-
-<style scoped>
-/* Keyframes only (non exprimable en classe) — l'animation est appliquée en inline. */
-@keyframes outline-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-</style>

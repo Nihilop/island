@@ -114,6 +114,11 @@ pub fn search(query: &str, roots: Vec<String>, limit: usize) -> Vec<FileEntry> {
     home_search(q, &roots, limit)
 }
 
+/// Everything seul (None = pas lancé) : source « tout le disque » du launcher.
+pub(crate) fn everything_search(query: &str, limit: usize) -> Option<Vec<FileEntry>> {
+    everything::search(query, limit)
+}
+
 /// True si une instance Everything tourne (pour l'afficher dans les réglages de Flow).
 pub fn everything_available() -> bool {
     everything::is_running()

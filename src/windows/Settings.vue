@@ -11,9 +11,7 @@ import {
 } from "@island/sdk";
 import { discoverManifests, getEnabled, setEnabled } from "../composables/extensions";
 import { islandTheme, setIslandTheme, initIslandTheme, islandAccent, setIslandAccent, type IslandTheme } from "../composables/islandTheme";
-import { physicalPresence, setPhysicalPresence, loadPresence } from "../composables/presence";
 import { t } from "../composables/i18n";
-import { updateState, checkForUpdate, applyUpdate } from "../composables/updater";
 import { getVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "@/stores/appStore.ts";
 import { storeToRefs } from "pinia";
@@ -92,7 +90,6 @@ async function pickAndInstall() {
 
 onMounted(async () => {
   initIslandTheme(); // charge le style de l'île persisté + suit les changements cross-fenêtre
-  loadPresence(); // charge l'état de la présence physique (bandeau réservé)
   getVersion().then((v) => (version.value = v)).catch(() => {});
   await loadRows();
   // Une install (modal) émet ext://reload → on rafraîchit la liste sans recharger la page.
@@ -158,13 +155,6 @@ onMounted(async () => {
           </div>
           <div class="flex items-center justify-between gap-4 py-3.5 border-b">
             <div>
-              <div class="text-[14px]">Présence physique</div>
-              <div class="text-[12px] opacity-50 mt-0.5">Réserve un bandeau en haut : l'île reste visible même sous les fenêtres maximisées</div>
-            </div>
-            <Switch :model-value="physicalPresence" @update:model-value="setPhysicalPresence" />
-          </div>
-          <div class="flex items-center justify-between gap-4 py-3.5 border-b">
-            <div>
               <div class="text-[14px]">{{ t('general.accent.title') }}</div>
               <div class="text-[12px] opacity-50 mt-0.5">{{ t('general.accent.desc') }}</div>
             </div>
@@ -192,23 +182,6 @@ onMounted(async () => {
                 </SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div class="flex items-center justify-between gap-4 py-3.5 border-b">
-            <div>
-              <div class="text-[14px]">{{ t('general.updates.title') }}</div>
-              <div class="text-[12px] opacity-50 mt-0.5">
-                {{ t('general.updates.current', { v: version || '…' }) }}
-                <span v-if="updateState.status === 'uptodate'"> · {{ t('updates.uptodate') }}</span>
-                <span v-else-if="updateState.status === 'available'" class="text-primary"> · {{ t('updates.available', { v: updateState.version }) }}</span>
-                <span v-else-if="updateState.status === 'error'" class="text-destructive"> · {{ t('updates.error') }}</span>
-              </div>
-            </div>
-            <div class="flex items-center gap-2">
-              <Button v-if="updateState.status === 'available'" @click="applyUpdate">{{ t('updates.install') }}</Button>
-              <Button variant="outline" :disabled="updateState.status === 'checking' || updateState.status === 'installing'" @click="checkForUpdate(false)">
-                {{ updateState.status === 'checking' ? t('updates.checking') : updateState.status === 'installing' ? t('updates.installing') : t('updates.check') }}
-              </Button>
-            </div>
           </div>
         </section>
 

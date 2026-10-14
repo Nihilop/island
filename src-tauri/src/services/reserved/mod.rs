@@ -10,7 +10,7 @@
 use tauri::AppHandle;
 
 #[cfg(target_os = "windows")]
-mod windows;
+pub(crate) mod windows;
 
 /// Active/désactive la capture d'une touche réservée pour une extension.
 /// `key` = identifiant logique ("Super"/"Win" = touche Windows).

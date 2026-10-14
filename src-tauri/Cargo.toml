@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "0.7.7"
+version = "2.0.0-alpha.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -32,11 +32,20 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 notify = "6"
 notify-debouncer-mini = "0.4"
 sysinfo = "0.32"
-ureq = { version = "2", features = ["cookies"] } # HTTP natif côté hôte : téléchargement de binaires + client cookie-jar par extension (comme dio/cookie_jar de Flutter)
+rustfft = "6" # FFT de l'égaliseur (niveaux par bande)
+hmac = "0.12" # TOTP du coffre (RFC 6238)
+sha1 = "0.10"
+sha2 = "0.10" # TOTP + vérif SHA-256 du CLI Bitwarden téléchargé
+aes-gcm = "0.10" # Windows Hello : scellement AES-256-GCM
+x25519-dalek = { version = "2", features = ["static_secrets"] } # Windows Hello : scellement sans invite
+getrandom = "0.2"
+rqrr = "0.9" # décodage des QR 2FA collés dans le coffre
+ureq = { version = "2", features = ["cookies", "json"] } # HTTP natif côté hôte : téléchargement de binaires + client cookie-jar par extension (comme dio/cookie_jar de Flutter)
 cookie_store = "0.21" # persistance du cookie-jar par extension (session conservée entre redémarrages)
 arboard = "3" # presse-papiers cross-platform (texte + image) exposé aux extensions
 base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers, flux PTY)
-png = "0.17" # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
+png = "0.17"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] } # vignettes (presse-papiers, étagère) # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
 portable-pty = "0.8" # terminaux PTY (ConPTY sous Windows) exposés aux extensions (perm `terminal`)
 minisign-verify = "0.2" # vérif (pure Rust) de la signature minisign des paquets .island
 
@@ -48,6 +57,7 @@ version = "1"
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] } # Credential Manager
 winreg = "0.52"
+webview2-com = "0.38" # niveau mémoire WebView2 (notch fermé → « Low »)
 windows = { version = "0.61", features = [
   "Foundation",
   "Foundation_Collections",
@@ -67,6 +77,29 @@ windows = { version = "0.61", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_Graphics_Gdi",
   "Win32_UI_Shell",
+  "Win32_System_LibraryLoader",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Memory",
+  "UI_Shell",
+  "Win32_System_Performance",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_Networking_WinSock",
+  "Win32_System_Registry",
+  "Win32_System_Pipes",
+  "Win32_System_Diagnostics_Etw",
+  "Win32_System_Time",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Security_Credentials",
+  "UI_Notifications",
+  "Win32_System_Shutdown",
+  "Win32_System_Diagnostics_ToolHelp",
+  "UI_Notifications_Management",
+  "ApplicationModel",
+  "Security_Cryptography",
 ] }
 
 # Secrets : Keychain (macOS) / Secret Service (Linux). Permet au crate de compiler

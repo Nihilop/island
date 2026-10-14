@@ -24,21 +24,36 @@ pub(crate) fn write_store(app: &AppHandle, ext: &str, map: &serde_json::Map<Stri
     }
 }
 
+/// Sérialise les lecture-modification-écriture : les commandes Tauri tournent en
+/// parallèle et l'hôte Rust écrit aussi dans `__app__` (placement du notch).
+static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub(crate) fn get(app: &AppHandle, ext: &str, key: &str) -> Option<serde_json::Value> {
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    read_store(app, ext).get(key).cloned()
+}
+
+pub(crate) fn set(app: &AppHandle, ext: &str, key: &str, value: Option<serde_json::Value>) {
+    let _g = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut m = read_store(app, ext);
+    match value {
+        Some(v) => m.insert(key.to_string(), v),
+        None => m.remove(key),
+    };
+    write_store(app, ext, &m);
+}
+
 #[tauri::command]
 pub fn storage_get(app: AppHandle, ext: String, key: String) -> Option<serde_json::Value> {
-    read_store(&app, &ext).get(&key).cloned()
+    get(&app, &ext, &key)
 }
 #[tauri::command]
 pub fn storage_set(app: AppHandle, ext: String, key: String, value: serde_json::Value) {
-    let mut m = read_store(&app, &ext);
-    m.insert(key, value);
-    write_store(&app, &ext, &m);
+    set(&app, &ext, &key, Some(value));
 }
 #[tauri::command]
 pub fn storage_delete(app: AppHandle, ext: String, key: String) {
-    let mut m = read_store(&app, &ext);
-    m.remove(&key);
-    write_store(&app, &ext, &m);
+    set(&app, &ext, &key, None);
 }
 #[tauri::command]
 pub fn storage_keys(app: AppHandle, ext: String) -> Vec<String> {

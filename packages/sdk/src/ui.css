@@ -1,0 +1,177 @@
+/* Kit UI des extensions Island : mêmes couleurs et typographie que le notch (thème sombre
+   par défaut, classe `light` posée par le SDK). Fond transparent : la vue est posée dans
+   le notch. */
+:root {
+  color-scheme: dark;
+  --label: #fff;
+  --label-2: rgb(255 255 255 / 0.62);
+  --label-3: rgb(255 255 255 / 0.42);
+  --fill-1: rgb(255 255 255 / 0.06);
+  --fill-2: rgb(255 255 255 / 0.1);
+  --fill-3: rgb(255 255 255 / 0.16);
+  --separator: rgb(255 255 255 / 0.1);
+  --green: #30d158;
+  --orange: #ff9f0a;
+  --red: #ff453a;
+  --blue: #419cff;
+  --purple: #bf5af2;
+}
+:root.light {
+  color-scheme: light;
+  --label: #000;
+  --label-2: rgb(0 0 0 / 0.6);
+  --label-3: rgb(0 0 0 / 0.42);
+  --fill-1: rgb(0 0 0 / 0.04);
+  --fill-2: rgb(0 0 0 / 0.07);
+  --fill-3: rgb(0 0 0 / 0.12);
+  --separator: rgb(0 0 0 / 0.1);
+  --green: #248a3d;
+  --orange: #c93400;
+  --red: #d70015;
+  --blue: #0066cc;
+  --purple: #8944ab;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--label);
+  font: 13px/1.4 "Inter Variable", "Segoe UI Variable Text", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fill-3);
+  border-radius: 3px;
+}
+.caption {
+  font-size: 11px;
+  color: var(--label-3);
+}
+.muted {
+  color: var(--label-2);
+}
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--fill-1);
+  cursor: default;
+  transition: background 120ms ease-out;
+}
+.item:hover {
+  background: var(--fill-2);
+}
+.item .grow {
+  min-width: 0;
+  flex: 1;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--fill-2);
+  color: var(--label);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 120ms ease-out,
+    scale 120ms ease-out;
+}
+.btn:hover {
+  background: var(--fill-3);
+}
+.btn:active {
+  scale: 0.97;
+}
+.btn.primary {
+  background: var(--label);
+  color: #000;
+}
+:root.light .btn.primary {
+  color: #fff;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--fill-2);
+  color: var(--label-2);
+}
+.badge.green {
+  color: var(--green);
+}
+.badge.orange {
+  color: var(--orange);
+}
+.badge.red {
+  color: var(--red);
+}
+.badge.blue {
+  color: var(--blue);
+}
+.badge.purple {
+  color: var(--purple);
+}
+.empty {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--label-3);
+  gap: 8px;
+}
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fill-1);
+  gap: 2px;
+}
+.seg button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--label-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--fill-3);
+  color: var(--label);
+}

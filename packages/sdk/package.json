@@ -1,0 +1,11 @@
+{
+  "name": "@island/sdk",
+  "version": "2.0.0-alpha.0",
+  "description": "SDK des extensions Island v2 (client du canal hôte, kit UI).",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui.css": "./src/ui.css"
+  }
+}

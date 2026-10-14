@@ -19,7 +19,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     data-slot="slider"
     :data-vertical="props.orientation === 'vertical' ? '' : undefined"
     :class="cn(
-      'data-vertical:min-h-40 relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:w-auto data-vertical:flex-col',
+      'group/slider relative flex h-4 w-full touch-none select-none items-center data-disabled:opacity-35',
       props.class,
     )"
     v-bind="forwarded"
@@ -28,13 +28,13 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       data-slot="slider-track"
       :data-horizontal="props.orientation !== 'vertical' ? '' : undefined"
       :data-vertical="props.orientation === 'vertical' ? '' : undefined"
-      class="bg-input/90 rounded-full data-horizontal:h-2 data-vertical:w-2 relative grow overflow-hidden data-horizontal:w-full data-vertical:h-full"
+      class="relative h-[5px] grow overflow-hidden rounded-full bg-fill-2 transition-[height] duration-150 group-hover/slider:h-[9px] group-active/slider:h-[9px]"
     >
       <SliderRange
         data-slot="slider-range"
         :data-horizontal="props.orientation !== 'vertical' ? '' : undefined"
         :data-vertical="props.orientation === 'vertical' ? '' : undefined"
-        class="bg-primary absolute select-none data-horizontal:h-full data-vertical:w-full"
+        class="absolute h-full bg-label-2 transition-colors duration-150 group-hover/slider:bg-label group-active/slider:bg-label"
       />
     </SliderTrack>
 
@@ -43,7 +43,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       :key="key"
       data-slot="slider-thumb"
       :data-vertical="props.orientation === 'vertical' ? '' : undefined"
-      class="ring-black/10 not-dark:bg-clip-padding ring-1 h-4 w-6 rounded-full bg-white shadow-md transition-[color,box-shadow,background-color] hover:ring-4 hover:ring-ring/30 focus-visible:ring-4 focus-visible:ring-ring/30 focus-visible:outline-hidden data-vertical:h-6 data-vertical:w-4 block shrink-0 select-none disabled:pointer-events-none disabled:opacity-50"
+      class="block size-0 opacity-0 outline-none"
     />
   </SliderRoot>
 </template>

@@ -12,7 +12,8 @@ import {
 import { setIdleState, setIdleCenter, setIdleAction, setIdleTap, type IdleAction } from "./composables/idle";
 import { setLauncherEntry, setLauncherProvider, type LauncherEntry, type LauncherProvider } from "./composables/launcher";
 import { registerShortcut, unregisterShortcut } from "./composables/shortcuts";
-import { post as postNotif, markRead, clearUnread, type NotifSpec } from "./composables/notifications";
+import { notify, dismiss as dismissNotif, notifs as notifStore } from "./tools/notifications/store";
+import type { NotificationSpec } from "./sdk/island";
 import { busEmit, busOn } from "./composables/bus";
 import type { Component } from "vue";
 import type { IdleState } from "./sdk";
@@ -45,9 +46,19 @@ export function installBridge() {
     },
     selectRegion: () => selectRegion(),
     showRegionOutline: (r: Region | null) => showRegionOutline(r),
-    notify: (spec: NotifSpec) => postNotif(spec),
-    dismissNotification: (id: string) => markRead(id),
-    clearNotifications: () => clearUnread(),
+    // Ancien contrat d'extension → API unifiée (icône SVG → data URL, timeout 0 =
+    // historique seul, onClick → action de la carte).
+    notify: (spec: NotificationSpec) =>
+      notify({
+        title: spec.title,
+        body: spec.body,
+        app: spec.source,
+        icon: spec.icon ? `data:image/svg+xml;utf8,${encodeURIComponent(spec.icon)}` : null,
+        banner: spec.timeout !== 0,
+        action: spec.onClick ? { label: spec.actions?.[0]?.label ?? "Ouvrir", run: spec.onClick } : undefined,
+      }),
+    dismissNotification: (id: string) => void dismissNotif(id),
+    clearNotifications: () => void (notifStore.island = []),
     busEmit: (channel: string, payload: unknown) => busEmit(channel, payload),
     busOn: (channel: string, handler: (payload: any) => void, owner?: string) => busOn(channel, handler, owner),
   };

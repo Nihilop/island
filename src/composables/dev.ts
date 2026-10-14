@@ -7,7 +7,7 @@
 // L'état (pin + surface forcée) est persisté en localStorage → il SURVIT au HMR : on
 // épingle/ouvre une fois, et chaque save remet la surface en place.
 import { ref, h } from "vue";
-import { post, clearUnread } from "./notifications";
+import { notify } from "../tools/notifications/store";
 import { cycleIslandTheme } from "./islandTheme";
 import {
   openModal, closeModal, modalSpec,
@@ -36,10 +36,10 @@ export function devSetForce(f: string) { devForce.value = f; persist(); }
 // --- Contenu de démo (surfaces de design) ---------------------------------------
 const ICON = "<svg viewBox='0 0 24 24'><path fill='currentColor' d='M12 2a6 6 0 0 0-6 6v3.4l-1.7 3A1 1 0 0 0 5.2 16h13.6a1 1 0 0 0 .9-1.6L18 11.4V8a6 6 0 0 0-6-6z'/></svg>";
 export function devSeedNotifs() {
-  clearUnread();
-  post({ title: "Spotify", body: "Bohemian Rhapsody — Queen", icon: ICON, color: "#1db954", source: "now", timeout: 0 });
-  post({ title: "Capture", body: "Enregistrement de zone terminé", icon: ICON, color: "#ff453a", source: "2 min", timeout: 0 });
-  post({ title: "Aniplex", body: "Nouvel épisode disponible", icon: ICON, color: "#6366f1", source: "1 h", timeout: 0 });
+  const icon = `data:image/svg+xml;utf8,${encodeURIComponent(ICON)}`;
+  notify({ app: "Spotify", title: "Bohemian Rhapsody", body: "Queen", icon, banner: false });
+  notify({ app: "Capture", title: "Enregistrement de zone terminé", icon, banner: false });
+  notify({ app: "Aniplex", title: "Nouvel épisode disponible", icon });
 }
 
 // Modal de démo : exerce le kit UI déclaratif (UiNode) → représentatif du chrome réel.
@@ -80,7 +80,7 @@ function openDemoWindow() {
 }
 function resetAll(setFormat: (f: string) => void) {
   devSetForce(""); devSetPin(false);
-  closeModal(); closeWindow(); clearUnread();
+  closeModal(); closeWindow();
   setFormat("idle");
 }
 

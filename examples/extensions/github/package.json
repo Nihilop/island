@@ -1,0 +1,8 @@
+{
+  "name": "island-extension-github",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  }
+}
