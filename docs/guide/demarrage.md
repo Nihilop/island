@@ -1,57 +1,87 @@
-# 2. Démarrage rapide
+# Démarrage rapide
 
-## Le plus rapide : générer depuis un template
+Objectif : une extension minimale, chargée dans Island en mode développeur.
 
-Dans Island : **tray → Réglages → Extensions → « Créer une extension »**. Choisis un
-template, donne un nom → un projet prêt à coder est généré dans le dossier des
-extensions.
+## 1. Partir de l'exemple
 
-- **Minimal** : une seule `view`, le strict nécessaire.
-- **Complet** : `view` + `config` (modal), compteur persistant (`storage`),
-  contribution idle et notification — une vitrine du SDK.
-
-Les placeholders `__EXT_ID__` / `__EXT_NAME__` / `__EXT_SLUG__` sont substitués à la
-génération. Les templates de référence vivent dans `src-tauri/templates/{minimal,complete}/`.
-
-## Où vit une extension
-
-Le dossier des extensions installées **EST** l'espace de dev (on code en place) :
+Le plus simple est de copier `examples/extensions/github` du dépôt, puis de l'alléger. Une
+extension minimale contient :
 
 ```
-%APPDATA%\com.nihil.island\extensions\<id>\
+mon-extension/
+├─ manifest.json
+├─ icons/icon.svg          ← icône monochrome (teintée par Island)
+├─ hello.html              ← vue d'outil
+├─ src/main.ts             ← logique (tourne en fond)
+├─ src/hello.ts            ← script de la vue
+└─ vite.config.ts
 ```
 
-soit `C:\Users\<toi>\AppData\Roaming\com.nihil.island\extensions\<id>\`.
+## 2. Le manifeste
 
-> ⚠️ Le dossier de config utilise l'**identifier** Tauri (`com.nihil.island`), pas
-> « island ». C'est un piège classique.
+```json
+{
+  "id": "dev.moi.hello",
+  "name": "Hello",
+  "version": "0.1.0",
+  "icon": "icons/icon.svg",
+  "main": "dist/main.js",
+  "permissions": ["notifications"],
+  "contributes": {
+    "tools": [{ "id": "hello", "title": "Hello", "view": "dist/hello.html", "size": [480, 240] }],
+    "live": [{ "id": "status", "tool": "hello" }]
+  }
+}
+```
 
-Island scanne ce dossier au démarrage. Une extension qui contient un `package.json`
-est marquée **dev** (badge + bouton « Packager » dans les Réglages). Un `.island`
-packagé ne contient que `manifest.json` + `dist/`.
+L'`id` est un nom de domaine inversé (`a-z`, `0-9`, `-`, au moins deux segments). Détails
+dans [Manifeste & build](./manifeste).
 
-## Le cycle de dev
+## 3. La logique
 
-1. Ouvre un terminal dans le dossier de l'extension.
-2. `pnpm install` puis **`pnpm dev`** (= `vite build --watch` → reconstruit `dist/` à
-   chaque sauvegarde).
-3. Dans Island : **Réglages → Extensions** → active l'extension.
-4. Ouvre le launcher sur l'île → clique ton entrée → ta `view` s'affiche.
+```ts
+// src/main.ts
+import { connect } from "@island/sdk";
 
-### Live-reload
+const island = await connect();
+await island.live.set("status", { text: "Hi", color: "green" });
+await island.notify({ title: "Hello est prêt" });
+```
 
-- En **dev** (Island lancé via `pnpm tauri dev`) : un watcher de l'hôte surveille les
-  `dist/`. Dès que `vite build --watch` réécrit ton build, l'extension est **rechargée
-  à chaud** — pas de redémarrage.
-- En **prod** (Island installé) : le `dist/` est lu et importé via une Blob URL. Pas de
-  Vite requis.
+## 4. La vue
 
-> Une extension ajoutée pendant qu'Island tourne : rouvre les Réglages (re-scan) pour
-> la voir apparaître, puis active-la. La (dés)activation est gérée à chaud
-> (reconciliation runtime), sans redémarrage.
+```html
+<!-- hello.html -->
+<!doctype html>
+<meta charset="utf-8" />
+<div id="app"></div>
+<script type="module" src="./src/hello.ts"></script>
+```
 
-## Et ensuite
+```ts
+// src/hello.ts
+import "@island/sdk/ui.css";
+import { connect } from "@island/sdk";
 
-Tu as une extension qui tourne. Pour comprendre chaque fichier et le contrat de build
-(externals `vue`/`@island/sdk`, Tailwind) → [Anatomie & contrat de build](03-anatomie-et-build.md).
-Pour l'API → [Le SDK](04-le-sdk.md).
+const island = await connect();
+document.getElementById("app")!.innerHTML = `<div class="empty">Bonjour depuis ${island.id}</div>`;
+```
+
+## 5. Build
+
+```bash
+node ../../../node_modules/vite/bin/vite.js build
+```
+
+(depuis le dossier de l'extension, avec la config Vite de l'exemple — voir
+[Manifeste & build](./manifeste#build-avec-vite)).
+
+## 6. Charger dans Island
+
+1. **Réglages › Extensions › Mode développeur** : activer.
+2. **Ajouter un dossier** : choisir le dossier de l'extension (celui qui contient
+   `manifest.json`).
+3. L'extension apparaît avec le badge **Dév.** ; son outil rejoint la fin du dock.
+4. Après un nouveau build : bouton **Recharger** à côté de l'extension.
+
+En mode développeur, les permissions sont celles du manifeste (pas de consentement).

@@ -1,0 +1,13 @@
+{
+  "id": "dev.island.isolation",
+  "name": "Isolation (test)",
+  "version": "0.1.0",
+  "author": "Island",
+  "description": "Vérifie qu'une extension v2 est bien isolée de l'app.",
+  "icon": "icon.svg",
+  "main": "main.js",
+  "permissions": [],
+  "contributes": {
+    "tools": [{ "id": "report", "title": "Isolation", "icon": "icon.svg", "view": "view.html", "size": [560, 360] }]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "tab.reviews": "À revoir",
+  "tab.mine": "Mes PR",
+  "refresh": "Rafraîchir",
+  "loading": "Chargement…",
+  "noToken": "Ajoute un jeton GitHub dans Réglages › Extensions › GitHub.",
+  "badToken": "Jeton refusé par GitHub : vérifie-le dans Réglages › Extensions.",
+  "error": "GitHub ne répond pas ({msg})",
+  "empty.reviews": "Aucune revue demandée",
+  "empty.mine": "Aucune PR ouverte",
+  "ci.success": "CI ok",
+  "ci.failure": "CI échouée",
+  "ci.pending": "CI en cours",
+  "draft": "Brouillon",
+  "updated": "mis à jour {age}",
+  "age.now": "à l'instant",
+  "age.min": "il y a {n} min",
+  "age.hour": "il y a {n} h",
+  "age.day": "il y a {n} j",
+  "notify.review": "Revue demandée : {repo}",
+  "notify.ciFailed": "CI échouée : {repo}"
+}

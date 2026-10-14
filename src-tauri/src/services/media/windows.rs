@@ -1,83 +1,50 @@
-//! Contrôleur média natif (Windows SMTC) — AGNOSTIQUE (aucune app en dur).
+//! Lecture en cours (Windows GSMTC) — agnostique : couvre tout ce que Windows affiche dans
+//! son flyout média (Spotify, navigateurs, Apple Music, VLC…).
 //!
-//! Suit la **session média active de l'OS** (`GetCurrentSession` : l'app que
-//! Windows considère comme courante — Spotify, Deezer, un navigateur…) via
-//! `GlobalSystemMediaTransportControlsSessionManager`, et expose les contrôles
-//! transport (play/pause/suivant/préc./seek). Le volume cible la session audio
-//! Windows (WASAPI / ISimpleAudioVolume) du **process derrière cette session
-//! courante** — identifié dynamiquement depuis son AUMID.
+//! Poll toutes les 400 ms (plus robuste aux changements de session que les events WinRT).
+//! Choix de la session affichée : une session EN LECTURE gagne (la « courante » de Windows,
+//! puis l'app déjà affichée, puis n'importe laquelle) ; si rien ne joue, on GARDE l'app
+//! affichée (une pause par touche média ne fait pas sauter vers une autre app). Les
+//! commandes visent l'app affichée, pas la « courante ».
 //!
-//! Tout le WinRT/COM vit sur un thread MTA dédié ; le front pilote via des
-//! commandes Tauri et reçoit l'état par l'event `media://update`.
+//! Émission `np://update` seulement si un champ visible change ou si la position dérive de
+//! plus de 1,5 s par rapport à l'extrapolation (= seek).
 
 use std::sync::mpsc::{self, Sender};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use tauri::{AppHandle, Emitter};
 
-use windows::core::Interface;
+use windows::core::HSTRING;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session,
     GlobalSystemMediaTransportControlsSessionManager as Manager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 };
 use windows::Storage::Streams::DataReader;
-use windows::Win32::Foundation::CloseHandle;
-use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
-    ISimpleAudioVolume, MMDeviceEnumerator,
-};
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
-};
-use windows::Win32::System::Threading::{
-    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION,
-};
+use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+
+use super::NowPlaying;
 
 enum Ctl {
     Toggle,
     Next,
     Prev,
-    Seek(i64), // ms
+    Seek(f64), // secondes
 }
 
 static CONTROL: OnceLock<Sender<Ctl>> = OnceLock::new();
+/// Dernier état émis (lu par `snapshot` quand une vue se monte).
+static LAST: Mutex<Option<NowPlaying>> = Mutex::new(None);
+/// AUMID de l'app affichée.
+static SHOWN: Mutex<Option<String>> = Mutex::new(None);
 
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MediaUpdate {
-    active: bool,
-    title: Option<String>,
-    artist: Option<String>,
-    is_playing: bool,
-    position_ms: i64,
-    duration_ms: i64,
-    /// Data-URL de la pochette — fournie uniquement quand le titre change.
-    art: Option<String>,
-    /// App source du média (jeton normalisé de l'AUMID, ex. "spotify", "msedge") →
-    /// permet à une extension dédiée (Spotify) de ne réagir QU'À son app.
-    source: Option<String>,
-}
+const POLL: Duration = Duration::from_millis(400);
+const ART_WINDOW: Duration = Duration::from_secs(10);
+const DRIFT: f64 = 1.5;
 
-impl MediaUpdate {
-    fn inactive() -> Self {
-        MediaUpdate {
-            active: false,
-            title: None,
-            artist: None,
-            is_playing: false,
-            position_ms: 0,
-            duration_ms: 0,
-            art: None,
-            source: None,
-        }
-    }
-}
-
-/// Démarre le thread contrôleur (MTA) : poll de l'état + exécution des contrôles.
 pub fn start(app: AppHandle) {
     let (tx, rx) = mpsc::channel::<Ctl>();
     let _ = CONTROL.set(tx);
@@ -86,37 +53,42 @@ pub fn start(app: AppHandle) {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let mut last_title = String::new();
-        // Gestionnaire SMTC obtenu UNE FOIS puis réutilisé (au lieu d'un `RequestAsync`
-        // par poll = ~1 alloc WinRT toutes les 700 ms). Retry paresseux tant qu'absent.
         let mut mgr: Option<Manager> = None;
+        let mut st = PollState::default();
         loop {
             if mgr.is_none() {
                 mgr = Manager::RequestAsync().ok().and_then(|op| op.get().ok());
+                if mgr.is_none() {
+                    std::thread::sleep(Duration::from_secs(2));
+                    continue;
+                }
             }
-            match rx.recv_timeout(Duration::from_millis(700)) {
+            let m = mgr.as_ref().unwrap();
+            match rx.recv_timeout(POLL) {
                 Ok(c) => {
-                    if let Some(m) = mgr.as_ref() {
-                        run_ctl(m, c);
-                        if let Some(u) = read_update(m, &mut last_title) {
-                            let _ = app.emit("media://update", u);
-                        }
+                    if let Some(s) = shown_session(m) {
+                        run_ctl(&s, c);
                     }
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if let Some(m) = mgr.as_ref() {
-                        if let Some(u) = read_update(m, &mut last_title) {
-                            let _ = app.emit("media://update", u);
-                        }
-                    }
-                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+            match poll(m, &mut st) {
+                Ok(Some(np)) => {
+                    *LAST.lock().unwrap_or_else(|p| p.into_inner()) = Some(np.clone());
+                    let _ = app.emit("np://update", np);
+                }
+                Ok(None) => {}
+                // Le manager ne répond plus (ex. redémarrage de l'Explorateur) → recréé.
+                Err(()) => mgr = None,
             }
         }
     });
 }
 
-// --- Commandes (appelées depuis lib.rs) -------------------------------------
+pub fn snapshot() -> Option<NowPlaying> {
+    LAST.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
 
 pub fn toggle() {
     send(Ctl::Toggle);
@@ -127,8 +99,8 @@ pub fn next() {
 pub fn prev() {
     send(Ctl::Prev);
 }
-pub fn seek(position_ms: i64) {
-    send(Ctl::Seek(position_ms));
+pub fn seek(seconds: f64) {
+    send(Ctl::Seek(seconds));
 }
 
 fn send(c: Ctl) {
@@ -137,89 +109,172 @@ fn send(c: Ctl) {
     }
 }
 
-/// Volume : opérations COM courtes, isolées sur leur propre thread MTA.
-pub fn get_volume() -> f32 {
-    std::thread::spawn(|| {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            read_volume().unwrap_or(-1.0)
-        }
-    })
-    .join()
-    .unwrap_or(-1.0)
-}
-
-pub fn set_volume(level: f32) {
-    std::thread::spawn(move || unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        write_volume(level.clamp(0.0, 1.0));
-    });
-}
-
-// --- SMTC -------------------------------------------------------------------
-
-// Session média ACTIVE selon l'OS (peu importe l'app), depuis le gestionnaire mis en cache.
-fn run_ctl(mgr: &Manager, c: Ctl) {
-    if let Ok(s) = mgr.GetCurrentSession() {
-        let _ = match c {
-            Ctl::Toggle => s.TryTogglePlayPauseAsync().and_then(|o| o.get()),
-            Ctl::Next => s.TrySkipNextAsync().and_then(|o| o.get()),
-            Ctl::Prev => s.TrySkipPreviousAsync().and_then(|o| o.get()),
-            Ctl::Seek(ms) => s
-                .TryChangePlaybackPositionAsync(ms * 10_000)
-                .and_then(|o| o.get()),
-        };
-    }
-}
-
-fn read_update(mgr: &Manager, last_title: &mut String) -> Option<MediaUpdate> {
-    let session = match mgr.GetCurrentSession().ok() {
-        Some(s) => s,
-        None => {
-            last_title.clear();
-            return Some(MediaUpdate::inactive());
+fn run_ctl(s: &Session, c: Ctl) {
+    let _ = match c {
+        Ctl::Toggle => s.TryTogglePlayPauseAsync().and_then(|o| o.get()),
+        Ctl::Next => s.TrySkipNextAsync().and_then(|o| o.get()),
+        Ctl::Prev => s.TrySkipPreviousAsync().and_then(|o| o.get()),
+        Ctl::Seek(secs) => {
+            let start = s.GetTimelineProperties().and_then(|t| t.StartTime()).map(|d| d.Duration).unwrap_or(0);
+            s.TryChangePlaybackPositionAsync(start + (secs * 1e7) as i64).and_then(|o| o.get())
         }
     };
-
-    let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
-    let title = props.Title().map(|h| h.to_string()).unwrap_or_default();
-    let artist = props.Artist().map(|h| h.to_string()).unwrap_or_default();
-
-    let timeline = session.GetTimelineProperties().ok()?;
-    let position_ms = timeline.Position().map(|t| t.Duration / 10_000).unwrap_or(0);
-    let duration_ms = timeline.EndTime().map(|t| t.Duration / 10_000).unwrap_or(0);
-
-    let is_playing = session
-        .GetPlaybackInfo()
-        .and_then(|p| p.PlaybackStatus())
-        .map(|s| s == PlaybackStatus::Playing)
-        .unwrap_or(false);
-
-    let mut art = None;
-    if title != *last_title {
-        art = read_thumb(&session);
-        *last_title = title.clone();
-    }
-
-    let source = session
-        .SourceAppUserModelId()
-        .ok()
-        .map(|h| normalize_app_hint(&h.to_string()));
-
-    Some(MediaUpdate {
-        active: true,
-        title: Some(title),
-        artist: Some(artist),
-        is_playing,
-        position_ms,
-        duration_ms,
-        art,
-        source,
-    })
 }
 
-fn read_thumb(session: &Session) -> Option<String> {
-    let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+fn aumid(s: &Session) -> String {
+    s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
+}
+
+fn is_playing(s: &Session) -> bool {
+    s.GetPlaybackInfo()
+        .and_then(|p| p.PlaybackStatus())
+        .map(|st| st == PlaybackStatus::Playing)
+        .unwrap_or(false)
+}
+
+/// Session de l'app affichée (pour les commandes).
+fn shown_session(mgr: &Manager) -> Option<Session> {
+    let want = SHOWN.lock().unwrap_or_else(|p| p.into_inner()).clone()?;
+    mgr.GetSessions().ok()?.into_iter().find(|s| aumid(s) == want)
+}
+
+/// Choisit la session à afficher (cf. en-tête du module).
+fn pick(mgr: &Manager) -> Result<Option<Session>, ()> {
+    let sessions: Vec<Session> = mgr.GetSessions().map_err(|_| ())?.into_iter().collect();
+    let current = mgr.GetCurrentSession().ok();
+    let shown = SHOWN.lock().unwrap_or_else(|p| p.into_inner()).clone();
+
+    if let Some(c) = current.as_ref().filter(|c| is_playing(c)) {
+        return Ok(Some(c.clone()));
+    }
+    if let Some(s) = shown.as_ref().and_then(|w| sessions.iter().find(|s| &aumid(s) == w && is_playing(s))) {
+        return Ok(Some(s.clone()));
+    }
+    if let Some(s) = sessions.iter().find(|s| is_playing(s)) {
+        return Ok(Some(s.clone()));
+    }
+    if let Some(s) = shown.as_ref().and_then(|w| sessions.iter().find(|s| &aumid(s) == w)) {
+        return Ok(Some(s.clone()));
+    }
+    Ok(current)
+}
+
+#[derive(Default)]
+struct PollState {
+    /// Clé de piste (app + titre + artiste) : relance la lecture de la pochette.
+    track: String,
+    track_since: Option<Instant>,
+    art: Option<String>,
+    last_art_read: Option<Instant>,
+    /// Dernière émission + instant, pour l'extrapolation de la dérive.
+    emitted: Option<(NowPlaying, Instant)>,
+}
+
+/// Horloge système en ticks de 100 ns depuis 1601 (même base que `LastUpdatedTime`).
+fn now_ticks() -> i64 {
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64 / 100)
+        .unwrap_or(0);
+    unix + 11_644_473_600 * 10_000_000
+}
+
+fn poll(mgr: &Manager, st: &mut PollState) -> Result<Option<NowPlaying>, ()> {
+    let Some(s) = pick(mgr)? else {
+        *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        st.track.clear();
+        st.art = None;
+        let empty = NowPlaying::default();
+        let changed = st.emitted.as_ref().map(|(e, _)| e.active).unwrap_or(true);
+        st.emitted = Some((empty.clone(), Instant::now()));
+        return Ok(changed.then_some(empty));
+    };
+    let app_id = aumid(&s);
+    *SHOWN.lock().unwrap_or_else(|p| p.into_inner()) = Some(app_id.clone());
+
+    let props = s.TryGetMediaPropertiesAsync().and_then(|o| o.get()).ok();
+    let title = props.as_ref().and_then(|p| p.Title().ok()).map(|h| h.to_string()).unwrap_or_default();
+    let artist = props.as_ref().and_then(|p| p.Artist().ok()).map(|h| h.to_string()).unwrap_or_default();
+    let playing = is_playing(&s);
+    let can_seek = s
+        .GetPlaybackInfo()
+        .and_then(|p| p.Controls())
+        .and_then(|c| c.IsPlaybackPositionEnabled())
+        .unwrap_or(false);
+
+    // Position extrapolée : GSMTC ne la met à jour que sporadiquement.
+    let (mut position, duration) = match s.GetTimelineProperties() {
+        Ok(t) => {
+            let start = t.StartTime().map(|d| d.Duration).unwrap_or(0);
+            let end = t.EndTime().map(|d| d.Duration).unwrap_or(0);
+            let pos = t.Position().map(|d| d.Duration).unwrap_or(0);
+            let mut p = (pos - start) as f64 / 1e7;
+            if playing {
+                if let Ok(updated) = t.LastUpdatedTime() {
+                    let dt = (now_ticks() - updated.UniversalTime) as f64 / 1e7;
+                    if (0.0..86_400.0).contains(&dt) {
+                        p += dt;
+                    }
+                }
+            }
+            (p, ((end - start) as f64 / 1e7).max(0.0))
+        }
+        Err(_) => (0.0, 0.0),
+    };
+    position = if duration > 0.0 { position.clamp(0.0, duration) } else { position.max(0.0) };
+
+    // Pochette : relue à chaque changement de piste et pendant 10 s ensuite (certaines apps
+    // la fournissent après le titre ; Windows peut encore servir celle de l'ancienne piste).
+    let key = format!("{app_id}\u{1}{title}\u{1}{artist}");
+    if key != st.track {
+        st.track = key;
+        st.track_since = Some(Instant::now());
+        st.last_art_read = None;
+        st.art = None;
+    }
+    let in_window = st.track_since.map(|t| t.elapsed() < ART_WINDOW).unwrap_or(false);
+    let due = st.last_art_read.map(|t| t.elapsed() >= Duration::from_millis(1200)).unwrap_or(true);
+    if in_window && due {
+        st.last_art_read = Some(Instant::now());
+        if let Some(a) = props.as_ref().and_then(read_thumb) {
+            st.art = Some(a);
+        }
+    }
+
+    let np = NowPlaying {
+        active: true,
+        title,
+        artist,
+        art: st.art.clone(),
+        playing,
+        position,
+        duration,
+        can_seek,
+        app_id,
+    };
+
+    let emit = match &st.emitted {
+        None => true,
+        Some((prev, at)) => {
+            let expected = if prev.playing { prev.position + at.elapsed().as_secs_f64() } else { prev.position };
+            prev.active != np.active
+                || prev.title != np.title
+                || prev.artist != np.artist
+                || prev.playing != np.playing
+                || prev.can_seek != np.can_seek
+                || prev.app_id != np.app_id
+                || (prev.duration - np.duration).abs() > 0.5
+                || prev.art.as_ref().map(|a| a.len()) != np.art.as_ref().map(|a| a.len())
+                || (expected - np.position).abs() > DRIFT
+        }
+    };
+    if emit {
+        st.emitted = Some((np.clone(), Instant::now()));
+    }
+    Ok(emit.then_some(np))
+}
+
+fn read_thumb(props: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties) -> Option<String> {
     let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.get().ok()?;
     let size = stream.Size().ok()?;
     if size == 0 {
@@ -230,100 +285,147 @@ fn read_thumb(session: &Session) -> Option<String> {
     reader.LoadAsync(size as u32).ok()?.get().ok()?;
     let mut buf = vec![0u8; size as usize];
     reader.ReadBytes(&mut buf).ok()?;
-    let mime = stream
-        .ContentType()
-        .map(|h| h.to_string())
-        .unwrap_or_else(|_| "image/jpeg".to_string());
-    Some(format!(
-        "data:{};base64,{}",
-        mime,
-        base64::engine::general_purpose::STANDARD.encode(&buf)
-    ))
+    // Type MIME déduit des octets (le content-type fourni peut casser la data URL).
+    let mime = match buf.as_slice() {
+        [0x89, b'P', b'N', b'G', ..] => "image/png",
+        [0xFF, 0xD8, ..] => "image/jpeg",
+        [b'G', b'I', b'F', ..] => "image/gif",
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "image/webp",
+        [b'B', b'M', ..] => "image/bmp",
+        _ => "image/jpeg",
+    };
+    Some(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&buf)))
 }
 
-// --- Volume (WASAPI, session audio de l'app média COURANTE) -----------------
+// --- Correspondance app média ↔ exécutable -----------------------------------------
 
-/// Jeton normalisé identifiant l'app média courante, dérivé de l'AUMID de la
-/// session SMTC active → sert à retrouver SA session audio. Ex. `"Spotify.exe"` →
-/// `"spotify"`, un chemin `C:\…\Deezer.exe` → `"deezer"`, un AUMID UWP `"Pkg_…!App"`
-/// → `"pkg_…"` (best-effort ; si rien ne matche, le volume est indisponible).
-fn current_media_app_hint() -> Option<String> {
-    let mgr = Manager::RequestAsync().ok()?.get().ok()?;
-    let session = mgr.GetCurrentSession().ok()?;
-    let aumid = session.SourceAppUserModelId().ok()?.to_string();
-    let hint = normalize_app_hint(&aumid);
-    (!hint.is_empty()).then_some(hint)
-}
-
-fn normalize_app_hint(aumid: &str) -> String {
-    let lower = aumid.to_lowercase();
-    // UWP : "Famille_hash!AppId" → on garde la partie avant '!'.
+/// Forme « écrasée » : alphanumérique minuscule, sans « .exe ».
+pub fn crush(s: &str) -> String {
+    let lower = s.to_lowercase();
     let head = lower.split('!').next().unwrap_or(&lower);
-    // Chemin/exe → nom de fichier sans extension.
     let base = head.rsplit(['\\', '/']).next().unwrap_or(head);
-    base.strip_suffix(".exe").unwrap_or(base).trim().to_string()
+    base.strip_suffix(".exe").unwrap_or(base).chars().filter(|c| c.is_ascii_alphanumeric()).collect()
 }
 
-/// Session audio (WASAPI) du process correspondant à l'app média courante.
-unsafe fn current_app_volume() -> Option<ISimpleAudioVolume> {
-    let hint = current_media_app_hint()?;
-    let enumerator: IMMDeviceEnumerator =
-        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-    let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
-    let mgr: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None).ok()?;
-    let sessions = mgr.GetSessionEnumerator().ok()?;
-    let count = sessions.GetCount().ok()?;
-    for i in 0..count {
-        if let Ok(ctrl) = sessions.GetSession(i) {
-            if let Ok(ctrl2) = ctrl.cast::<IAudioSessionControl2>() {
-                if let Ok(pid) = ctrl2.GetProcessId() {
-                    if process_matches(pid, &hint) {
-                        return ctrl2.cast::<ISimpleAudioVolume>().ok();
-                    }
-                }
-            }
-        }
-    }
-    None
-}
+/// Firefox expose un AUMID hashé fixe.
+const FIREFOX_AUMID: &str = "308046b0af4a39cb";
 
-unsafe fn read_volume() -> Option<f32> {
-    current_app_volume().and_then(|v| v.GetMasterVolume().ok())
-}
-
-unsafe fn write_volume(level: f32) {
-    if let Some(v) = current_app_volume() {
-        let _ = v.SetMasterVolume(level, std::ptr::null());
-    }
-}
-
-/// Le process `pid` correspond-il à l'app média courante ? (comparaison sur le nom
-/// d'exécutable sans extension, tolérante : égal / inclus dans un sens ou l'autre).
-fn process_matches(pid: u32, hint: &str) -> bool {
-    if hint.is_empty() {
+/// L'exe (chemin complet) correspond-il à l'app média `app_id` ?
+pub fn exe_matches(exe_path: &str, app_id: &str) -> bool {
+    let exe = crush(exe_path);
+    let app = crush(app_id);
+    if app.is_empty() || exe.is_empty() {
         return false;
     }
-    unsafe {
-        let handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-        let mut buf = [0u16; 260];
-        let mut size = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(
-            handle,
-            PROCESS_NAME_WIN32,
-            windows::core::PWSTR(buf.as_mut_ptr()),
-            &mut size,
-        )
-        .is_ok();
-        let _ = CloseHandle(handle);
-        if !ok {
-            return false;
-        }
-        let full = String::from_utf16_lossy(&buf[..size as usize]).to_lowercase();
-        let base = full.rsplit(['\\', '/']).next().unwrap_or(&full);
-        let proc = base.strip_suffix(".exe").unwrap_or(base);
-        proc == hint || proc.contains(hint) || hint.contains(proc)
+    if app == FIREFOX_AUMID {
+        return exe == "firefox";
     }
+    exe == app || (exe.len() >= 4 && app.contains(&exe)) || (app.len() >= 4 && exe.contains(&app))
+}
+
+
+// --- « Ouvrir l'app source » ---------------------------------------------------------
+
+/// Amène l'app de la lecture au premier plan : fenêtre du programme (de préférence celle
+/// dont le titre contient la piste), sinon activation de l'app packagée, sinon relance de
+/// l'exe en cours (les apps mono-instance réaffichent leur fenêtre).
+pub fn open_source() -> Result<(), String> {
+    let np = snapshot().filter(|n| n.active).ok_or("aucune lecture")?;
+    let exes = crate::services::mixer::running_exes()
+        .into_iter()
+        .filter(|(_, path)| exe_matches(path, &np.app_id))
+        .collect::<Vec<_>>();
+
+    if let Some(hwnd) = find_window(&exes.iter().map(|(pid, _)| *pid).collect::<Vec<_>>(), &np.title) {
+        focus_window(hwnd);
+        return Ok(());
+    }
+    if np.app_id.contains('!') {
+        return activate_packaged(&np.app_id);
+    }
+    if let Some((_, path)) = exes.first() {
+        std::process::Command::new(path).spawn().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    Err("app introuvable".into())
+}
+
+fn find_window(pids: &[u32], track_title: &str) -> Option<windows::Win32::Foundation::HWND> {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+        IsWindowVisible, GW_OWNER,
+    };
+    if pids.is_empty() {
+        return None;
+    }
+    struct Ctx<'a> {
+        pids: &'a [u32],
+        found: Vec<(HWND, String)>,
+    }
+    unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> windows::core::BOOL {
+        let ctx = &mut *(lp.0 as *mut Ctx);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if ctx.pids.contains(&pid)
+            && IsWindowVisible(hwnd).as_bool()
+            && GetWindow(hwnd, GW_OWNER).map(|o| o.0.is_null()).unwrap_or(true)
+        {
+            let len = GetWindowTextLengthW(hwnd);
+            if len > 0 {
+                let mut buf = vec![0u16; len as usize + 1];
+                let n = GetWindowTextW(hwnd, &mut buf);
+                ctx.found.push((hwnd, String::from_utf16_lossy(&buf[..n as usize])));
+            }
+        }
+        true.into()
+    }
+    let mut ctx = Ctx { pids, found: Vec::new() };
+    unsafe {
+        let _ = EnumWindows(Some(cb), LPARAM(&mut ctx as *mut _ as isize));
+    }
+    let t = track_title.to_lowercase();
+    ctx.found
+        .iter()
+        .find(|(_, title)| !t.is_empty() && title.to_lowercase().contains(&t))
+        .or_else(|| ctx.found.first())
+        .map(|(h, _)| *h)
+}
+
+fn focus_window(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_MENU,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE};
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        if SetForegroundWindow(hwnd).as_bool() {
+            return;
+        }
+        // Windows refuse le premier plan : un appui Alt simulé débloque (technique classique).
+        let key = |flags| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_MENU, dwFlags: flags, ..Default::default() } },
+        };
+        SendInput(&[key(Default::default()), key(KEYEVENTF_KEYUP)], std::mem::size_of::<INPUT>() as i32);
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+fn activate_packaged(aumid: &str) -> Result<(), String> {
+    use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager, AO_NONE};
+    std::thread::scope(|s| {
+        s.spawn(|| unsafe {
+            let _ = CoInitializeEx(None, windows::Win32::System::Com::COINIT_APARTMENTTHREADED);
+            let mgr: IApplicationActivationManager =
+                CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_ALL).map_err(|e| e.to_string())?;
+            mgr.ActivateApplication(&HSTRING::from(aumid), &HSTRING::new(), AO_NONE)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+        .join()
+        .unwrap_or_else(|_| Err("activation".into()))
+    })
 }

@@ -12,17 +12,6 @@
   </head>
   <body>
     <div id="app"></div>
-    <!-- Loader PROD : les extensions installées importent `vue`/`@island/sdk` en bare ;
-         l'import map les résout vers des shims qui ré-exportent le runtime de l'hôte
-         (même instance). Inoffensif en dev (Vite résout côté serveur). -->
-    <script type="importmap">
-      {
-        "imports": {
-          "vue": "/island-runtime/vue.mjs",
-          "@island/sdk": "/island-runtime/sdk.mjs"
-        }
-      }
-    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -300,7 +300,7 @@ pub fn icon_data_url(path: &str, size: i32) -> Option<String> {
 
 /// Lance un fichier/app via ShellExecute avec un verbe (`open`, `runas`…) et des
 /// paramètres optionnels. Un `.lnk` exécute sa cible ; `runas` demande l'élévation.
-fn shell_exec(verb: &str, path: &str, args: Option<&str>) -> Result<(), String> {
+pub(crate) fn shell_exec(verb: &str, path: &str, args: Option<&str>) -> Result<(), String> {
     use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;

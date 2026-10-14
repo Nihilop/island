@@ -1,0 +1,11 @@
+:root { color-scheme: dark; --label: #fff; --label-2: rgb(255 255 255 / 0.6); --ok: #30d158; --ko: #ff453a; }
+:root.light { color-scheme: light; --label: #000; --label-2: rgb(0 0 0 / 0.55); --ok: #248a3d; --ko: #d70015; }
+html, body { margin: 0; background: transparent; font: 13px/1.4 "Inter", system-ui, sans-serif; color: var(--label); }
+main { padding: 4px 16px; }
+h1 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+#sum { margin: 0 0 8px; color: var(--label-2); font-size: 12px; }
+ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+li { display: flex; gap: 8px; align-items: baseline; font-size: 12px; }
+li b { width: 14px; flex: none; }
+li.ok b { color: var(--ok); } li.ko b { color: var(--ko); }
+li span:last-child { color: var(--label-2); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }

@@ -21,6 +21,8 @@ export const useAppStore = defineStore('appStore', () => {
 
     // Le thème s'applique au DOM de LA fenêtre courante (chaque webview a le sien).
     function applyTheme(t: string) {
+        // Fenêtre du notch : le thème suit le réglage du notch (src/notch/theme.ts).
+        if (document.documentElement.dataset.themeOwner === "notch") return;
         document.documentElement.style.colorScheme = t;
         document.documentElement.classList.toggle("dark", t === "dark"); // tokens shadcn
     }

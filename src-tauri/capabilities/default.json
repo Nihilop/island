@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capacités des fenêtres overlay, settings, install et create",
-  "windows": ["overlay", "settings", "install", "create"],
+  "description": "Capacités de la fenêtre du notch (overlay)",
+  "windows": [
+    "overlay"
+  ],
   "permissions": [
     "core:default",
     "opener:default",

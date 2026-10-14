@@ -1,0 +1,22 @@
+{
+  "tab.reviews": "To review",
+  "tab.mine": "My PRs",
+  "refresh": "Refresh",
+  "loading": "Loading…",
+  "noToken": "Add a GitHub token in Settings › Extensions › GitHub.",
+  "badToken": "GitHub rejected the token: check it in Settings › Extensions.",
+  "error": "GitHub isn't responding ({msg})",
+  "empty.reviews": "No review requested",
+  "empty.mine": "No open pull request",
+  "ci.success": "CI passed",
+  "ci.failure": "CI failed",
+  "ci.pending": "CI running",
+  "draft": "Draft",
+  "updated": "updated {age}",
+  "age.now": "just now",
+  "age.min": "{n} min ago",
+  "age.hour": "{n} h ago",
+  "age.day": "{n} d ago",
+  "notify.review": "Review requested: {repo}",
+  "notify.ciFailed": "CI failed: {repo}"
+}

@@ -59,15 +59,6 @@ pub(crate) fn start_memory_watchdog(app: AppHandle) {
     });
 }
 
-/// Ouvre (et met au premier plan) la fenêtre de réglages.
-#[tauri::command]
-pub fn open_settings(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("settings") {
-        w.show().map_err(|e| e.to_string())?;
-        w.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
 
 /// Révèle un fichier dans l'explorateur (clic sur une notification de capture).
 #[tauri::command]
@@ -86,16 +77,68 @@ pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
-/// Icône de la zone de notification (system tray) : clic gauche → Réglages,
-/// menu contextuel → Réglages / Quitter. Seul moyen de fermer Island proprement
-/// (les fenêtres se cachent, jamais ne se ferment).
-pub(crate) fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+// --- Zone de notification (tray) ------------------------------------------------------
+// Clic gauche = ouvrir le notch ; menu = Ouvrir, Réglages…, Mode focus ☐, Démarrer avec
+// Windows ☐, Quitter. Le front est la source de vérité du mode focus et des libellés
+// (i18n) : il les renvoie via `tray_sync`.
 
-    let settings_i = MenuItem::with_id(app, "tray-settings", "Réglages…", true, None::<&str>)?;
-    let quit_i = MenuItem::with_id(app, "tray-quit", "Quitter Island", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&settings_i, &PredefinedMenuItem::separator(app)?, &quit_i])?;
+pub(crate) struct TrayItems {
+    open: tauri::menu::MenuItem<tauri::Wry>,
+    settings: tauri::menu::MenuItem<tauri::Wry>,
+    focus: tauri::menu::CheckMenuItem<tauri::Wry>,
+    autostart: tauri::menu::CheckMenuItem<tauri::Wry>,
+    quit: tauri::menu::MenuItem<tauri::Wry>,
+}
+
+/// Force le menu contextuel en thème sombre (uxtheme, exports par ordinal, Windows 10
+/// 1903+). Échec silencieux → menu clair.
+#[cfg(target_os = "windows")]
+fn force_dark_menus() {
+    use windows::core::{w, PCSTR};
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    unsafe {
+        let Ok(lib) = LoadLibraryW(w!("uxtheme.dll")) else { return };
+        if let Some(set_mode) = GetProcAddress(lib, PCSTR(135 as *const u8)) {
+            let f: extern "system" fn(i32) -> i32 = std::mem::transmute(set_mode);
+            f(2); // ForceDark
+        }
+        if let Some(flush) = GetProcAddress(lib, PCSTR(136 as *const u8)) {
+            let f: extern "system" fn() = std::mem::transmute(flush);
+            f();
+        }
+    }
+}
+
+pub(crate) fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri::Emitter;
+    use tauri_plugin_autostart::ManagerExt;
+
+    #[cfg(target_os = "windows")]
+    force_dark_menus();
+
+    let auto_on = app.autolaunch().is_enabled().unwrap_or(false);
+    let items = TrayItems {
+        open: MenuItem::with_id(app, "tray-open", "Ouvrir Island\tCtrl+Alt+Espace", true, None::<&str>)?,
+        settings: MenuItem::with_id(app, "tray-settings", "Réglages…", true, None::<&str>)?,
+        focus: CheckMenuItem::with_id(app, "tray-focus", "Mode focus", true, false, None::<&str>)?,
+        autostart: CheckMenuItem::with_id(app, "tray-autostart", "Démarrer avec Windows", true, auto_on, None::<&str>)?,
+        quit: MenuItem::with_id(app, "tray-quit", "Quitter", true, None::<&str>)?,
+    };
+    let menu = Menu::with_items(
+        app,
+        &[
+            &items.open,
+            &items.settings,
+            &PredefinedMenuItem::separator(app)?,
+            &items.focus,
+            &items.autostart,
+            &PredefinedMenuItem::separator(app)?,
+            &items.quit,
+        ],
+    )?;
+    app.manage(items);
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().expect("icône par défaut").clone())
@@ -103,8 +146,23 @@ pub(crate) fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray-open" => {
+                let _ = app.emit("notch://open", None::<String>);
+            }
             "tray-settings" => {
-                let _ = open_settings(app.clone());
+                let _ = app.emit("notch://open", Some("settings"));
+            }
+            "tray-focus" => {
+                let _ = app.emit("notch://focus-toggle", ());
+            }
+            "tray-autostart" => {
+                let al = app.autolaunch();
+                let on = al.is_enabled().unwrap_or(false);
+                let _ = if on { al.disable() } else { al.enable() };
+                if let Some(items) = app.try_state::<TrayItems>() {
+                    let _ = items.autostart.set_checked(!on);
+                }
+                let _ = app.emit("autostart://changed", !on);
             }
             "tray-quit" => app.exit(0),
             _ => {}
@@ -116,12 +174,68 @@ pub(crate) fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let _ = open_settings(tray.app_handle().clone());
+                let _ = tray.app_handle().emit("notch://open", None::<String>);
             }
         })
         .build(app)?;
 
     Ok(())
+}
+
+#[derive(serde::Deserialize)]
+pub struct TrayLabels {
+    open: String,
+    settings: String,
+    focus: String,
+    autostart: String,
+    quit: String,
+}
+
+/// Le front renvoie les libellés traduits et l'état réel des cases à cocher.
+#[tauri::command]
+pub fn tray_sync(app: AppHandle, labels: Option<TrayLabels>, focus_mode: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let Some(items) = app.try_state::<TrayItems>() else { return Ok(()) };
+    if let Some(l) = labels {
+        let _ = items.open.set_text(l.open);
+        let _ = items.settings.set_text(l.settings);
+        let _ = items.focus.set_text(l.focus);
+        let _ = items.autostart.set_text(l.autostart);
+        let _ = items.quit.set_text(l.quit);
+    }
+    let _ = items.focus.set_checked(focus_mode);
+    let _ = items.autostart.set_checked(app.autolaunch().is_enabled().unwrap_or(false));
+    Ok(())
+}
+
+// --- Raccourci global d'ouverture du notch (réglable ; défaut Ctrl + Alt + Espace) ----
+
+static OPEN_SHORTCUT: std::sync::Mutex<Option<tauri_plugin_global_shortcut::Shortcut>> =
+    std::sync::Mutex::new(None);
+
+/// Vrai si `shortcut` est le raccourci d'ouverture courant.
+pub(crate) fn is_open_shortcut(shortcut: &tauri_plugin_global_shortcut::Shortcut) -> bool {
+    OPEN_SHORTCUT.lock().unwrap_or_else(|p| p.into_inner()).as_ref() == Some(shortcut)
+}
+
+/// Remplace le raccourci d'ouverture (`None` = aucun). Renvoie `false` si la combinaison
+/// est invalide ou déjà possédée par un autre programme ; l'app tourne alors sans.
+#[tauri::command]
+pub fn notch_set_shortcut(app: AppHandle, accel: Option<String>) -> bool {
+    use std::str::FromStr;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+    let gs = app.global_shortcut();
+    let mut cur = OPEN_SHORTCUT.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(old) = cur.take() {
+        let _ = gs.unregister(old);
+    }
+    let Some(accel) = accel.filter(|a| !a.is_empty()) else { return true };
+    let Ok(sc) = Shortcut::from_str(&accel) else { return false };
+    if gs.register(sc).is_err() {
+        return false;
+    }
+    *cur = Some(sc);
+    true
 }
 
 // --- Service foreground : détection d'une app en plein écran ----------------
@@ -214,12 +328,40 @@ pub(crate) fn start_fullscreen_monitor(app: AppHandle) {
             .unwrap_or(0);
 
         std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
+            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
             let mut last = false;
+            let mut hidden = false;
+            let mut last_fg: isize = 0;
             loop {
                 let fs = unsafe { foreground_is_fullscreen(overlay_hwnd) };
                 if fs != last {
                     last = fs;
                     let _ = app.emit("fullscreen://changed", serde_json::json!({ "active": fs }));
+                }
+                let win = app.get_webview_window("overlay");
+                // Visibilité « masquer en plein écran ».
+                let hide = fs && crate::overlay::HIDE_IN_FULLSCREEN.load(Ordering::SeqCst);
+                if let Some(w) = &win {
+                    if hide != hidden {
+                        hidden = hide;
+                        if hide {
+                            let _ = w.hide();
+                        } else {
+                            let _ = w.show();
+                            let _ = w.set_always_on_top(true);
+                            crate::overlay::refresh();
+                        }
+                    }
+                }
+                // Une autre app topmost a pu passer devant : on réaffirme à chaque
+                // changement de premier plan.
+                let fg = unsafe { GetForegroundWindow() }.0 as isize;
+                if fg != last_fg {
+                    last_fg = fg;
+                    if let (Some(w), false) = (&win, hidden) {
+                        let _ = w.set_always_on_top(true);
+                    }
                 }
                 std::thread::sleep(std::time::Duration::from_millis(400));
             }
