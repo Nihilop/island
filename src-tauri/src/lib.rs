@@ -16,7 +16,6 @@ use tauri::Manager;
 mod extensions;
 mod host;
 mod launcher;
-mod migrate; // ménage de la v2.0.0 — à supprimer en v2.0.1
 mod overlay;
 mod services;
 mod store;
@@ -80,8 +79,6 @@ pub fn run() {
             // Historique du presse-papiers (en mémoire).
             services::cliphist::start(app.handle().clone());
             // Coffre Bitwarden : verrouillage automatique (glissant).
-            // Premier démarrage de la v2 : ménage du système d'extensions v1 (provisoire).
-            migrate::run(app.handle());
             vault::start(app.handle().clone());
             services::notifs::start(app.handle().clone());
             launcher::start(app.handle().clone());
