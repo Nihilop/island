@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use tauri::http::{header, Request, Response, StatusCode};
 use tauri::{AppHandle, UriSchemeContext, Wry};
 
-use super::{manifest, root};
+use super::{ext_dir, manifest};
 
 pub const SCHEME: &str = "island-ext";
 
@@ -78,7 +78,7 @@ fn serve(app: &AppHandle, req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>
         )
         .into_bytes()
     } else {
-        let dir = root(app).join(id);
+        let Some(dir) = ext_dir(app, id) else { return status(StatusCode::NOT_FOUND) };
         let Ok(base) = dir.canonicalize() else { return status(StatusCode::NOT_FOUND) };
         let Ok(file) = dir.join(rel).canonicalize() else { return status(StatusCode::NOT_FOUND) };
         if !file.starts_with(&base) || !file.is_file() {

@@ -10,7 +10,7 @@ use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use super::{manifest, root, valid_id};
+use super::{ext_dir, manifest, valid_id};
 
 // --- Secrets (trousseau du système, cloisonné par extension) --------------------------
 
@@ -31,8 +31,14 @@ pub fn ext2_secret_get(id: String, key: String) -> Result<Option<String>, String
 }
 
 #[tauri::command]
-pub fn ext2_secret_set(id: String, key: String, value: String) -> Result<(), String> {
-    secret(&id, &key)?.set_password(&value).map_err(|e| e.to_string())
+pub fn ext2_secret_set(app: AppHandle, id: String, key: String, value: String) -> Result<(), String> {
+    secret(&id, &key)?.set_password(&value).map_err(|e| e.to_string())?;
+    // Clé retenue pour l'effacer à la désinstallation (le trousseau ne s'énumère pas).
+    let mut st = super::install::state(&app, &id).unwrap_or_default();
+    if st.secrets.insert(key) {
+        super::install::save_state(&app, &id, &st);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -52,7 +58,7 @@ pub fn ext2_read_text(app: AppHandle, id: String, path: String) -> Result<String
     if !super::valid_rel(&path) {
         return Err("invalidPath".into());
     }
-    let dir = root(&app).join(&id);
+    let dir = ext_dir(&app, &id).ok_or("notFound")?;
     let base = dir.canonicalize().map_err(|_| "notFound")?;
     let file = dir.join(&path).canonicalize().map_err(|_| "notFound")?;
     if !file.starts_with(&base) || std::fs::metadata(&file).map(|m| m.len() > 1 << 20).unwrap_or(true) {

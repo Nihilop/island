@@ -59,15 +59,6 @@ pub(crate) fn start_memory_watchdog(app: AppHandle) {
     });
 }
 
-/// Ouvre (et met au premier plan) la fenêtre de réglages.
-#[tauri::command]
-pub fn open_settings(app: AppHandle) -> Result<(), String> {
-    if let Some(w) = app.get_webview_window("settings") {
-        w.show().map_err(|e| e.to_string())?;
-        w.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
 
 /// Révèle un fichier dans l'explorateur (clic sur une notification de capture).
 #[tauri::command]

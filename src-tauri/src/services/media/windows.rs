@@ -17,17 +17,13 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use tauri::{AppHandle, Emitter};
 
-use windows::core::{Interface, HSTRING};
+use windows::core::HSTRING;
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session,
     GlobalSystemMediaTransportControlsSessionManager as Manager,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 };
 use windows::Storage::Streams::DataReader;
-use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
-    ISimpleAudioVolume, MMDeviceEnumerator,
-};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
 
 use super::NowPlaying;
@@ -327,42 +323,6 @@ pub fn exe_matches(exe_path: &str, app_id: &str) -> bool {
     exe == app || (exe.len() >= 4 && app.contains(&exe)) || (app.len() >= 4 && exe.contains(&app))
 }
 
-// --- Volume de l'app affichée (API extensions, gelée) -------------------------------
-
-unsafe fn shown_app_volume() -> Option<ISimpleAudioVolume> {
-    let app_id = SHOWN.lock().unwrap_or_else(|p| p.into_inner()).clone()?;
-    let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-    let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
-    let mgr: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None).ok()?;
-    let sessions = mgr.GetSessionEnumerator().ok()?;
-    for i in 0..sessions.GetCount().ok()? {
-        let Ok(ctrl) = sessions.GetSession(i) else { continue };
-        let Ok(c2) = ctrl.cast::<IAudioSessionControl2>() else { continue };
-        let Ok(pid) = c2.GetProcessId() else { continue };
-        if crate::services::mixer::exe_path(pid).is_some_and(|p| exe_matches(&p, &app_id)) {
-            return c2.cast::<ISimpleAudioVolume>().ok();
-        }
-    }
-    None
-}
-
-pub fn get_volume() -> f32 {
-    std::thread::spawn(|| unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        shown_app_volume().and_then(|v| v.GetMasterVolume().ok()).unwrap_or(-1.0)
-    })
-    .join()
-    .unwrap_or(-1.0)
-}
-
-pub fn set_volume(level: f32) {
-    std::thread::spawn(move || unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        if let Some(v) = shown_app_volume() {
-            let _ = v.SetMasterVolume(level.clamp(0.0, 1.0), std::ptr::null());
-        }
-    });
-}
 
 // --- « Ouvrir l'app source » ---------------------------------------------------------
 

@@ -63,7 +63,7 @@ const COMBO: u8 = 2;
 const NATIVE: u8 = 3;
 const SWALLOW: u8 = 4;
 
-/// Mode launcher (cf. en-tête §2) ; sinon un Win seul émet `reserved://key` (extensions).
+/// Mode launcher (cf. en-tête §2) ; sinon un Win seul est simplement retenu.
 static WIN_LAUNCHER: AtomicBool = AtomicBool::new(false);
 /// Le launcher est ouvert (tenu à jour par le front) : un Win seul le referme.
 static LAUNCHER_OPEN: AtomicBool = AtomicBool::new(false);
@@ -84,8 +84,6 @@ static HOOK_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Ce que le callback confie au thread émetteur (il ne fait jamais d'`emit` lui-même).
 enum Ev {
-    /// Win seul, mode extensions.
-    Super,
     /// Win seul, mode launcher : ouvrir (capture démarrée) ou fermer.
     LauncherWin(bool),
     /// Frappe captée pour le launcher.
@@ -151,7 +149,6 @@ fn ensure_hook_thread() {
         std::thread::spawn(move || {
             while let Ok(ev) = rx.recv() {
                 let _ = match ev {
-                    Ev::Super => app.emit("reserved://key", serde_json::json!({ "key": "Super" })),
                     Ev::LauncherWin(open) => app.emit("launcher://win", open),
                     Ev::Key(k) => app.emit("launcher://key", k),
                 };
@@ -226,7 +223,7 @@ fn on_lone_win() {
         return;
     }
     if !WIN_LAUNCHER.load(Ordering::Relaxed) {
-        return send(Ev::Super);
+        return;
     }
     let open = !LAUNCHER_OPEN.load(Ordering::Relaxed);
     LAUNCHER_OPEN.store(open, Ordering::Relaxed);

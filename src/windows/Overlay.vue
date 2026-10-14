@@ -28,10 +28,7 @@ import { initAsk } from "../tools/ask/store";
 import { initHello } from "../notch/hello";
 import { initNotifs } from "../tools/notifications/store";
 import { initLauncher } from "../launcher/store";
-import { initExtensions } from "../extensions/runtime";
-import { registerExtensionTools } from "../extensions/tools";
-import { registerExtensionSlots } from "../extensions/slots";
-import "../extensions/settings";
+import { initExtensionsHost } from "../extensions/install";
 
 registerBuiltinTools();
 
@@ -44,7 +41,7 @@ loadSettings().finally(() => {
   initHello();
   initNotifs();
   initLauncher();
-  void initExtensions(registerExtensionTools, registerExtensionSlots);
+  void initExtensionsHost();
   watch(
     () => settings.vaultTimeout,
     (seconds) => invoke("vault_set_timeout", { seconds }).catch(() => {}),

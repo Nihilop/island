@@ -2,16 +2,13 @@
 // Réglages › Outils : liste réordonnable par glisser (poignée), activation par outil.
 // Impossible de désactiver le dernier outil actif.
 import { computed, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import { PhDotsSixVertical } from "@phosphor-icons/vue";
 import { settings } from "../../notch/settings";
 import { hold } from "../../notch/state";
 import { tools } from "../registry";
 import { t } from "../../notch/i18n";
 import Group from "../../ui/Group.vue";
-import Row from "../../ui/Row.vue";
 import { Switch } from "@/sdk/ui/switch";
-import { Button } from "@/sdk/ui/button";
 import VaultSettings from "../vault/VaultSettings.vue";
 import HelloSettings from "./HelloSettings.vue";
 
@@ -130,10 +127,5 @@ function onHandleUp() {
 
     <VaultSettings />
 
-    <Group :title="t('settings.extensions')">
-      <Row :label="t('settings.extensions.soon')" :help="t('settings.extensions.help')">
-        <Button @click="invoke('open_settings')">{{ t("notch.settings.legacy") }}</Button>
-      </Row>
-    </Group>
   </div>
 </template>

@@ -36,3 +36,7 @@ export function requestSize(tool: string, size: { w: number; h: number } | null)
 export function registerTool(tool: Tool) {
   tools.value = [...tools.value.filter((t) => t.id !== tool.id), tool];
 }
+
+export function unregisterTool(id: string) {
+  tools.value = tools.value.filter((t) => t.id !== id);
+}

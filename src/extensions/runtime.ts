@@ -181,33 +181,69 @@ export function sandboxFrame(src: string): HTMLIFrameElement {
   return f;
 }
 
-// --- Logique (iframe cachée par extension) --------------------------------------------
+// --- Cycle de vie ----------------------------------------------------------------------
 
-const backgrounds = new Map<string, { frame: HTMLIFrameElement; disconnect?: () => void }>();
+export interface Installed {
+  manifest: Manifest;
+  /** Chargée depuis un dossier de développement. */
+  dev: boolean;
+}
 
-function startBackground(ext: Manifest) {
-  if (backgrounds.has(ext.id)) return;
+/** Toutes les extensions connues (actives ou non). */
+export const all = ref<Installed[]>([]);
+
+type Setup = (ext: Manifest) => (() => void) | void;
+let setups: Setup[] = [];
+/** Extensions démarrées : iframe de logique + nettoyages des emplacements. */
+const running = new Map<string, { frame: HTMLIFrameElement; disconnect?: () => void; cleanups: (() => void)[] }>();
+
+function start(ext: Manifest) {
+  if (running.has(ext.id)) return;
+  const cleanups = setups.map((fn) => fn(ext)).filter((c): c is () => void => typeof c === "function");
   const frame = sandboxFrame(extUrl(ext.id, "__main.html"));
   frame.style.display = "none";
-  const entry: { frame: HTMLIFrameElement; disconnect?: () => void } = { frame };
+  const entry: { frame: HTMLIFrameElement; disconnect?: () => void; cleanups: (() => void)[] } = { frame, cleanups };
   frame.addEventListener("load", () => {
     entry.disconnect?.();
     entry.disconnect = connect(ext, frame);
   });
-  backgrounds.set(ext.id, entry);
+  running.set(ext.id, entry);
   document.body.appendChild(frame);
+}
+
+function stop(id: string) {
+  const r = running.get(id);
+  if (!r) return;
+  r.disconnect?.();
+  r.frame.remove();
+  r.cleanups.forEach((c) => c());
+  for (const p of ports.get(id) ?? []) p.close();
+  ports.delete(id);
+  running.delete(id);
+}
+
+/** Extensions désactivées par l'utilisateur (réglage). */
+let isDisabled: (id: string) => boolean = () => false;
+
+/** (Re)lit la liste et aligne ce qui tourne : arrête les disparues / désactivées,
+ *  redémarre celles demandées (`restart`), démarre les nouvelles. */
+export async function reload(restart: string[] = []) {
+  const list = await invoke<Installed[]>("ext2_list").catch(() => []);
+  all.value = list;
+  const wanted = list.filter((x) => !isDisabled(x.manifest.id)).map((x) => x.manifest);
+  for (const id of [...running.keys()]) if (restart.includes(id) || !wanted.some((m) => m.id === id)) stop(id);
+  installed.value = wanted;
+  for (const ext of wanted) start(ext);
 }
 
 export const runtime = reactive({ ready: false });
 
-/** Charge les extensions installées ; `setup` branche chacune sur les emplacements. */
-export async function initExtensions(...setup: ((ext: Manifest) => void)[]) {
-  const list = await invoke<{ manifest: Manifest }[]>("ext2_list").catch(() => []);
-  installed.value = list.map((x) => x.manifest);
-  for (const ext of installed.value) {
-    for (const fn of setup) fn(ext);
-    startBackground(ext);
-  }
+/** Démarre le runtime ; `setup` branche chaque extension sur les emplacements et renvoie
+ *  son nettoyage. */
+export async function initExtensions(opts: { disabled: (id: string) => boolean }, ...setup: Setup[]) {
+  isDisabled = opts.disabled;
+  setups = setup;
+  await reload();
   runtime.ready = true;
   // Thème / langue suivis en direct par les extensions.
   const obs = new MutationObserver(() => broadcast("theme", theme()));

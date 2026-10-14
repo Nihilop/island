@@ -23,6 +23,12 @@ export function onFilesDropped(tool: string, h: Handler) {
   handlers.set(tool, h);
 }
 
+/** Intercepteurs : prélèvent des chemins avant les outils (ex. paquets `.island`). */
+const interceptors: ((paths: string[]) => string[])[] = [];
+export function interceptDrop(fn: (paths: string[]) => string[]) {
+  interceptors.push(fn);
+}
+
 /** Dernier outil fichier utilisé (cible du dépôt rapide). */
 let lastFileTool = "shelf";
 
@@ -85,10 +91,11 @@ export function initDrop() {
 
   // Chemins réels renvoyés par Rust.
   listen<string[]>("drop://files", (e) => {
+    const paths = interceptors.reduce((rest, fn) => fn(rest), e.payload);
     const h = handlers.get(target) ?? handlers.get(activeTool.value);
-    if (h && e.payload.length) {
+    if (h && paths.length) {
       lastFileTool = handlers.has(target) ? target : activeTool.value;
-      h(e.payload);
+      h(paths);
     }
   });
 }

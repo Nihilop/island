@@ -3,7 +3,7 @@
 // l'activation se règlent dans Réglages › Outils, comme pour les autres.
 
 import { defineComponent, h } from "vue";
-import { registerTool } from "../tools/registry";
+import { registerTool, unregisterTool } from "../tools/registry";
 import { settings } from "../notch/settings";
 import ExtensionView from "./ExtensionView.vue";
 import { extUrl, type Manifest } from "./runtime";
@@ -31,7 +31,9 @@ function iconComponent(url: string | null) {
   });
 }
 
-export function registerExtensionTools(ext: Manifest) {
+/** Enregistre les outils d'une extension ; renvoie de quoi les retirer. */
+export function registerExtensionTools(ext: Manifest): () => void {
+  const ids: string[] = [];
   for (const tool of ext.contributes.tools) {
     const id = `ext:${ext.id}:${tool.id}`;
     const icon = tool.icon ?? ext.icon;
@@ -43,7 +45,14 @@ export function registerExtensionTools(ext: Manifest) {
       view: defineComponent(() => () => h(ExtensionView, { ext, tool })),
       defaultEnabled: true,
     });
+    ids.push(id);
     // Premier passage : l'outil rejoint le dock (activé, en dernier).
     if (!settings.tools.some((t) => t.id === id)) settings.tools.push({ id, enabled: true });
   }
+  return () => ids.forEach(unregisterTool);
+}
+
+/** Désinstallation : l'extension quitte aussi l'ordre du dock. */
+export function forgetExtensionTools(extId: string) {
+  settings.tools = settings.tools.filter((t) => !t.id.startsWith(`ext:${extId}:`));
 }

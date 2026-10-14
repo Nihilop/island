@@ -13,12 +13,13 @@
 
 use tauri::Manager;
 
-mod ext;
 mod extensions;
 mod host;
 mod launcher;
+mod migrate; // ménage de la v2.0.0 — à supprimer en v2.0.1
 mod overlay;
 mod services;
+mod store;
 mod vault;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,7 +38,7 @@ pub fn run() {
         // DOIT être le 1er plugin : si l'app tourne déjà, un double-clic sur un
         // .island transmet l'argv à l'instance vivante au lieu d'en lancer une 2ᵉ.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            ext::install::handle_island_argv(app, &argv, true);
+            extensions::install::handle_argv(app, &argv);
         }))
         .register_uri_scheme_protocol(extensions::protocol::SCHEME, extensions::protocol::handle)
         .plugin(tauri_plugin_opener::init())
@@ -79,6 +80,8 @@ pub fn run() {
             // Historique du presse-papiers (en mémoire).
             services::cliphist::start(app.handle().clone());
             // Coffre Bitwarden : verrouillage automatique (glissant).
+            // Premier démarrage de la v2 : ménage du système d'extensions v1 (provisoire).
+            migrate::run(app.handle());
             vault::start(app.handle().clone());
             services::notifs::start(app.handle().clone());
             launcher::start(app.handle().clone());
@@ -100,7 +103,7 @@ pub fn run() {
 
             // Double-clic au démarrage : un .island dans l'argv → modal d'install.
             let argv: Vec<String> = std::env::args().collect();
-            ext::install::handle_island_argv(app.handle(), &argv, false);
+            extensions::install::handle_argv(app.handle(), &argv);
 
             Ok(())
         })
@@ -117,32 +120,8 @@ pub fn run() {
             overlay::notch_memory_low,
             host::tray_sync,
             host::notch_set_shortcut,
-            host::open_settings,
             host::reveal_path,
             host::open_url,
-            services::system::system_stats,
-            services::system::system_battery,
-            services::system::system_online,
-            services::system::system_idle_ms,
-            services::system::system_volume,
-            services::system::system_set_volume,
-            services::system::system_set_muted,
-            services::system::system_power,
-            services::net::http_fetch,
-            services::apps::list_apps,
-            services::apps::launch_path,
-            services::apps::app_icons,
-            services::apps::search_files,
-            services::apps::files_engine,
-            services::apps::launch_admin,
-            services::capture::capture_list_displays,
-            services::capture::capture_screenshot,
-            services::capture::capture_start_recording,
-            services::capture::capture_stop_recording,
-            services::capture::capture_is_recording,
-            services::capture::ext_fetch_binary,
-            services::audio::audio_record_start,
-            services::audio::audio_record_stop,
             services::media::np_state,
             services::media::np_toggle,
             services::media::np_next,
@@ -183,8 +162,6 @@ pub fn run() {
             services::weather::weather_geocode,
             services::weather::weather_locate,
             services::desktop::master_volume,
-            services::desktop::focus_state,
-            services::desktop::focus_set,
             vault::vault_status,
             vault::vault_install,
             vault::vault_set_server,
@@ -215,6 +192,12 @@ pub fn run() {
             extensions::ext2_storage_get,
             extensions::ext2_storage_set,
             extensions::ext2_log,
+            extensions::install::ext2_set_dev,
+            extensions::install::ext2_dev_inspect,
+            extensions::install::ext2_inspect,
+            extensions::install::ext2_install,
+            extensions::install::ext2_uninstall,
+            extensions::install::ext2_take_pending,
             extensions::services::ext2_secret_get,
             extensions::services::ext2_secret_set,
             extensions::services::ext2_secret_delete,
@@ -230,7 +213,6 @@ pub fn run() {
             launcher::hotkey::launcher_config,
             launcher::hotkey::launcher_capture,
             launcher::hotkey::launcher_paste_text,
-            launcher::hotkey::launcher_suspended,
             launcher::processes::launcher_processes,
             vault::vault_list,
             vault::vault_codes,
@@ -242,43 +224,9 @@ pub fn run() {
             vault::vault_scan_qr,
             vault::vault_clear_scan,
             vault::vault_add_totp,
-            services::media::media_toggle,
-            services::media::media_next,
-            services::media::media_prev,
-            services::media::media_seek,
-            services::media::media_get_volume,
-            services::media::media_set_volume,
-            services::clipboard::clipboard_read_text,
-            services::clipboard::clipboard_write_text,
-            services::clipboard::clipboard_read_image,
-            services::clipboard::clipboard_write_image,
-            services::secrets::secret_get,
-            services::secrets::secret_set,
-            services::secrets::secret_delete,
-            services::tts::tts_speak,
-            services::input::input_type_text,
-            services::reserved::reserved_key_set,
-            services::windows::window_foreground,
-            services::windows::window_list,
-            services::windows::window_focus,
-            services::pty::pty_spawn,
-            services::pty::pty_write,
-            services::pty::pty_resize,
-            services::pty::pty_kill,
-            services::pty::pty_exec,
-            ext::install::register_file_association,
-            ext::install::take_pending_install,
-            ext::install::list_installed,
-            ext::install::read_ext_file,
-            ext::install::pack_extension,
-            ext::install::open_install,
-            ext::install::install_island,
-            ext::scaffold::scaffold_extension,
-            ext::scaffold::open_create,
-            ext::storage::storage_get,
-            ext::storage::storage_set,
-            ext::storage::storage_delete,
-            ext::storage::storage_keys
+            store::storage_get,
+            store::storage_set,
+            store::storage_keys
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -33,9 +33,6 @@ pub fn running_exes() -> Vec<(u32, String)> {
         .collect()
 }
 
-#[cfg(target_os = "windows")]
-pub use imp::exe_path;
-
 #[tauri::command]
 pub async fn mixer_list() -> Result<MixerState, String> {
     #[cfg(target_os = "windows")]

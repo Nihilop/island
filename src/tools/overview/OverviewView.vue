@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Outil « Vue d'ensemble » (520 × 252) : heure + date, météo, activité en cours (minuteur
-// > musique), tuile Focus Windows, tuile volume principal.
+// > musique), tuile mode focus du notch, tuile volume principal.
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -21,7 +21,7 @@ import TrackBar from "../../ui/TrackBar.vue";
 import { Button } from "@/sdk/ui/button";
 import { Skeleton } from "@/sdk/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { selectTool } from "../../notch/state";
+import { selectTool, setFocusMode } from "../../notch/state";
 import { settings } from "../../notch/settings";
 import { np } from "../media/store";
 import { discord, inCall, someoneSpeaking } from "../discord/store";
@@ -51,18 +51,13 @@ const activity = computed<"timer" | "discord" | "media" | null>(() => {
   return null;
 });
 
-// --- Focus Windows (repoll toutes les 2 s) ------------------------------------------
-const focus = ref<boolean | null>(null);
-const focusSupported = ref(true);
-async function readFocus() {
-  const s = await invoke<boolean | null>("focus_state").catch(() => null);
-  focusSupported.value = s !== null;
-  focus.value = s;
-}
-async function toggleFocus() {
-  if (!focusSupported.value) return;
-  focus.value = !focus.value; // optimiste
-  await invoke("focus_set", { on: focus.value }).catch(() => {});
+// --- Mode focus du notch (même chemin que la cible du header) ------------------------
+// Le focus Windows (`FocusSessionManager`) n'est pas pilotable : `TryStartFocusSession`
+// est une « Limited Access Feature » (jeton Microsoft + identité de package) → accès
+// refusé pour une app non packagée. La tuile pilote donc le mode focus du notch.
+const focus = computed(() => settings.focusMode);
+function toggleFocus() {
+  setFocusMode(!settings.focusMode);
 }
 
 // --- Volume (repoll toutes les 1 s, sauf pendant le drag) ---------------------------
@@ -92,9 +87,8 @@ const speaker = computed(() => {
 let polls: number[] = [];
 onMounted(() => {
   clock = window.setInterval(() => (now.value = new Date()), 1000);
-  void readFocus();
   void readVolume();
-  polls = [window.setInterval(readFocus, 2000), window.setInterval(readVolume, 1000)];
+  polls = [window.setInterval(readVolume, 1000)];
 });
 onBeforeUnmount(() => {
   window.clearInterval(clock);
@@ -180,7 +174,6 @@ const sky = computed(() => (weather.current ? wmo(weather.current.code, weather.
           cn(
             'flex h-10 w-[150px] items-center gap-2 rounded-md px-2 transition-[background-color,color] duration-200 ease-out',
             focus ? 'bg-label text-notch' : 'bg-fill-1',
-            !focusSupported && 'pointer-events-none opacity-40',
           )
         "
         @click="toggleFocus"

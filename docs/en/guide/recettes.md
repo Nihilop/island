@@ -1,174 +1,86 @@
-# 6. Recipes
+# Recipes
 
-Concrete patterns, taken from the reference extensions (Flow, Capture, Aniplex, Spotify,
-Monitoring).
+Short snippets, taken from the GitHub extension (`examples/extensions/github`).
 
-## Keyboard input in a view
-
-The overlay does **not** take keyboard focus by default (intentional: it doesn't steal
-focus from games). If your view has an `<input>`:
+## Refresh in the background at a configurable interval
 
 ```ts
-ctx.view.open(Search, COMPACT);
-ctx.invoke("overlay_focus");   // gives keyboard focus to the overlay
-// then, when the component mounts: inputEl.focus()
-```
+let timer: ReturnType<typeof setTimeout> | undefined;
 
-When the overlay loses focus (a click elsewhere), the island collapses by itself. That's
-what **Flow** (the launcher) does.
-
-## Launching applications
-
-*Permission: `apps`.*
-
-```ts
-const EXT_ID = "com.island.flow";
-const apps = await useIsland().invoke<{name: string; path: string}[]>("list_apps", { extId: EXT_ID });
-// …filter / score…
-await useIsland().invoke("launch_path", { extId: EXT_ID, path: chosen });
-```
-
-`list_apps` returns Start Menu shortcuts; `launch_path` runs the target via ShellExecute.
-`app_icons({ extId, paths })` returns icons (PNG data URL) on demand. ⚠ High trust level
-(launches executables).
-
-## Calling an API (network)
-
-### Simple case: standard `fetch`
-
-The host runs with `csp: null` → a `fetch()` to an API that returns CORS works without
-declaring anything. Example: `https://meme-api.com/gimme` (CORS `*`).
-
-### Calling an API with a cookie session
-
-*Permission: `network`.* When the API uses a **cookie session** (login), a browser `fetch`
-is blocked by CORS/SameSite. Use Island's **native** HTTP, which keeps a per-extension
-cookie-jar:
-
-```ts
-const EXT_ID = "com.island.aniplex";
-const r = await useIsland().http.request({
-  extId: EXT_ID,
-  method: "POST",
-  url: "https://api.example.com/auth/login",
-  body: { user, pass },                 // object → automatic JSON
-  headers: { "X-Custom": "…" },
-});
-// r = { status: number, body: string }
-```
-
-A cookie set by a response is **replayed** on subsequent requests, and the cookie-jar is
-**persisted on disk** → the session survives an Island restart (no need to log in again),
-exactly like a desktop client.
-
-## Embedding a native binary
-
-*Permission: `native-encoder`.* The host doesn't decide the codec: an extension can provide
-its own binary (e.g. ffmpeg). It's **one trust notch above JS**:
-
-```ts
-const EXT_ID = "com.island.capture";
-// 1) Download the binary INTO the extension's folder (on first need)
-await useIsland().capture.fetchBinary({
-  extId: EXT_ID,
-  url: "https://…/ffmpeg-win64.zip",
-  dest: "binaries/ffmpeg.exe",
-  zipEntry: "bin/ffmpeg.exe",           // if the URL is a zip: entry to extract
-});                                      // progress via the "encoder://download" event
-
-// 2) Record by providing the encoder
-await useIsland().capture.startRecording({
-  region, display, fps: 30,
-  encoder: { extId: EXT_ID, bin: "binaries/ffmpeg.exe", args: ["-c:v","libx265","-crf","25"] },
-});
-```
-
-- The binary and the destination are **confined** to `extensions/<id>/` (against `..`/absolute
-  paths) → impossible to launch a system program.
-- **Don't put it in the `.island`**: keep the package light, download on first need,
-  `.gitignore` the `binaries/` folder.
-
-**System audio**: add `audio: true` + `audioArgs`:
-
-```ts
-startRecording({ …, audio: true, encoder: { …, audioArgs: ["-c:a","aac","-b:a","160k"] } });
-```
-
-The host captures the PC's audio (WASAPI loopback), encodes the video, then muxes the two.
-
-## Floating window (player, mini-tool)
-
-```ts
-const id = ctx.window.open(Player, { title: "Player", width: 480, height: 270, resizable: true });
-// movable, independent of the island; ctx.window.close(id) to close
-```
-
-## Open a URL in the browser
-
-```ts
-await ctx.openExternal("https://example.com/watch/123");
-```
-
-Handy when playback/rendering is better handled by the browser (that's what **Aniplex**
-does: click an episode → opens the web player + `ctx.view.close()`).
-
-## Feeding the launcher search (provider)
-
-The island's launcher becomes an **extensible command palette**: register a provider, and
-as soon as the user types, your results show up. As long as no extension registers a
-provider, the launcher stays a plain grid (the search field only appears if there's at least
-one provider).
-
-```ts
-activate(ctx) {
-  ctx.launcher.provider({
-    onQuery: async (q) => {
-      if (!q) return [];
-      const hits = await search(q);                   // sync or async (fetch, compute…)
-      return hits.map((h) => ({
-        id: h.id,
-        title: h.name,
-        subtitle: h.detail,
-        icon: "<svg…>",                                // optional (default icon otherwise)
-        onActivate: () => open(h),                     // Enter or click
-      }));
-    },
-  });
+async function refresh() {
+  clearTimeout(timer);
+  // … work …
+  const minutes = Number(await island.settings.get<string>("interval")) || 5;
+  timer = setTimeout(refresh, minutes * 60_000);
 }
-// automatic cleanup on deactivation; or ctx.launcher.removeProvider()
+
+island.settings.onChange(() => void refresh());
+island.commands.on("refresh", () => void refresh());
+await refresh();
 ```
 
-Results from **all** active providers are merged. `Enter` activates the first result. One
-extension = one provider.
-
-## Communicating between extensions (bus)
-
-A "producer" extension publishes an event; others subscribe — without knowing each other.
-Prefix your channels to avoid collisions.
+## Call an API with a token
 
 ```ts
-// Producer (e.g. a player):
-ctx.bus.emit("nowplaying:update", { title, artist });
-
-// Consumer (e.g. a widget):
-const off = ctx.bus.on("nowplaying:update", (p) => show(p));
-// `off()` to unsubscribe; otherwise cleaned up automatically on deactivation.
+const token = await island.settings.get<string | null>("token"); // "secret"-type setting
+if (!token) return "noToken";
+const prs = await island.http.json<{ items: unknown[] }>(
+  `https://api.github.com/search/issues?q=${encodeURIComponent("is:open is:pr author:@me")}`,
+  { headers: { Authorization: `Bearer ${token}` } },
+);
 ```
 
-## Read out loud / type text
+Manifest: `"permissions": ["network:api.github.com"]` and a setting
+`{ "key": "token", "type": "secret" }`.
+
+## Share state between the logic and the view
+
+The logic and the view run in two separate iframes: go through storage.
 
 ```ts
-ctx.speak("Build done");                    // text-to-speech (no permission)
-await ctx.input.typeText("Hello 👋");        // types into the active app (⚠ perm `input`)
+// logic
+await island.storage.set("snapshot", { reviews, mine, at: Date.now() });
+
+// view: show the last known state right away, then refresh
+let snap = await island.storage.get<Snapshot>("snapshot");
+render();
 ```
 
-## Notify the end of a task
+## Notify only about new items
 
 ```ts
-ctx.notify({
-  title: "Recording finished", body: "0:42", color: "#ff453a",
-  source: "Capture", onClick: () => island.invoke("reveal_path", { path }),  // opens the file
+const known = new Set(before.reviews.map((p) => p.id));
+for (const pr of now.reviews.filter((p) => !known.has(p.id))) {
+  await island.notify({ title: island.t("notify.review", { repo: pr.repo }), body: pr.title });
+}
+```
+
+## Live activity based on state
+
+```ts
+if (failed) return island.live.set("status", { icon: "icons/ci.svg", text: String(failed), color: "red", priority: "high" });
+if (reviews) return island.live.set("status", { icon: "icons/review.svg", text: String(reviews), color: "orange" });
+return island.live.set("status", null);
+```
+
+## Cached launcher results
+
+```ts
+island.launcher.provide("repos", async (q) => {
+  const list = await repos(island); // cached for 1 h in island.storage
+  return list
+    .filter((r) => r.name.toLowerCase().includes(q.toLowerCase()))
+    .slice(0, 20)
+    .map((r) => ({ id: r.url, title: r.name, subtitle: r.description ?? undefined, icon: "icons/github.svg" }));
 });
+island.launcher.onRun("repos", (url) => void island.openUrl(url));
 ```
 
-`reveal_path` (reveal in the file explorer) is not gated: it's an app command.
+## Follow the theme in a view
+
+With `@island/sdk/ui.css`, nothing to do. For your own colors:
+
+```css
+:root { --accent: #fff; }
+:root.light { --accent: #000; }
+```

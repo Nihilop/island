@@ -1,78 +1,57 @@
-# 7. Distribution
+# Distribution
 
-## Le format `.island`
+Une extension se distribue en **paquet `.island`** : un zip qui contient le manifeste, les
+fichiers construits (`dist/`, `icons/`, `locales/`, `assets/`) et une signature.
 
-Un `.island` est une **archive zip** contenant `manifest.json` + `dist/` (sans le code
-source). C'est tout ce dont l'hôte a besoin pour installer et charger une extension.
+## Empaqueter
 
-## Packager
-
-Deux voies :
-
-- **Dans l'app** (recommandé) : Réglages → Extensions → bouton **« Packager »** (visible
-  sur les extensions marquées *dev*, c.-à-d. qui ont un `package.json`) → choisir la
-  destination → un `.island` est créé.
-  L'app **ne compile pas** : elle zippe le `dist/` que tu as déjà buildé. Build d'abord
-  (`pnpm build`).
-- **Manuellement** : zippe `manifest.json` + `dist/` à la racine de l'archive, extension
-  `.island`.
-
-## Signer une extension (optionnel, recommandé)
-
-À l'installation, l'écran de consentement affiche un **badge de confiance** : 🟢 *Signée par
-un éditeur de confiance*, 🟠 *Non signée*, ou 🔴 *Signature invalide*. La signature est
-**advisory** : une extension non signée s'installe quand même (à la responsabilité de
-l'utilisateur), mais une extension signée rassure.
-
-Island utilise des **signatures détachées [minisign](https://jedisct1.github.io/minisign/)**
-(même mécanisme que l'updater).
+L'outil `packages/sdk/bin/island.mjs` ne demande que Node :
 
 ```bash
-# 1. Générer ta paire de clés UNE FOIS (garde la clé privée SECRÈTE, hors du dépôt).
-minisign -G -p island-ext.pub -s island-ext.key
-
-# 2. Signer le paquet → produit `mon-extension.island.minisig`.
-minisign -S -s island-ext.key -m mon-extension.island
-
-# 3. Distribue le `.minisig` À CÔTÉ du `.island` (même dossier, même nom de base).
-#    Island cherche automatiquement `<paquet>.island.minisig` à l'installation.
+node packages/sdk/bin/island.mjs pack examples/extensions/github --out github.island
 ```
 
-> **Badge « de confiance »** : le statut 🟢 n'apparaît que si la **clé publique** qui a signé
-> est celle **embarquée dans le build d'Island** (`EXT_TRUSTED_PUBKEY`). Pour les extensions
-> first-party, signe avec la clé du mainteneur. Une signature d'une clé inconnue → 🔴 *invalide* ;
-> pas de `.minisig` → 🟠 *non signée*. Dans les deux cas l'install reste possible (advisory).
+Sans clé, le paquet n'est **pas signé** : il ne s'installe qu'en mode développeur, après un
+avertissement.
+
+## Signer
+
+```bash
+node packages/sdk/bin/island.mjs keygen ma-cle.json
+node packages/sdk/bin/island.mjs pack . --key ma-cle.json
+```
+
+- La signature (ed25519) porte sur l'empreinte de chaque fichier du paquet : un paquet
+  modifié après signature est refusé, même en mode développeur.
+- **Gardez la clé privée secrète et sauvegardée** : sans elle, plus de mise à jour signée.
+- Seules les clés reconnues par Island donnent le statut « Signé par Island ». Un paquet
+  signé par une autre clé est traité comme non officiel (mode développeur).
 
 ## Installer
 
-- **Double-clic** sur un `.island` (si l'association de fichiers est active) → une modal
-  d'installation s'ouvre : CGU → permissions demandées (traduites, les paliers ⚠ mis en
-  évidence) → progression → l'extension est copiée dans le dossier des extensions et
-  activée.
-- Depuis l'app : la même modal peut être déclenchée via **Réglages → Extensions →
-  Parcourir…**.
+L'utilisateur peut :
 
-## Association de fichiers
+- glisser le `.island` sur le notch ;
+- double-cliquer sur le fichier (association créée à la première installation) ;
+- passer par **Réglages › Extensions › Installer…**.
 
-À la première installation, Island associe les `.island` à l'application (clé `HKCU`,
-per-utilisateur, sans admin) → le double-clic fonctionne. Un bouton **« Associer les
-.island »** est aussi disponible dans les Réglages.
+Une fiche s'ouvre dans le notch : nom, auteur, état de la signature, permissions en clair,
+ce que l'extension ajoute. Après acceptation, Island vérifie à nouveau le paquet, l'installe
+d'un coup et enregistre les permissions consenties.
 
-## Checklist avant de publier
+## Mettre à jour
 
-- [ ] `id` du `manifest.json` = nom du dossier (reverse-DNS).
-- [ ] `vite.config.ts` externalise `["vue", "@island/sdk"]`.
-- [ ] `tailwind.css` : `theme(reference)` + `@source not "./dist"` + `@theme inline`.
-- [ ] `permissions` du manifeste = **exactement** les services backend utilisés (ni plus,
-      ni moins) — chaque service est vérifié à l'appel.
-- [ ] Les composants qui appellent un service gardé utilisent `useIsland(EXT_ID)`.
-- [ ] Un binaire natif éventuel est **téléchargé au runtime** (pas dans le `.island`),
-      `binaries/` est gitignore.
-- [ ] `pnpm build` à jour → `dist/index.mjs` + `dist/style.css` présents.
-- [ ] Testé activé/désactivé à chaud (Réglages → Extensions) sans erreur console.
-- [ ] (optionnel) Paquet **signé** : `<paquet>.island.minisig` joint au `.island`.
+Même chemin qu'une installation, avec une version plus récente et le même `id` : la fiche
+indique la version installée et met en évidence les **nouvelles** permissions. Le stockage
+et les secrets de l'extension sont conservés.
 
-## Et après
+## Désinstaller
 
-La traduction anglaise de cette documentation viendra dans `docs/en/`. La référence de
-typage reste [`src/sdk/island.ts`](../../src/sdk/island.ts) (source de vérité de l'API).
+Réglages › Extensions › corbeille (deux clics). Island supprime le dossier, les permissions,
+le stockage et les secrets de l'extension.
+
+## Limites
+
+- 2 000 fichiers et 64 Mo décompressés au plus.
+- Chemins relatifs sans `..` ; tous les fichiers référencés par le manifeste doivent être
+  présents.

@@ -2,26 +2,29 @@
 layout: home
 hero:
   name: Island
-  text: The Dynamic Island for Windows
-  tagline: Agnostic slots + extensions. Vue 3 · Tauri 2 · WebView2.
+  text: The notch for Windows
+  tagline: Your tools in a notch at the top of the screen. Extensible, isolated, signed.
   actions:
     - theme: brand
-      text: Get started
+      text: Write an extension
       link: /en/guide/introduction
+    - theme: alt
+      text: Quick start
+      link: /en/guide/demarrage
     - theme: alt
       text: GitHub
       link: https://github.com/Nihilop/island
 features:
   - icon: 🏝️
-    title: Agnostic host
-    details: The island knows about no extension. It exposes slots (idle, view, modal, window, notification, launcher) that extensions fill through @island/sdk.
-  - icon: 🧩
-    title: Vue + TS extensions
-    details: An extension is a small Vue/Vite project built to ESM. Dev == prod (same artifact), with the Vue/SDK runtime shared with the host.
+    title: Slots, not windows
+    details: An extension plugs into specific places in the notch — dock tool, live activity, launcher results, commands, settings. Everything stays in the notch.
+  - icon: 🛡️
+    title: Isolated by design
+    details: Each extension runs in a sandboxed iframe, with no access to the app, the network or other extensions. It only talks to Island, which knows its identity.
   - icon: 🔐
-    title: Explicit permissions
-    details: Every backend service (capture, media, network, terminal…) is gated by a permission declared in the manifest and checked on every call.
-  - icon: ⚡
-    title: Native & light
-    details: WGC capture, SMTC media, cookie-jar HTTP, PTY terminals, global shortcuts — exposed cleanly to the front-end without bloating the host.
+    title: Consented permissions
+    details: Network limited to declared domains, secrets, notifications, clipboard… The user accepts the list at install time, and Island checks it on every call.
+  - icon: ✍️
+    title: Signed packages
+    details: An extension ships as a signed .island package (ed25519). Developer mode loads a folder and hot-reloads it.
 ---

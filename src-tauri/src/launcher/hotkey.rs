@@ -120,11 +120,6 @@ pub fn launcher_paste_text() -> Option<String> {
     arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok()
 }
 
-/// Le launcher est-il suspendu (exclusion, plein écran) ? Pour l'afficher dans les réglages.
-#[tauri::command]
-pub fn launcher_suspended() -> bool {
-    SUSPENDED.load(Ordering::Relaxed)
-}
 
 #[cfg(target_os = "windows")]
 mod imp {

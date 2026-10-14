@@ -4,7 +4,7 @@ import { defineConfig } from "vitepress";
 // Le thème « island interactif » viendra dans docs/.vitepress/theme (phase 2).
 export default defineConfig({
   title: "Island",
-  description: "La Dynamic Island pour Windows — slots agnostiques + extensions (Vue 3, Tauri 2).",
+  description: "Island, le notch de Windows — et ses extensions (iframes isolées, paquets signés).",
   base: "/island/", // GitHub Pages projet : nihilop.github.io/island/
   cleanUrls: true,
   ignoreDeadLinks: true, // liens internes inter-fichiers à repasser après la réorg
@@ -22,39 +22,25 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: "Guide", link: "/guide/introduction" },
-          { text: "Référence", link: "/reference/authoring" },
-          { text: "Extensions", link: "/extensions/toolchain" },
+          { text: "Mises à jour", link: "/reference/updates" },
         ],
         sidebar: [
           {
-            text: "Guide",
+            text: "Écrire une extension",
             items: [
               { text: "Introduction", link: "/guide/introduction" },
               { text: "Démarrage rapide", link: "/guide/demarrage" },
-              { text: "Anatomie & build", link: "/guide/anatomie" },
+              { text: "Manifeste & build", link: "/guide/manifeste" },
               { text: "Le SDK", link: "/guide/sdk" },
-              { text: "Services & permissions", link: "/guide/services" },
+              { text: "Emplacements", link: "/guide/emplacements" },
+              { text: "Permissions & sécurité", link: "/guide/permissions" },
               { text: "Recettes", link: "/guide/recettes" },
               { text: "Distribution", link: "/guide/distribution" },
             ],
           },
           {
-            text: "Référence",
-            items: [
-              { text: "Écrire une extension", link: "/reference/authoring" },
-              { text: "Catalogue des services", link: "/reference/services-catalog" },
-              { text: "Intégrations & serve", link: "/reference/integrations" },
-              { text: "Mises à jour & releases", link: "/reference/updates" },
-              { text: "Roadmap SDK", link: "/reference/roadmap" },
-              { text: "Perf : gel de l'overlay", link: "/reference/perf-overlay-freeze" },
-            ],
-          },
-          {
-            text: "Extensions",
-            items: [
-              { text: "Toolchain", link: "/extensions/toolchain" },
-              { text: "Docker", link: "/extensions/docker" },
-            ],
+            text: "Island",
+            items: [{ text: "Mises à jour & releases", link: "/reference/updates" }],
           },
         ],
         docFooter: { prev: "Précédent", next: "Suivant" },
@@ -70,39 +56,25 @@ export default defineConfig({
       themeConfig: {
         nav: [
           { text: "Guide", link: "/en/guide/introduction" },
-          { text: "Reference", link: "/en/reference/authoring" },
-          { text: "Extensions", link: "/en/extensions/toolchain" },
+          { text: "Updates", link: "/en/reference/updates" },
         ],
         sidebar: [
           {
-            text: "Guide",
+            text: "Writing an extension",
             items: [
               { text: "Introduction", link: "/en/guide/introduction" },
               { text: "Quick start", link: "/en/guide/demarrage" },
-              { text: "Anatomy & build", link: "/en/guide/anatomie" },
+              { text: "Manifest & build", link: "/en/guide/manifeste" },
               { text: "The SDK", link: "/en/guide/sdk" },
-              { text: "Services & permissions", link: "/en/guide/services" },
+              { text: "Slots", link: "/en/guide/emplacements" },
+              { text: "Permissions & security", link: "/en/guide/permissions" },
               { text: "Recipes", link: "/en/guide/recettes" },
               { text: "Distribution", link: "/en/guide/distribution" },
             ],
           },
           {
-            text: "Reference",
-            items: [
-              { text: "Authoring an extension", link: "/en/reference/authoring" },
-              { text: "Services catalog", link: "/en/reference/services-catalog" },
-              { text: "Integrations & serve", link: "/en/reference/integrations" },
-              { text: "Updates & releases", link: "/en/reference/updates" },
-              { text: "SDK roadmap", link: "/en/reference/roadmap" },
-              { text: "Perf: overlay freeze", link: "/en/reference/perf-overlay-freeze" },
-            ],
-          },
-          {
-            text: "Extensions",
-            items: [
-              { text: "Toolchain", link: "/en/extensions/toolchain" },
-              { text: "Docker", link: "/en/extensions/docker" },
-            ],
+            text: "Island",
+            items: [{ text: "Updates & releases", link: "/en/reference/updates" }],
           },
         ],
         docFooter: { prev: "Previous", next: "Next" },

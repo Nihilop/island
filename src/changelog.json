@@ -1,18 +1,24 @@
 [
   {
-    "version": "2.0.0-alpha.0",
-    "date": "2026-10-13",
+    "version": "2.0.0",
+    "date": "2026-10-14",
     "highlight": true,
     "items": {
       "fr": [
-        "Nouveau notch : forme collée au bord de l'écran, ouverture au survol, dock d'outils.",
-        "Glisse le notch pour le déplacer, épingle-le, ou passe en mode focus (triple-clic pour sortir).",
-        "Réglages intégrés au notch, raccourci d'ouverture configurable."
+        "Island devient un notch : collé en haut de l'écran, il s'ouvre au survol ou au raccourci, avec un dock d'outils réordonnable.",
+        "Outils intégrés : vue d'ensemble, notifications Windows, lecture (égaliseur, mixer), minuteur, tâches, note, presse-papiers, étagère, Ask (IA), conversion, quotas IA, météo, matériel, Discord.",
+        "Coffre : pont vers ton compte Bitwarden (copie privée, codes 2FA), déverrouillage par Windows Hello.",
+        "Launcher natif (Ctrl+Espace ou touche Windows) : apps, fichiers, réglages Windows, calculatrice, recherche web.",
+        "Thème clair, sombre ou système.",
+        "Nouvelles extensions, isolées et signées. Les extensions de la v1 sont retirées."
       ],
       "en": [
-        "New notch: shape attached to the screen edge, opens on hover, tool dock.",
-        "Drag the notch to move it, pin it, or switch to focus mode (triple-click to exit).",
-        "Settings built into the notch, configurable open shortcut."
+        "Island becomes a notch: attached to the top of the screen, it opens on hover or with a shortcut, with a reorderable tool dock.",
+        "Built-in tools: overview, Windows notifications, media (equalizer, mixer), timer, to-dos, note, clipboard, shelf, Ask (AI), conversion, AI quotas, weather, hardware, Discord.",
+        "Vault: bridge to your Bitwarden account (private copy, 2FA codes), unlock with Windows Hello.",
+        "Native launcher (Ctrl+Space or the Windows key): apps, files, Windows settings, calculator, web search.",
+        "Light, dark or system theme.",
+        "New extensions, isolated and signed. v1 extensions are removed."
       ]
     }
   }

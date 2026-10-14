@@ -58,7 +58,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 
     <div
       v-if="!items.length"
-      class="mb-1 flex flex-1 flex-col items-center justify-center gap-1 rounded-[14px] border-[1.5px] border-dashed transition-[scale,background-color,border-color] duration-200 ease-out"
+      class="mt-2 mb-1 flex flex-1 flex-col items-center justify-center gap-1 rounded-[14px] border-[1.5px] border-dashed transition-[scale,background-color,border-color] duration-200 ease-out"
       :class="dragOver ? 'scale-[1.015] border-label-2 bg-fill-2' : 'border-fill-3 bg-fill-1'"
     >
       <PhTray :size="22" weight="duotone" class="text-label-3" />

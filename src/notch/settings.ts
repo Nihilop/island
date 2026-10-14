@@ -38,6 +38,8 @@ export interface NotchSettings {
   /** Notification reçue notch fermé : pastille (minimal) ou bannière complète. */
   notifStyle: "minimal" | "full";
   /** Launcher : raccourci, touche Windows, apps qui le suspendent, plein écran, moteur web. */
+  /** Extensions v2 : désactivées, mode développeur (dossiers non empaquetés). */
+  extensions: { disabled: string[]; devMode: boolean; devFolders: string[] };
   launcher: {
     shortcut: string;
     winKey: boolean;
@@ -113,6 +115,7 @@ const DEFAULTS: NotchSettings = {
   vaultTimeout: 15 * 60,
   hello: { vault: false, notes: false },
   notifStyle: "minimal",
+  extensions: { disabled: [], devMode: false, devFolders: [] },
   launcher: { shortcut: "Control+Space", winKey: false, exclude: [], fullscreenOff: true, engine: "google" },
   passwordGen: { length: 20, digits: true, symbols: true },
   alarm: { sound: "gong", volume: 0.7, duration: 5 },
@@ -156,7 +159,7 @@ function migrateTools(saved: unknown): ToolPref[] {
 
 function merge(saved: Partial<NotchSettings> | null): NotchSettings {
   const s = saved && typeof saved === "object" ? saved : {};
-  return { ...DEFAULTS, ...s, hello: { ...DEFAULTS.hello, ...s.hello }, launcher: { ...DEFAULTS.launcher, ...s.launcher }, tools: migrateTools(s.tools) };
+  return { ...DEFAULTS, ...s, hello: { ...DEFAULTS.hello, ...s.hello }, launcher: { ...DEFAULTS.launcher, ...s.launcher }, extensions: { ...DEFAULTS.extensions, ...s.extensions }, tools: migrateTools(s.tools) };
 }
 
 export const settings = reactive<NotchSettings>(merge(null));

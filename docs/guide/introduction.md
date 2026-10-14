@@ -1,67 +1,49 @@
-# 1. Introduction & modèle
+# Introduction
 
-## L'hôte est agnostique
+Island est un notch pour Windows : une barre en haut de l'écran qui s'ouvre au survol (ou
+au raccourci) et accueille des outils — lecture, minuteur, presse-papiers, coffre, launcher…
+Une **extension** y ajoute ses propres outils et informations.
 
-Island (l'application) ne fait que **présenter** des surfaces et **router** des
-événements. Il n'a aucune connaissance d'une extension en particulier : pas d'« id en
-dur », pas de logique Spotify/capture/etc. dans le cœur. Tout ce qui apparaît dans
-l'île vient d'une extension via le SDK.
+## Ce qu'une extension peut ajouter
 
-Conséquence pratique : **tout ce que tu peux faire, une autre extension peut le faire
-aussi.** Les primitives sont génériques.
+Une extension ne crée jamais de fenêtre : elle s'ajoute à des **emplacements** du notch,
+déclarés dans son manifeste.
 
-## Qu'est-ce qu'une extension ?
+| Emplacement | Ce que voit l'utilisateur | Rendu par |
+|---|---|---|
+| **Outil** | un bouton dans le dock, une vue dans le notch ouvert | l'extension (HTML/CSS/JS) |
+| **Activité en direct** | une icône et un texte court quand le notch est fermé | Island |
+| **Launcher** | des résultats dans le launcher (avec un préfixe optionnel, ex. `gh …`) | Island |
+| **Notifications** | une bannière notch fermé + l'historique | Island |
+| **Commandes** | une action avec raccourci global, cherchable dans le launcher | Island |
+| **Réglages** | une section dans Réglages › Extensions | Island |
 
-Un **mini-projet Vue/TypeScript autonome** qui :
+Tout ce qui est « rendu par Island » reprend automatiquement le design du notch (thème clair
+ou sombre compris) : l'extension ne fournit que des données.
 
-- ne dépend, au runtime, que de **`vue`** et **`@island/sdk`** (tous deux fournis par
-  l'hôte — voir le contrat de build) ;
-- se compile en un **module ESM unique** `dist/index.mjs` (+ `dist/style.css`) ;
-- exporte par défaut un objet `defineExtension({...})`.
+## Comment elle tourne
 
-L'hôte ne lit **que** `manifest.json` + `dist/`. Le code source présent à côté est
-**ignoré** (c'est ton espace de travail ; tu le rebuild avec ton propre `pnpm dev`).
+- Le code d'une extension s'exécute dans des **iframes isolées** : une cachée pour sa
+  logique (`main`), une par vue d'outil ouverte.
+- Elle n'a **aucun accès** à l'app, au réseau, au disque ni aux autres extensions. Tout passe
+  par le **SDK** (`@island/sdk`), qui parle à Island ; Island vérifie les permissions.
+- Elle est livrée en **paquet `.island` signé** ; l'utilisateur voit ses permissions avant de
+  l'installer.
 
-## Surfaces : où ton UI s'affiche
+Voir [Permissions & sécurité](./permissions) pour le détail.
 
-Une surface est un composant Vue que l'hôte monte à un endroit de l'interface :
+## Exemple de référence
 
-| Surface  | Où | Pour quoi |
-| -------- | -- | --------- |
-| `view`   | **dans l'île** (elle morphe à la taille demandée) | l'écran principal de l'extension |
-| `config` | dans la **modal** centrée | les réglages de l'extension |
-| `drop`   | **goutte** sous une view (sous-slot) | un mini-contenu annexe (ex. slider de volume) |
-| `window` | **panneau flottant** draggable | un outil libre, déplaçable (lecteur, mini-fenêtre) |
+L'extension **GitHub** (`examples/extensions/github` dans le dépôt) utilise tous les
+emplacements : un outil « À revoir / Mes PR », l'activité en direct (revues en attente, CI),
+des notifications, les dépôts dans le launcher (`gh …`), une commande « Rafraîchir » et une
+page de réglages (jeton, fréquence). C'est le meilleur point de départ.
 
-Tu déclares quelles surfaces existent dans le `manifest.json`, et tu branches le
-composant Vue réel dans `index.ts`.
+## Pour aller plus loin
 
-## Contributions : ce que tu ajoutes à l'île
-
-Au-delà des surfaces, une extension **contribue** à l'île sans la « posséder » :
-
-- **`launcher`** — une entrée (label + icône) dans le lanceur de l'île.
-- **`idle`** — au centre : un état simple (`recording`… = couleur) **ou** un composant
-  custom (`idle.center` — viz riche) ; et/ou des raccourcis aux extrémités quand l'île est
-  au repos ; un *tap* sur l'île ouvre ton UI.
-- **`notify`** — une notification (bannière + historique).
-
-Plusieurs extensions coexistent : leurs contributions sont cumulées et nettoyées
-automatiquement à la désactivation.
-
-## Le cycle de vie
-
-```ts
-export default defineExtension({
-  surfaces: { view: MaView },
-  activate(ctx) { /* l'extension démarre : enregistre launcher, idle, watchers… */ },
-  deactivate() { /* optionnel : nettoyage manuel */ },
-});
-```
-
-`activate(ctx)` reçoit le **contexte** : l'API Island complète **+** `ctx.id` (ton
-identifiant) **+** `ctx.storage` (ton stockage isolé). L'hôte gère le scope : les
-`watch`/`watchEffect` créés dans `activate` sont stoppés à la désactivation, et tes
-contributions (launcher, idle, surfaces) sont retirées.
-
-→ Place : [Démarrage rapide](02-demarrage-rapide.md).
+- [Démarrage rapide](./demarrage) — de zéro à une extension chargée dans Island.
+- [Manifeste & build](./manifeste) — les champs du manifeste, la config Vite.
+- [Le SDK](./sdk) — toutes les fonctions disponibles.
+- [Emplacements](./emplacements) — chaque emplacement en détail.
+- [Recettes](./recettes) — des exemples courts.
+- [Distribution](./distribution) — empaqueter, signer, installer.

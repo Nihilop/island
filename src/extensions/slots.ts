@@ -11,7 +11,7 @@
 import { computed, reactive } from "vue";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { addMethods, emitTo, extUrl, installed, type Manifest } from "./runtime";
-import { addLauncherSource, setExternalResults, type ExternalItem } from "../launcher/store";
+import { addLauncherSource, removeLauncherSource, setExternalResults, type ExternalItem } from "../launcher/store";
 
 // --- Activité en direct ----------------------------------------------------------------
 
@@ -106,10 +106,13 @@ async function bindShortcut(ext: Manifest, cmd: { id: string; shortcut?: string 
   }
 }
 
-/** Branche une extension sur les emplacements live / launcher / commandes. */
-export function registerExtensionSlots(ext: Manifest) {
+/** Branche une extension sur les emplacements live / launcher / commandes ; renvoie de
+ *  quoi l'en débrancher (désactivation, désinstallation, rechargement). */
+export function registerExtensionSlots(ext: Manifest): () => void {
+  const keys: string[] = [];
   for (const p of ext.contributes.launcher) {
     const key = `${ext.id}:${p.id}`;
+    keys.push(key);
     addLauncherSource({
       key,
       name: p.title ?? ext.name,
@@ -125,6 +128,7 @@ export function registerExtensionSlots(ext: Manifest) {
   // Commandes : aussi cherchables dans le launcher (titre).
   if (ext.contributes.commands.length) {
     const key = `${ext.id}:#commands`;
+    keys.push(key);
     addLauncherSource({
       key,
       name: ext.name,
@@ -141,6 +145,11 @@ export function registerExtensionSlots(ext: Manifest) {
     });
     for (const c of ext.contributes.commands) void bindShortcut(ext, c);
   }
+  return () => {
+    keys.forEach(removeLauncherSource);
+    for (const k of [...lives.keys()]) if (k.startsWith(`${ext.id}:`)) lives.delete(k);
+    void unbindShortcuts(ext.id);
+  };
 }
 
 /** Retire les raccourcis d'extensions (désinstallation, rechargement). */

@@ -61,7 +61,7 @@ const KEY: &str = "display";
 fn migrate_legacy(app: &AppHandle) -> Option<DisplayPrefs> {
     let path = app.path().app_config_dir().ok()?.join("display.json");
     let prefs: DisplayPrefs = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-    crate::ext::storage::set(app, STORE, KEY, serde_json::to_value(&prefs).ok());
+    crate::store::set(app, STORE, KEY, serde_json::to_value(&prefs).ok());
     let _ = std::fs::remove_file(path);
     Some(prefs)
 }
@@ -69,7 +69,7 @@ fn migrate_legacy(app: &AppHandle) -> Option<DisplayPrefs> {
 fn display(app: &AppHandle) -> DisplayPrefs {
     let mut d = DISPLAY.lock().unwrap_or_else(|p| p.into_inner());
     d.get_or_insert_with(|| {
-        crate::ext::storage::get(app, STORE, KEY)
+        crate::store::get(app, STORE, KEY)
             .and_then(|v| serde_json::from_value(v).ok())
             .or_else(|| migrate_legacy(app))
             .unwrap_or_default()
@@ -152,7 +152,7 @@ pub fn notch_set_display(
 ) -> Result<(), String> {
     let prefs = DisplayPrefs { monitor, offset };
     if persist {
-        crate::ext::storage::set(&app, STORE, KEY, serde_json::to_value(&prefs).ok());
+        crate::store::set(&app, STORE, KEY, serde_json::to_value(&prefs).ok());
     }
     *DISPLAY.lock().unwrap_or_else(|p| p.into_inner()) = Some(prefs);
     let win = app.get_webview_window("overlay").ok_or("overlay introuvable")?;
@@ -319,23 +319,6 @@ pub fn notch_memory_low(app: AppHandle, low: bool) -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     let _ = (win, low);
     Ok(())
-}
-
-/// Exclut (ou non) la fenêtre overlay d'Island des captures d'écran, tout en la
-/// gardant visible à l'œil. C'est le mécanisme « ignorer les éléments d'Island ».
-#[cfg(target_os = "windows")]
-pub(crate) fn set_overlay_excluded(app: &AppHandle, exclude: bool) {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
-    };
-    if let Some(w) = app.get_webview_window("overlay") {
-        if let Ok(hwnd) = w.hwnd() {
-            let affinity = if exclude { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
-            unsafe {
-                let _ = SetWindowDisplayAffinity(hwnd, affinity);
-            }
-        }
-    }
 }
 
 // --- Thread de hit-test --------------------------------------------------------------
