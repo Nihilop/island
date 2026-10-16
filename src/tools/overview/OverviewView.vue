@@ -15,7 +15,8 @@ import {
 } from "@phosphor-icons/vue";
 import Equalizer from "../../ui/Equalizer.vue";
 import IconButton from "../../ui/IconButton.vue";
-import { PhDiscordLogo, PhEye, PhEyeSlash } from "@phosphor-icons/vue";
+import { PhDiscordLogo, PhEye, PhEyeSlash, PhGameController } from "@phosphor-icons/vue";
+import { duration as playDuration, playing } from "../activity/store";
 import { presentation, setPresentation } from "../../notch/presentation";
 import TrackBar from "../../ui/TrackBar.vue";
 import { Button } from "@/sdk/ui/button";
@@ -44,9 +45,10 @@ const date = computed(() =>
 );
 
 // --- Activité : minuteur > musique ------------------------------------------------
-const activity = computed<"timer" | "discord" | "media" | null>(() => {
+const activity = computed<"timer" | "discord" | "game" | "media" | null>(() => {
   if (running.value || timer.finished) return "timer";
   if (inCall.value) return "discord";
+  if (playing.value) return "game";
   if (np.active) return "media";
   return null;
 });
@@ -128,7 +130,7 @@ const sky = computed(() => (weather.current ? wmo(weather.current.code, weather.
       </button>
     </div>
 
-    <button type="button" class="flex h-11 items-center gap-2.5 rounded-md bg-fill-1 px-2.5" @click="activity && selectTool(activity)">
+    <button type="button" class="flex h-11 items-center gap-2.5 rounded-md bg-fill-1 px-2.5" @click="activity && selectTool(activity === 'game' ? 'activity' : activity)">
       <template v-if="activity === 'timer'">
         <span :class="cn('grid size-7 place-items-center', timer.mode === 'focus' && !timer.finished ? 'text-sys-orange' : 'text-sys-green')">
           <PhCheck v-if="timer.finished" :size="16" weight="bold" />
@@ -154,6 +156,14 @@ const sky = computed(() => (weather.current ? wmo(weather.current.code, weather.
           </div>
         </div>
         <Equalizer v-if="someoneSpeaking" color="var(--sys-green)" />
+      </template>
+      <template v-else-if="activity === 'game' && playing">
+        <img v-if="playing.art" :src="playing.art" alt="" class="h-7 w-[60px] rounded-[6px] object-cover" />
+        <span v-else class="grid size-7 place-items-center text-sys-green"><PhGameController :size="16" weight="fill" /></span>
+        <div class="min-w-0 flex-1 text-left">
+          <div class="type-body truncate">{{ playing.name }}</div>
+          <div class="type-caption truncate text-label-3">{{ t("activity.since", { d: playDuration(playing.elapsed) }) }}</div>
+        </div>
       </template>
       <template v-else-if="activity === 'media'">
         <img v-if="np.art" :src="np.art" alt="" class="size-7 rounded-[6px] object-cover" />

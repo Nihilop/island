@@ -68,6 +68,29 @@ export interface RecordingState {
   error?: string;
 }
 
+/** Activité (permission `activity`). */
+export interface ActivityApp {
+  pid: number;
+  exe: string;
+  path: string;
+  title: string;
+  name: string;
+  kind: "game" | "app";
+  source: string;
+  appId?: string;
+  art?: string;
+  icon?: string;
+}
+export interface ActivityState {
+  foreground: ActivityApp | null;
+  game: { key: string; name: string; source: string; appId?: string; art?: string; pid: number; startedAt: number } | null;
+}
+export interface ActivityDay {
+  date: string;
+  games: { key: string; name: string; seconds: number }[];
+  apps: { key: string; name: string; seconds: number }[];
+}
+
 export interface LiveSpec {
   /** Chemin d'une icône de l'extension (SVG monochrome, teinté par `color`). */
   icon?: string;
@@ -150,6 +173,13 @@ export interface Island {
     onRecording(cb: (state: RecordingState) => void): void;
     /** Affiche une capture d'Island dans l'Explorateur. */
     reveal(path: string): Promise<void>;
+  };
+  /** Permission `activity` (sensible) : jeu en cours, app au premier plan, temps passé. */
+  activity: {
+    state(): Promise<ActivityState>;
+    /** Temps par jour (AAAA-MM-JJ, bornes incluses). */
+    stats(from: string, to: string): Promise<ActivityDay[]>;
+    onChange(cb: (state: ActivityState) => void): void;
   };
   /** Événements entre les pages de l'extension (notch, fenêtres, logique). */
   events: {
@@ -291,6 +321,11 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
       onArgs: (cb) => on("window.args", cb),
       setTitle: (title) => call("windows.setTitle", title),
       close: () => call("windows.close"),
+    },
+    activity: {
+      state: () => call("activity.state"),
+      stats: (from, to) => call<{ days: ActivityDay[] }>("activity.stats", from, to).then((r) => r.days),
+      onChange: (cb) => on("activity.changed", cb),
     },
     capture: {
       displays: () => call("capture.displays"),

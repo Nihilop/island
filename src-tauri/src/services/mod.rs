@@ -5,6 +5,7 @@
 // déposer un `macos.rs`/`linux.rs` remplissant le même contrat, sans toucher aux
 // commandes ni aux permissions.
 
+pub mod activity;
 pub mod ai;
 pub mod apps;
 pub mod capture;
