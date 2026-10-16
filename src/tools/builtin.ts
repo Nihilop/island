@@ -36,6 +36,7 @@ import BudgetView from "./budget/BudgetView.vue";
 import NotesView from "./notes/NotesView.vue";
 import ConvertView from "./convert/ConvertView.vue";
 import WeatherView from "./weather/WeatherView.vue";
+import WeatherSky from "./weather/WeatherSky.vue";
 import MarketsView from "./markets/MarketsView.vue";
 import ClipboardView from "./clipboard/ClipboardView.vue";
 import ShelfView from "./shelf/ShelfView.vue";
@@ -68,6 +69,9 @@ const VIEWS: Record<string, Component> = {
 };
 import SettingsView from "./settings/SettingsView.vue";
 
+/** Fonds décoratifs (derrière tout le notch ouvert). */
+const BACKDROPS: Record<string, Component> = { weather: WeatherSky };
+
 // Taille ouverte (header + contenu + dock compris), en DIP.
 const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   overview: { icon: PhSquaresFour, size: [520, 252] },
@@ -83,7 +87,7 @@ const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   convert: { icon: PhArrowsLeftRight, size: [520, 290] },
   trading: { icon: PhChartLineUp, size: [560, 380] },
   usage: { icon: PhGauge, size: [600, 320] },
-  weather: { icon: PhCloudSun, size: [520, 250] },
+  weather: { icon: PhCloudSun, size: [540, 300] },
   system: { icon: PhCpu, size: [600, 248] },
   discord: { icon: PhDiscordLogo, size: [520, 210] },
   vault: { icon: PhLockKey, size: [560, 324] },
@@ -98,6 +102,7 @@ export function registerBuiltinTools() {
       title: () => t(`tool.${id}`),
       size: { w: spec.size[0], h: spec.size[1] },
       view: VIEWS[id] ?? ComingSoon,
+      backdrop: BACKDROPS[id],
       defaultEnabled: enabled,
     });
   }
