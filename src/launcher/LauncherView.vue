@@ -119,6 +119,8 @@ function subtitle(r: Row): string {
       return t("launcher.clip");
     case "ext":
       return r.item.subtitle || r.sourceName;
+    case "native":
+      return r.item.subtitle;
   }
 }
 
@@ -135,6 +137,8 @@ function title(r: Row): string {
     case "clip":
       return r.text.replace(/\s+/g, " ").trim();
     case "ext":
+      return r.item.title;
+    case "native":
       return r.item.title;
   }
 }
@@ -202,6 +206,7 @@ const placeholder = computed(() => t("launcher.placeholder"));
               />
               <PhPuzzlePiece v-else :size="20" weight="duotone" class="text-label-2" />
             </template>
+            <component :is="r.item.icon" v-else-if="r.type === 'native'" :size="20" weight="duotone" :class="r.item.tint ?? 'text-label-2'" />
             <PhClipboardText v-else :size="20" weight="duotone" class="text-label-2" />
           </span>
           <span class="min-w-0 flex-1">

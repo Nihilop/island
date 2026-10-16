@@ -45,6 +45,8 @@ export interface NotchSettings {
     winKey: boolean;
     exclude: string[];
     fullscreenOff: boolean;
+    /** Apps exclues : suspendre quand elles sont au premier plan, ou dès qu'elles tournent. */
+    excludeWhen: "focused" | "running";
     engine: "google" | "duckduckgo" | "bing";
   };
   /** Coffre : options du générateur de mots de passe. */
@@ -64,6 +66,8 @@ export interface NotchSettings {
   gaming: "off" | "fullscreen" | "game" | "always";
   /** Activité : reconnaître les jeux avec la liste de Discord, suivre le temps des apps. */
   activity: { discordDb: boolean; trackApps: boolean; presence: boolean };
+  /** Bannières de notification coupées (l'historique reste rempli) — automatisations. */
+  notifSilent: boolean;
   /** Ask : fournisseur et réglages par fournisseur (clés au Gestionnaire d'identifiants). */
   ask: {
     provider: AskProvider;
@@ -121,7 +125,7 @@ const DEFAULTS: NotchSettings = {
   hello: { vault: false, notes: false, budget: false },
   notifStyle: "minimal",
   extensions: { disabled: [], devMode: false, devFolders: [] },
-  launcher: { shortcut: "Control+Space", winKey: false, exclude: [], fullscreenOff: true, engine: "google" },
+  launcher: { shortcut: "Control+Space", winKey: false, exclude: [], fullscreenOff: true, excludeWhen: "focused", engine: "google" },
   passwordGen: { length: 20, digits: true, symbols: true },
   alarm: { sound: "gong", volume: 0.7, duration: 5 },
   privacyDots: false,
@@ -129,6 +133,7 @@ const DEFAULTS: NotchSettings = {
   discordClientId: "",
   gaming: "off",
   activity: { discordDb: true, trackApps: false, presence: true },
+  notifSilent: false,
   ask: {
     provider: "anthropic",
     byProvider: {

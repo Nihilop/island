@@ -1,5 +1,24 @@
 [
   {
+    "version": "2.3.0",
+    "date": "2026-10-16",
+    "highlight": true,
+    "items": {
+      "fr": [
+        "Automatisations (Réglages › Automatisations) : « pendant un jeu, une app ou une plage horaire, au démarrage » → notifications, volume, sortie audio, modes, lancer ou fermer une app, minuteur… Tout revient comme avant à la fin.",
+        "Launcher universel : crée une tâche (« todo acheter du pain demain 18h »), lance un minuteur (« timer 25 »), note une idée, ajoute une dépense, et cherche dans tes notes, tâches, jeux, dépenses et presse-papiers.",
+        "Préfixes du launcher : n: notes, t: tâches, j: jeux, b: budget.",
+        "Apps exclues du launcher : suspendu seulement quand l'app est au premier plan (ou dès qu'elle est ouverte, au choix)."
+      ],
+      "en": [
+        "Automations (Settings › Automations): “during a game, an app or a time range, at startup” → notifications, volume, audio output, modes, launch or close an app, timer… Everything is restored when it ends.",
+        "Universal launcher: create a to-do (“todo buy bread tomorrow 6pm”), start a timer (“timer 25”), jot a note, add an expense, and search your notes, to-dos, games, expenses and clipboard.",
+        "Launcher prefixes: n: notes, t: to-dos, j: games, b: budget.",
+        "Launcher excluded apps: suspended only while the app is in front (or as soon as it's open, your choice)."
+      ]
+    }
+  },
+  {
     "version": "2.2.0",
     "date": "2026-10-16",
     "highlight": true,

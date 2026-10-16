@@ -95,6 +95,16 @@ const PREFIXES = ["a", "f", "d", "s", "c"] as const;
     </Group>
 
     <Group :title="t('launcher.settings.exclude')" :note="t('launcher.settings.excludeNote')">
+      <Row :label="t('launcher.settings.excludeWhen')" :help="t('launcher.settings.excludeWhenHelp')">
+        <Segmented
+          v-model="cfg.excludeWhen"
+          size="sm"
+          :options="[
+            { value: 'focused', label: t('launcher.settings.excludeFocused') },
+            { value: 'running', label: t('launcher.settings.excludeRunning') },
+          ]"
+        />
+      </Row>
       <Row v-for="exe in cfg.exclude" :key="exe" :label="exe">
         <Button size="icon-sm" variant="ghost" :title="t('launcher.settings.remove')" @click="remove(exe)"><PhX weight="bold" /></Button>
       </Row>

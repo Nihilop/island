@@ -469,7 +469,15 @@ impl Core {
 fn emit(s: Option<ActivityState>) {
     if let (Some(s), Some(app)) = (s, APP.get()) {
         let _ = app.emit_to("overlay", EVENT, s);
+        // Le launcher se suspend quand une app exclue passe au premier plan : réévaluation
+        // immédiate, sans attendre son propre relevé.
+        crate::launcher::hotkey::reevaluate(app);
     }
+}
+
+/// Exécutable (minuscules) de l'app au premier plan, hors fenêtres d'Island.
+pub fn foreground_exe() -> Option<String> {
+    lock().and_then(|c| c.state().foreground.map(|f| f.exe.to_lowercase()))
 }
 
 /// Classement de base d'un exe (cache par chemin ; sondes disque hors verrou).

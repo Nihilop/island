@@ -4,7 +4,7 @@
 import { ref } from "vue";
 import { selectTool } from "../../notch/state";
 
-export type SettingsPage = "general" | "display" | "tools" | "launcher" | "extensions" | "timer" | "ai" | "connections" | "backup";
+export type SettingsPage = "general" | "display" | "tools" | "launcher" | "extensions" | "timer" | "ai" | "connections" | "automations" | "backup";
 
 /** Section → page qui la contient. */
 const SECTION_PAGE: Record<string, SettingsPage> = {
@@ -23,6 +23,7 @@ const SECTION_PAGE: Record<string, SettingsPage> = {
   extensions: "extensions",
   hello: "tools",
   vault: "tools",
+  automations: "automations",
   backup: "backup",
   restore: "backup",
 };

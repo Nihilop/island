@@ -26,5 +26,6 @@ pub mod notifs;
 pub mod privacy;
 pub mod reserved;
 pub mod system;
+pub mod system_ctl;
 pub mod usage;
 pub mod weather;

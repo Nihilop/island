@@ -102,7 +102,7 @@ function armBanner() {
 }
 
 function showBanner(n: Notif) {
-  if (state.value === "open" || presentation.value || settings.focusMode) return;
+  if (state.value === "open" || presentation.value || settings.focusMode || settings.notifSilent) return;
   notifs.banner = n;
   armBanner();
 }
