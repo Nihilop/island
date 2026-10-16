@@ -86,6 +86,7 @@ async function save(ext: Manifest, d: SettingDecl, value: unknown) {
 /** Libellé lisible d'une permission. */
 function permLabel(p: string): string {
   if (p.startsWith("network:")) return t("ext.perm.network", { host: p.slice(8) });
+  if (p.startsWith("images:")) return t("ext.perm.images", { host: p.slice(7) });
   const key = `ext.perm.${p}`;
   const s = t(key);
   return s === key ? p : s;

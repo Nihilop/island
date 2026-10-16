@@ -1,24 +1,24 @@
 # Introduction
 
-Island est un notch pour Windows : une barre en haut de l'écran qui s'ouvre au survol (ou
+Island est une île pour Windows : une barre en haut de l'écran qui s'ouvre au survol (ou
 au raccourci) et accueille des outils — lecture, minuteur, presse-papiers, coffre, launcher…
 Une **extension** y ajoute ses propres outils et informations.
 
 ## Ce qu'une extension peut ajouter
 
-Une extension ne crée jamais de fenêtre : elle s'ajoute à des **emplacements** du notch,
+Une extension s'ajoute à des **emplacements** de l'île (et peut ouvrir ses propres fenêtres),
 déclarés dans son manifeste.
 
 | Emplacement | Ce que voit l'utilisateur | Rendu par |
 |---|---|---|
-| **Outil** | un bouton dans le dock, une vue dans le notch ouvert | l'extension (HTML/CSS/JS) |
-| **Activité en direct** | une icône et un texte court quand le notch est fermé | Island |
+| **Outil** | un bouton dans le dock, une vue dans l'île ouverte | l'extension (HTML/CSS/JS) |
+| **Activité en direct** | une icône et un texte court quand l'île est fermée | Island |
 | **Launcher** | des résultats dans le launcher (avec un préfixe optionnel, ex. `gh …`) | Island |
-| **Notifications** | une bannière notch fermé + l'historique | Island |
+| **Notifications** | une bannière île fermée + l'historique | Island |
 | **Commandes** | une action avec raccourci global, cherchable dans le launcher | Island |
 | **Réglages** | une section dans Réglages › Extensions | Island |
 
-Tout ce qui est « rendu par Island » reprend automatiquement le design du notch (thème clair
+Tout ce qui est « rendu par Island » reprend automatiquement le design de l'île (thème clair
 ou sombre compris) : l'extension ne fournit que des données.
 
 ## Comment elle tourne

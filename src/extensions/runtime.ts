@@ -14,6 +14,8 @@
 
 import { reactive, ref, watch } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { locale } from "../sdk/i18n";
 import { notify } from "../tools/notifications/store";
 
@@ -23,6 +25,14 @@ export interface ToolDecl {
   icon: string | null;
   view: string;
   size: [number, number];
+}
+
+export interface WindowDecl {
+  id: string;
+  view: string;
+  title: string | null;
+  size: [number, number];
+  minSize: [number, number] | null;
 }
 
 export interface SettingDecl {
@@ -45,6 +55,7 @@ export interface Manifest {
   permissions: string[];
   contributes: {
     tools: ToolDecl[];
+    windows: WindowDecl[];
     live: { id: string; tool?: string }[];
     launcher: { id: string; prefix?: string; title?: string }[];
     commands: { id: string; title: string; shortcut?: string }[];
@@ -64,6 +75,32 @@ export const extUrl = (id: string, path: string) => `${ORIGIN}/${id}/${path.spli
 
 /** Thème effectif (classe posée sur <html> par notch/theme.ts). */
 const theme = () => (document.documentElement.classList.contains("light") ? "light" : "dark");
+
+/** Clé de fenêtre d'extension (`ext-<clé>`) : points de l'id → `_` (absents des id), puis
+ *  `__` et l'id de la fenêtre. */
+export const windowKey = (extId: string, winId: string) => `${extId.split(".").join("_")}__${winId}`;
+export function parseWindowKey(key: string): { extId: string; winId: string } | null {
+  const i = key.lastIndexOf("__");
+  return i > 0 ? { extId: key.slice(0, i).split("_").join("."), winId: key.slice(i + 2) } : null;
+}
+
+/** Libellé de la fenêtre où tourne ce runtime (notch ou fenêtre d'extension). */
+const here = (() => {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return "overlay";
+  }
+})();
+
+/** Requête HTTP d'une extension → forme attendue par Rust. */
+const toReq = (req: any) => ({
+  url: String(req?.url ?? ""),
+  method: req?.method ? String(req.method) : null,
+  headers: Object.entries(req?.headers ?? {}).map(([k, v]) => [String(k), String(v)]),
+  body: req?.body == null ? null : typeof req.body === "string" ? req.body : JSON.stringify(req.body),
+  timeout: typeof req?.timeout === "number" ? Math.round(req.timeout) : null,
+});
 
 // --- RPC ------------------------------------------------------------------------------
 
@@ -90,16 +127,39 @@ const methods: Record<string, Handler> = {
   "secrets.set": (ext, key: unknown, value: unknown) => (need(ext, "secrets"), invoke("ext2_secret_set", { id: ext.id, key: String(key), value: String(value) })),
   "secrets.delete": (ext, key: unknown) => (need(ext, "secrets"), invoke("ext2_secret_delete", { id: ext.id, key: String(key) })),
   // Réseau : la liste de domaines est revérifiée côté Rust (manifeste installé).
-  "http.request": (ext, req: any) =>
-    invoke("ext2_http", {
-      id: ext.id,
-      req: {
-        url: String(req?.url ?? ""),
-        method: req?.method ? String(req.method) : null,
-        headers: Object.entries(req?.headers ?? {}).map(([k, v]) => [String(k), String(v)]),
-        body: req?.body == null ? null : typeof req.body === "string" ? req.body : JSON.stringify(req.body),
-      },
-    }),
+  "http.request": (ext, req: any) => invoke("ext2_http", { id: ext.id, req: toReq(req) }),
+  // Binaire : `[u32 LE taille méta][méta JSON][corps]` → { status, headers, body } ; le
+  // corps (ArrayBuffer) est TRANSFÉRÉ à l'iframe (cf. serve).
+  "http.bytes": async (ext, req: any) => {
+    const buf = await invoke<ArrayBuffer>("ext2_http_bytes", { id: ext.id, req: toReq(req) });
+    const len = new DataView(buf).getUint32(0, true);
+    const meta = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, len)));
+    return { status: meta.status, headers: meta.headers, body: buf.slice(4 + len) };
+  },
+  // Cookies : tenus par Island (permission `cookies`), jamais visibles ; l'extension peut
+  // seulement tout oublier (déconnexion).
+  "http.clearCookies": (ext) => invoke("ext2_cookies_clear", { id: ext.id }),
+  // Fenêtres (permission `windows`) : page déclarée dans `contributes.windows`.
+  "windows.open": (ext, winId: unknown, args: unknown, opts: any) => {
+    need(ext, "windows");
+    const decl = ext.contributes.windows?.find((w) => w.id === String(winId));
+    if (!decl) throw new Error(`unknownWindow:${String(winId)}`);
+    return invoke("window_open", {
+      kind: "ext",
+      key: windowKey(ext.id, decl.id),
+      title: String(opts?.title ?? decl.title ?? ext.name).slice(0, 120),
+      size: decl.size,
+      minSize: decl.minSize ?? null,
+      args: args === undefined ? null : JSON.parse(JSON.stringify(args)),
+    }).then(() => undefined);
+  },
+  // Bus d'événements entre les pages d'UNE extension (notch, fenêtres) : relayé aux autres
+  // fenêtres par un événement Tauri, jamais aux autres extensions.
+  "events.emit": (ext, name: unknown, data: unknown) => {
+    const msg = { name: String(name), data: data === undefined ? null : JSON.parse(JSON.stringify(data)) };
+    emitTo(ext.id, "msg", msg);
+    void emit("ext2://msg", { ext: ext.id, from: here, ...msg });
+  },
   "clipboard.readText": (ext) => invoke("ext2_clipboard_read", { id: ext.id }),
   "clipboard.writeText": (ext, text: unknown) => invoke("ext2_clipboard_write", { id: ext.id, text: String(text) }),
   notify: (ext, spec: any) => {
@@ -141,8 +201,9 @@ function serve(ext: Manifest, port: MessagePort, onFirstCall: () => void) {
     const fn = methods[data.method];
     try {
       if (!fn) throw new Error(`unknownMethod:${data.method}`);
-      const value = await fn(ext, ...(Array.isArray(data.args) ? data.args : []));
-      port.postMessage({ t: "ret", n: data.n, ok: true, value: value ?? null });
+      const value: any = await fn(ext, ...(Array.isArray(data.args) ? data.args : []));
+      const transfer = value?.body instanceof ArrayBuffer ? [value.body] : [];
+      port.postMessage({ t: "ret", n: data.n, ok: true, value: value ?? null }, transfer);
     } catch (e) {
       port.postMessage({ t: "ret", n: data.n, ok: false, error: String((e as Error)?.message ?? e) });
     }
@@ -167,16 +228,32 @@ export function connect(ext: Manifest, frame: HTMLIFrameElement): () => void {
   };
 }
 
-function broadcast(name: string, data: unknown) {
+let busReady = false;
+/** Relais du bus d'événements venu des AUTRES fenêtres (cf. `events.emit`). */
+export function initExtBus() {
+  if (busReady) return;
+  busReady = true;
+  void listen<{ ext: string; from: string; name: string; data: unknown }>("ext2://msg", (e) => {
+    if (e.payload.from === here) return;
+    emitTo(e.payload.ext, "msg", { name: e.payload.name, data: e.payload.data });
+  });
+}
+
+export function broadcast(name: string, data: unknown) {
   for (const set of ports.values()) for (const p of set) p.postMessage({ t: "event", name, data });
 }
 
-/** Crée une iframe d'extension sandboxée. */
-export function sandboxFrame(src: string): HTMLIFrameElement {
+/** Crée une iframe d'extension sandboxée. `allow` : fonctions du navigateur permises
+ *  (fenêtres d'extension : plein écran et lecture automatique). */
+export function sandboxFrame(src: string, allow = ""): HTMLIFrameElement {
   const f = document.createElement("iframe");
-  f.setAttribute("sandbox", "allow-scripts");
+  // `allow-forms` : sans lui, le navigateur bloque un formulaire avant même l'événement
+  // `submit` (le JS de la page ne le voit pas) ; la CSP (`form-action 'none'`) interdit
+  // toujours tout envoi.
+  f.setAttribute("sandbox", "allow-scripts allow-forms");
   f.setAttribute("referrerpolicy", "no-referrer");
-  f.setAttribute("allow", "");
+  f.setAttribute("allow", allow);
+  if (allow.includes("fullscreen")) f.setAttribute("allowfullscreen", "");
   f.src = src;
   return f;
 }
@@ -244,6 +321,7 @@ export async function initExtensions(opts: { disabled: (id: string) => boolean }
   isDisabled = opts.disabled;
   setups = setup;
   await reload();
+  initExtBus();
   runtime.ready = true;
   // Thème / langue suivis en direct par les extensions.
   const obs = new MutationObserver(() => broadcast("theme", theme()));

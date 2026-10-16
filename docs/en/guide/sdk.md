@@ -43,8 +43,44 @@ const user = await island.http.json<{ login: string }>("https://api.github.com/u
 
 Permission `network:<domain>` (`network:*.exemple.com` for subdomains). **HTTPS only**, no
 redirects followed, response capped at 5 MB, local and private addresses refused.
+`timeout` (seconds, 1 to 120, default 20) extends a request's deadline.
 
-## Notch
+```ts
+// Binary body (video, images, files; 64 MB max), transferred without copying.
+const r = await island.http.bytes({ url: "https://example.com/video/seg0001.ts", timeout: 90 });
+// r = { status, headers, body: ArrayBuffer }
+```
+
+**Cookie sessions** (permission `cookies`): Island keeps the cookies set by the declared
+domains and sends them back on later requests, like a browser. They stay invisible to the
+extension (no `Set-Cookie` in responses, no `Cookie` accepted as input), are stored in the
+Windows credential vault and erased on uninstall. `island.http.clearCookies()` forgets
+them all (sign-out).
+
+## Windows and events
+
+```ts
+// Opens the declared window `player` (or brings it to front) with arguments.
+await island.windows.open("player", { episode: 12 }, { title: "Player" });
+
+// In the window's page:
+const args = await island.windows.args<{ episode: number }>();
+island.windows.onArgs((a) => …); // reopened with other arguments
+await island.windows.setTitle("Episode 12");
+
+// Between the extension's pages (island, windows, logic):
+island.events.on("progress", (p) => …);
+await island.events.emit("progress", { episode: 12, position: 340 });
+```
+
+| | Permission |
+|---|---|
+| `island.windows.open(id, args?, { title? })` | `windows` — a window from [`contributes.windows`](./emplacements#window) |
+| `island.windows.args()` / `onArgs(cb)` | none — in a window's page |
+| `island.windows.setTitle(title)` / `close()` | none — in a window's page |
+| `island.events.emit(name, data)` / `on(name, cb)` | none — never leaves the extension |
+
+## In the island
 
 | | Permission |
 |---|---|
@@ -62,7 +98,7 @@ redirects followed, response capped at 5 MB, local and private addresses refused
 import "@island/sdk/ui.css";
 ```
 
-The notch's colors and typography (variables `--label`, `--label-2`, `--fill-1`…, `--green`,
+The island's colors and typography (variables `--label`, `--label-2`, `--fill-1`…, `--green`,
 `--orange`, `--red`, `--blue`), a transparent background, and a few classes: `.list`, `.item`,
 `.btn` (`.primary`), `.badge` (`.green`, `.orange`…), `.seg` (tabs), `.empty`, `.caption`,
 `.muted`, `.truncate`. The light theme is handled automatically.

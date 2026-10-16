@@ -35,3 +35,8 @@ docs/internal/
 
 # Paquets d'extension construits
 *.island
+# Paquets installables des extensions d'exemple (partage)
+!examples/extensions/*/*.island
+
+# Extension privée (hors dépôt)
+examples/extensions/aniplex/

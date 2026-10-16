@@ -64,9 +64,12 @@
     "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^25.9.3",
     "@vitejs/plugin-vue": "^6.0.7",
+    "hls.js": "1.6.16",
+    "lucide-vue-next": "0.577.0",
     "typescript": "~6.0.3",
     "vite": "^8.0.16",
     "vitepress": "^1.6.4",
+    "vue-router": "4.5.1",
     "vue-tsc": "^3.3.5"
   }
 }

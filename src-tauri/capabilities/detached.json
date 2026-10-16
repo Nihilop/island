@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "detached",
-  "description": "Fenêtres détachées (notes…) : leur propre barre de titre, rien de plus.",
+  "description": "Fenêtres détachées (notes, extensions) : leur propre barre de titre, plein écran, rien de plus.",
   "windows": [
-    "note-*"
+    "note-*",
+    "ext-*"
   ],
   "permissions": [
     "core:default",
@@ -13,6 +14,8 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "core:window:allow-set-focus",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-unminimize"
   ]
 }

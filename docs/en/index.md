@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: Island
-  text: The notch for Windows
-  tagline: Your tools in a notch at the top of the screen. Extensible, isolated, signed.
+  text: The island for Windows
+  tagline: Your tools in an island at the top of the screen. Extensible, isolated, signed.
   actions:
     - theme: brand
       text: Write an extension
@@ -17,7 +17,7 @@ hero:
 features:
   - icon: 🏝️
     title: Slots, not windows
-    details: An extension plugs into specific places in the notch — dock tool, live activity, launcher results, commands, settings. Everything stays in the notch.
+    details: An extension plugs into specific places in the island — dock tool, live activity, launcher results, commands, settings. Everything stays in the island.
   - icon: 🛡️
     title: Isolated by design
     details: Each extension runs in a sandboxed iframe, with no access to the app, the network or other extensions. It only talks to Island, which knows its identity.

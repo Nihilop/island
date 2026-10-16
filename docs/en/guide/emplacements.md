@@ -11,9 +11,22 @@ Slots are declared in the manifest's `contributes`: Island knows what an extensi
 
 - A button in the dock (order and enablement in Settings › Tools, like built-in tools).
   Too many tools: the last ones move into the "•••" menu.
-- `view`: HTML page shown in the open notch, below the header and above the dock.
-- `size`: width × height of the open notch, header and dock included (max. 740 × 540).
+- `view`: HTML page shown in the open island, below the header and above the dock.
+- `size`: width × height of the open island, header and dock included (max. 740 × 540).
 - The view is reloaded every time it opens: keep useful state in `island.storage`.
+
+## Window
+
+```json
+"windows": [{ "id": "player", "title": "Player", "view": "dist/player.html", "size": [1280, 760], "minSize": [640, 400] }]
+```
+
+- Permission `windows`. A real Windows window, opened by `island.windows.open(id, args)`:
+  no system frame, Island's own title bar (title, minimize, maximize, close).
+- `view`: the page shown in the window, isolated like the extension's other pages.
+  Fullscreen (`requestFullscreen` → Windows fullscreen) and autoplay allowed.
+- One window per `id`: reopening it brings it to front and passes the new arguments
+  (`island.windows.onArgs`). Size and position are remembered.
 
 ## Live activity
 
@@ -33,7 +46,7 @@ await island.live.set("status", null); // remove
 | `color` | `label`, `green`, `orange`, `red`, `blue` |
 | `priority` | `normal` (after music) or `high` (before the timer, calls and music) |
 
-Visible while the notch is closed; a click opens the tool named by `tool`. Only one activity
+Visible while the island is closed; a click opens the tool named by `tool`. Only one activity
 is shown at a time: Island's alerts (timer finished, notification) take precedence.
 
 ## Launcher
@@ -57,7 +70,7 @@ island.launcher.onRun("repos", (id) => island.openUrl(id));
 ## Notifications
 
 Permission `notifications`. `island.notify({ title, body })` goes through Island's single
-API: a **Minimal** or **Full** banner, depending on the user's setting, when the notch is
+API: a **Minimal** or **Full** banner, depending on the user's setting, when the island is
 closed; nothing if it is open; history in the Notifications tool.
 `banner: false` = history only.
 

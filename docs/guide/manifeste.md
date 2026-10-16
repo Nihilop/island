@@ -8,7 +8,7 @@
   "name": "GitHub",
   "version": "0.1.0",
   "author": "Island",
-  "description": "Revues demandées, PR ouvertes et état de la CI, dans le notch.",
+  "description": "Revues demandées, PR ouvertes et état de la CI, dans l'île.",
   "icon": "icons/github.svg",
   "main": "dist/main.js",
   "permissions": ["network:api.github.com", "secrets", "notifications"],

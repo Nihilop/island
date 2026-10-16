@@ -1,24 +1,24 @@
 # Introduction
 
-Island is a notch for Windows: a bar at the top of the screen that opens on hover (or with
+Island is an island for Windows: a bar at the top of the screen that opens on hover (or with
 a shortcut) and hosts tools — playback, timer, clipboard, vault, launcher…
 An **extension** adds its own tools and information to it.
 
 ## What an extension can add
 
-An extension never creates a window: it plugs into **slots** of the notch, declared in its
+An extension plugs into **slots** of the island (and can open its own windows), declared in its
 manifest.
 
 | Slot | What the user sees | Rendered by |
 |---|---|---|
-| **Tool** | a button in the dock, a view in the open notch | the extension (HTML/CSS/JS) |
-| **Live activity** | an icon and a short text while the notch is closed | Island |
+| **Tool** | a button in the dock, a view in the open island | the extension (HTML/CSS/JS) |
+| **Live activity** | an icon and a short text while the island is closed | Island |
 | **Launcher** | results in the launcher (with an optional prefix, e.g. `gh …`) | Island |
-| **Notifications** | a banner while the notch is closed + the history | Island |
+| **Notifications** | a banner while the island is closed + the history | Island |
 | **Commands** | an action with a global shortcut, searchable in the launcher | Island |
 | **Settings** | a section in Settings › Extensions | Island |
 
-Everything "rendered by Island" automatically follows the notch design (light and dark
+Everything "rendered by Island" automatically follows the island design (light and dark
 themes included): the extension only provides data.
 
 ## How it runs

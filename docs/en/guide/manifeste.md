@@ -8,7 +8,7 @@
   "name": "GitHub",
   "version": "0.1.0",
   "author": "Island",
-  "description": "Requested reviews, open PRs and CI status, in the notch.",
+  "description": "Requested reviews, open PRs and CI status, in the island.",
   "icon": "icons/github.svg",
   "main": "dist/main.js",
   "permissions": ["network:api.github.com", "secrets", "notifications"],

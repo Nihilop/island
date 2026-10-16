@@ -11,9 +11,22 @@ extension ajoute **sans exécuter son code** (et l'affiche à l'installation).
 
 - Un bouton dans le dock (ordre et activation dans Réglages › Outils, comme les outils
   intégrés). Trop d'outils : les derniers passent dans le menu « ••• ».
-- `view` : page HTML affichée dans le notch ouvert, sous l'en-tête et au-dessus du dock.
-- `size` : largeur × hauteur du notch ouvert, en-tête et dock compris (max. 740 × 540).
+- `view` : page HTML affichée dans l'île ouverte, sous l'en-tête et au-dessus du dock.
+- `size` : largeur × hauteur de l'île ouverte, en-tête et dock compris (max. 740 × 540).
 - La vue est rechargée à chaque ouverture : gardez l'état utile dans `island.storage`.
+
+## Fenêtre
+
+```json
+"windows": [{ "id": "player", "title": "Lecteur", "view": "dist/player.html", "size": [1280, 760], "minSize": [640, 400] }]
+```
+
+- Permission `windows`. Une vraie fenêtre Windows, ouverte par `island.windows.open(id,
+  args)` : sans bordure système, avec la barre d'Island (titre, réduire, agrandir, fermer).
+- `view` : page affichée dans la fenêtre, isolée comme les autres pages de l'extension.
+  Plein écran (`requestFullscreen` → plein écran Windows) et lecture automatique permis.
+- Une fenêtre par `id` : la rouvrir la ramène au premier plan et lui passe les nouveaux
+  arguments (`island.windows.onArgs`). Taille et position mémorisées.
 
 ## Activité en direct
 
@@ -33,7 +46,7 @@ await island.live.set("status", null); // retirer
 | `color` | `label`, `green`, `orange`, `red`, `blue` |
 | `priority` | `normal` (après la musique) ou `high` (avant le minuteur, l'appel et la musique) |
 
-Visible notch fermé ; un clic ouvre l'outil désigné par `tool`. Une seule activité est
+Visible île fermée ; un clic ouvre l'outil désigné par `tool`. Une seule activité est
 affichée à la fois : les alertes d'Island (minuteur terminé, notification) passent devant.
 
 ## Launcher
@@ -58,7 +71,7 @@ island.launcher.onRun("repos", (id) => island.openUrl(id));
 
 Permission `notifications`. `island.notify({ title, body })` passe par l'API unique
 d'Island : bannière **minimale** ou **complète** selon le réglage de l'utilisateur quand le
-notch est fermé, rien s'il est ouvert, historique dans l'outil Notifications.
+l'île est fermée, rien s'il est ouvert, historique dans l'outil Notifications.
 `banner: false` = historique seulement.
 
 ## Commandes

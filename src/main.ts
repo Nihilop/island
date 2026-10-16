@@ -7,7 +7,7 @@ import { registerMessages, setLocale } from "./sdk/i18n";
 import { useAppStore } from "./stores/appStore";
 
 // Une seule build sert toutes les fenêtres : l'overlay du notch, et les fenêtres détachées
-// (`note-<id>`, cf. src-tauri/src/detached.rs). Le composant racine se choisit d'après le
+// (`note-<id>`, `ext-<id>__<fenêtre>`, cf. src-tauri/src/detached.rs). Le composant racine se choisit d'après le
 // libellé ; chaque racine est chargée à la demande (une fenêtre de note ne charge pas le notch).
 const label = (() => {
   try {
@@ -19,6 +19,7 @@ const label = (() => {
 
 async function root(): Promise<Component> {
   if (label.startsWith("note-")) return (await import("./notes/NoteWindow.vue")).default;
+  if (label.startsWith("ext-")) return (await import("./extensions/ExtWindow.vue")).default;
   return (await import("./windows/Overlay.vue")).default;
 }
 

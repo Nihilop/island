@@ -12,12 +12,21 @@ export interface HttpRequest {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD";
   headers?: Record<string, string>;
   body?: unknown;
+  /** Délai max en secondes (1 à 120, 20 par défaut). */
+  timeout?: number;
 }
 
 export interface HttpResponse {
   status: number;
   headers: [string, string][];
   body: string;
+}
+
+/** Réponse binaire (`http.bytes`) : le corps est un ArrayBuffer. */
+export interface HttpBytesResponse {
+  status: number;
+  headers: [string, string][];
+  body: ArrayBuffer;
 }
 
 export interface LiveSpec {
@@ -65,10 +74,32 @@ export interface Island {
     get<T = unknown>(key: string): Promise<T>;
     onChange(cb: (key: string) => void): void;
   };
-  /** Permission `network:<domaine>` (HTTPS, domaines déclarés seulement). */
+  /** Permission `network:<domaine>` (HTTPS, domaines déclarés seulement). Avec la
+   *  permission `cookies`, Island garde les cookies de session des réponses et les renvoie
+   *  aux requêtes suivantes (jamais visibles ici). */
   http: {
     request(req: HttpRequest): Promise<HttpResponse>;
     json<T = unknown>(url: string, init?: Omit<HttpRequest, "url">): Promise<T>;
+    /** Corps binaire (vidéo, images, fichiers), transféré sans copie. */
+    bytes(req: HttpRequest): Promise<HttpBytesResponse>;
+    /** Oublie tous les cookies (permission `cookies`). */
+    clearCookies(): Promise<void>;
+  };
+  /** Permission `windows` : pages de `contributes.windows` ouvertes dans leur fenêtre. */
+  windows: {
+    /** Ouvre (ou ramène au premier plan) la fenêtre `id` en lui passant `args`. */
+    open(id: string, args?: unknown, opts?: { title?: string }): Promise<void>;
+    /** Dans une fenêtre : arguments d'ouverture (null ailleurs). */
+    args<T = unknown>(): Promise<T | null>;
+    /** Dans une fenêtre : rouverte avec de nouveaux arguments. */
+    onArgs<T = unknown>(cb: (args: T) => void): void;
+    setTitle(title: string): Promise<void>;
+    close(): Promise<void>;
+  };
+  /** Événements entre les pages de l'extension (notch, fenêtres, logique). */
+  events: {
+    emit(name: string, data?: unknown): Promise<void>;
+    on<T = unknown>(name: string, cb: (data: T) => void): void;
   };
   /** Permission `notifications`. */
   notify(spec: NotifySpec): Promise<string>;
@@ -163,8 +194,13 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
   const commands = new Map<string, () => void>();
   on("command", ({ id }) => commands.get(id)?.());
 
+  const bus = new Map<string, ((data: any) => void)[]>();
+  on("msg", ({ name, data }) => bus.get(name)?.forEach((cb) => cb(data)));
+
   const http: Island["http"] = {
     request: (req) => call<HttpResponse>("http.request", req),
+    bytes: (req) => call<HttpBytesResponse>("http.bytes", req),
+    clearCookies: () => call("http.clearCookies"),
     async json<T>(url: string, init?: Omit<HttpRequest, "url">) {
       const r = await call<HttpResponse>("http.request", { ...init, url, headers: { Accept: "application/json", ...init?.headers } });
       if (r.status >= 400) throw new HttpError(r.status, r.body);
@@ -183,6 +219,17 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
     secrets: { get: (k) => call("secrets.get", k), set: (k, v) => call("secrets.set", k, v), delete: (k) => call("secrets.delete", k) },
     settings: { get: (k) => call("settings.get", k), onChange: (cb) => on("settings.changed", ({ key }) => cb(key)) },
     http,
+    windows: {
+      open: (id, args, opts) => call("windows.open", id, args, opts),
+      args: <T>() => call<T | null>("windows.args").catch(() => null),
+      onArgs: (cb) => on("window.args", cb),
+      setTitle: (title) => call("windows.setTitle", title),
+      close: () => call("windows.close"),
+    },
+    events: {
+      emit: (name, data) => call("events.emit", name, data),
+      on: (name, cb) => void bus.set(name, [...(bus.get(name) ?? []), cb]),
+    },
     notify: (spec) => call("notify", spec),
     openUrl: (url) => call("openUrl", url),
     clipboard: { readText: () => call("clipboard.readText"), writeText: (text) => call("clipboard.writeText", text) },
