@@ -61,6 +61,7 @@
     "yjs": "^13.6.33"
   },
   "devDependencies": {
+    "@island/sdk": "link:./packages/sdk",
     "@tauri-apps/cli": "^2.11.2",
     "@types/node": "^25.9.3",
     "@vitejs/plugin-vue": "^6.0.7",
