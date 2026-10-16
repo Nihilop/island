@@ -106,6 +106,7 @@ import { testBanner, testPending } from "../notifications/store";
           :options="[
             { value: 'off', label: t('settings.gaming.off') },
             { value: 'fullscreen', label: t('settings.gaming.fullscreen') },
+            { value: 'game', label: t('settings.gaming.game') },
             { value: 'always', label: t('settings.gaming.always') },
           ]"
         />
@@ -116,6 +117,18 @@ import { testBanner, testPending } from "../notifications/store";
         :help="unlockHelp"
       >
         <Button v-if="fps.status === 'noAdmin'" :loading="unlocking" @click="unlock">{{ t("settings.fps.unlockAction") }}</Button>
+      </Row>
+    </Group>
+
+    <Group :title="t('activity.settings')" section="activity" :note="t('activity.settings.note')">
+      <Row :label="t('activity.settings.presence')" :help="t('activity.settings.presenceHelp')">
+        <Switch v-model="settings.activity.presence" />
+      </Row>
+      <Row :label="t('activity.settings.discordDb')" :help="t('activity.settings.discordDbHelp')">
+        <Switch v-model="settings.activity.discordDb" />
+      </Row>
+      <Row :label="t('activity.settings.trackApps')" :help="t('activity.settings.trackAppsHelp')">
+        <Switch v-model="settings.activity.trackApps" />
       </Row>
     </Group>
 

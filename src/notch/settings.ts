@@ -60,7 +60,10 @@ export interface NotchSettings {
   /** Discord : Client ID de l'application du portail développeur (le secret est au coffre Windows). */
   discordClientId: string;
   /** Mode jeu : live activity FPS / CPU / GPU / RAM. */
-  gaming: "off" | "fullscreen" | "always";
+  /** « game » = quand un jeu est lancé (service Activité). */
+  gaming: "off" | "fullscreen" | "game" | "always";
+  /** Activité : reconnaître les jeux avec la liste de Discord, suivre le temps des apps. */
+  activity: { discordDb: boolean; trackApps: boolean; presence: boolean };
   /** Ask : fournisseur et réglages par fournisseur (clés au Gestionnaire d'identifiants). */
   ask: {
     provider: AskProvider;
@@ -94,6 +97,7 @@ export const DEFAULT_TOOLS: ToolPref[] = [
   { id: "trading", enabled: false },
   { id: "usage", enabled: true },
   { id: "weather", enabled: true },
+  { id: "activity", enabled: true },
   { id: "system", enabled: false },
   { id: "discord", enabled: false },
   { id: "vault", enabled: false },
@@ -124,6 +128,7 @@ const DEFAULTS: NotchSettings = {
   presentationAuto: true,
   discordClientId: "",
   gaming: "off",
+  activity: { discordDb: true, trackApps: false, presence: true },
   ask: {
     provider: "anthropic",
     byProvider: {
@@ -160,7 +165,7 @@ function migrateTools(saved: unknown): ToolPref[] {
 
 function merge(saved: Partial<NotchSettings> | null): NotchSettings {
   const s = saved && typeof saved === "object" ? saved : {};
-  return { ...DEFAULTS, ...s, hello: { ...DEFAULTS.hello, ...s.hello }, launcher: { ...DEFAULTS.launcher, ...s.launcher }, extensions: { ...DEFAULTS.extensions, ...s.extensions }, tools: migrateTools(s.tools) };
+  return { ...DEFAULTS, ...s, hello: { ...DEFAULTS.hello, ...s.hello }, activity: { ...DEFAULTS.activity, ...s.activity }, launcher: { ...DEFAULTS.launcher, ...s.launcher }, extensions: { ...DEFAULTS.extensions, ...s.extensions }, tools: migrateTools(s.tools) };
 }
 
 export const settings = reactive<NotchSettings>(merge(null));

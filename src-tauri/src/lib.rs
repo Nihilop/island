@@ -84,6 +84,8 @@ pub fn run() {
             vault::start(app.handle().clone());
             services::notifs::start(app.handle().clone());
             launcher::start(app.handle().clone());
+            // Activité (jeux & apps) : hook de premier plan + relevé des process toutes les 2 s.
+            services::activity::start(app.handle().clone());
 
             // v2 : loader d'extensions gelé (cf. docs/internal/v2-migration.md) → pas de
             // watcher `dist/` tant qu'aucune extension ne se charge.
@@ -122,6 +124,16 @@ pub fn run() {
             host::reveal_path,
             host::open_url,
             services::media::np_state,
+            services::activity::activity_state,
+            services::activity::activity_running,
+            services::activity::activity_set_override,
+            services::activity::activity_overrides,
+            services::activity::activity_stats,
+            services::activity::activity_settings,
+            services::activity::activity_settings_set,
+            services::activity::activity_refresh_catalog,
+            services::activity::activity_ext_state,
+            services::activity::activity_ext_stats,
             services::media::np_toggle,
             services::media::np_next,
             services::media::np_prev,

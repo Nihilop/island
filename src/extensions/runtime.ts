@@ -182,6 +182,10 @@ const methods: Record<string, Handler> = {
     if (!/[\\/]Island[\\/][^\\/]+\.(png|mp4)$/i.test(p) || p.includes("..")) throw new Error("forbidden");
     return invoke("reveal_path", { path: p });
   },
+  // Activité (permission `activity`, sensible : jeux et apps utilisés). Revérifiée côté Rust.
+  "activity.state": (ext) => (need(ext, "activity"), invoke("activity_ext_state", { id: ext.id })),
+  "activity.stats": (ext, from: unknown, to: unknown) =>
+    (need(ext, "activity"), invoke("activity_ext_stats", { id: ext.id, from: String(from), to: String(to) })),
   // Bus d'événements entre les pages d'UNE extension (notch, fenêtres) : relayé aux autres
   // fenêtres par un événement Tauri, jamais aux autres extensions.
   "events.emit": (ext, name: unknown, data: unknown) => {
@@ -262,6 +266,10 @@ let busReady = false;
 export function initExtBus() {
   if (busReady) return;
   busReady = true;
+  // Changement de jeu / d'app au premier plan : extensions qui ont `activity`.
+  void listen("activity://changed", (e) => {
+    for (const x of installed.value) if (x.permissions.includes("activity")) emitTo(x.id, "activity.changed", e.payload);
+  });
   // Début / fin d'un enregistrement d'écran : prévient les extensions qui ont `capture`.
   void listen("capture://recording", (e) => {
     for (const x of installed.value) if (x.permissions.includes("capture")) emitTo(x.id, "capture.recording", e.payload);

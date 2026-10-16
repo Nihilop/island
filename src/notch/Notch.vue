@@ -33,6 +33,8 @@ import Dock from "./Dock.vue";
 import { PhBell } from "@phosphor-icons/vue";
 import { notifs } from "../tools/notifications/store";
 import { extLive, liveIconUrl } from "../extensions/slots";
+import { duration as playDuration, playing } from "../tools/activity/store";
+import { PhGameController } from "@phosphor-icons/vue";
 
 const rootEl = ref<HTMLElement>();
 
@@ -62,9 +64,9 @@ const backdropStyle = computed(() => {
 const lineMode = computed(() => (settings.focusMode && settings.focusStyle === "line") || settings.idleStyle === "line");
 
 /** Live activity (notch fermé) : une seule à la fois, par priorité — alerte de minuteur >
- *  notification > gaming > minuteur > appel > musique. Rien en style « ligne » sauf les
+ *  notification > gaming > minuteur > appel > jeu en cours > musique. Rien en style « ligne » sauf les
  *  alertes (minuteur terminé, notification). */
-const live = computed<"notifications" | "gaming" | "timer" | "discord" | "media" | "ext" | null>(() => {
+const live = computed<"notifications" | "gaming" | "timer" | "discord" | "game" | "media" | "ext" | null>(() => {
   if (timer.finished) return "timer"; // alerte : même en style « ligne »
   if (notifs.banner) return "notifications";
   if (lineMode.value) return null;
@@ -73,6 +75,7 @@ const live = computed<"notifications" | "gaming" | "timer" | "discord" | "media"
   if (extLive.value?.priority === "high") return "ext";
   if (timerRunning.value) return "timer";
   if (inCall.value) return "discord";
+  if (playing.value && settings.activity.presence) return "game";
   if (np.active && np.playing) return "media";
   if (extLive.value) return "ext";
   return null;
@@ -89,7 +92,7 @@ const fpsColor = computed(() => {
 const alert = computed(() => timer.finished && lineMode.value);
 // Outil ouvert « à froid » sur la live activity (extension : l'outil qu'elle désigne).
 watch(
-  () => (live.value === "ext" ? (extLive.value?.tool ?? null) : live.value),
+  () => (live.value === "ext" ? (extLive.value?.tool ?? null) : live.value === "game" ? "activity" : live.value),
   (id) => (liveTool.value = id),
   { immediate: true },
 );
@@ -380,6 +383,16 @@ onBeforeUnmount(() => unsubs.forEach((u) => u()));
               />
             </div>
             <div class="type-footnote max-w-[48px] translate-x-[var(--edge,0px)] truncate font-semibold tabular-nums">{{ extLive.text }}</div>
+          </div>
+          <div
+            v-else-if="state !== 'open' && live === 'game' && playing"
+            class="absolute top-0 left-1/2 flex h-[30px] w-[284px] -translate-x-1/2 items-center justify-between px-[9px]"
+          >
+            <div class="relative grid size-5 translate-x-[calc(-1*var(--edge,0px))] place-items-center">
+              <img v-if="playing.art" :src="playing.art" alt="" class="absolute inset-0 size-5 rounded-[5px] object-cover" />
+              <PhGameController v-else :size="14" weight="fill" class="text-sys-green" />
+            </div>
+            <div class="type-caption translate-x-[var(--edge,0px)] font-semibold tabular-nums text-sys-green" :title="playing.name">{{ playDuration(playing.elapsed) }}</div>
           </div>
           <div
             v-else-if="state !== 'open' && live === 'media'"

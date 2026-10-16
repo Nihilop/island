@@ -6,12 +6,16 @@ import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { settings } from "../../notch/settings";
+import { activity } from "../activity/store";
 
 /** Une app est en plein écran (détection Rust). */
 export const fullscreen = ref(false);
 
 export const gamingActive = computed(
-  () => settings.gaming === "always" || (settings.gaming === "fullscreen" && fullscreen.value),
+  () =>
+    settings.gaming === "always" ||
+    (settings.gaming === "fullscreen" && fullscreen.value) ||
+    (settings.gaming === "game" && !!activity.game),
 );
 
 export const fps = reactive({

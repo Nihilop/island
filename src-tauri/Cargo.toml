@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "2.1.0"
+version = "2.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -102,6 +102,8 @@ windows = { version = "0.61", features = [
   "Storage",
   "Win32_Graphics_Dwm",
   "Win32_UI_HiDpi",
+  # Activité (services/activity) : hook de premier plan (SetWinEventHook).
+  "Win32_UI_Accessibility",
 ] }
 
 # Secrets : Keychain (macOS) / Secret Service (Linux). Permet au crate de compiler

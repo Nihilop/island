@@ -1,5 +1,24 @@
 [
   {
+    "version": "2.2.0",
+    "date": "2026-10-16",
+    "highlight": true,
+    "items": {
+      "fr": [
+        "Activité : Island reconnaît le jeu en cours (Steam, Epic, GOG, Battle.net, Xbox… et des milliers d'autres via la liste de Discord) et l'affiche dans l'île avec sa durée.",
+        "Nouvel outil Activité : temps de jeu du jour et de la semaine, temps passé dans les apps en option, correction jeu / app en un clic.",
+        "Mode gaming « Pendant un jeu » : FPS, CPU et GPU dès qu'un jeu est lancé.",
+        "Extensions : nouvelle permission « activité »."
+      ],
+      "en": [
+        "Activity: Island recognizes the game you're playing (Steam, Epic, GOG, Battle.net, Xbox… and thousands more via Discord's list) and shows it in the island with its duration.",
+        "New Activity tool: play time for today and the week, optional time spent in apps, one-click game / app correction.",
+        "Game mode “During a game”: FPS, CPU and GPU as soon as a game starts.",
+        "Extensions: new “activity” permission."
+      ]
+    }
+  },
+  {
     "version": "2.1.0",
     "date": "2026-10-16",
     "highlight": true,
