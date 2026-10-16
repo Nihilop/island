@@ -19,6 +19,7 @@ pub mod hello;
 pub mod markets;
 pub mod media;
 pub mod mixer;
+pub mod notes;
 pub mod notifs;
 pub mod privacy;
 pub mod reserved;

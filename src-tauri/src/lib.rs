@@ -13,6 +13,7 @@
 
 use tauri::Manager;
 
+mod detached;
 mod extensions;
 mod host;
 mod launcher;
@@ -158,6 +159,21 @@ pub fn run() {
             services::files::file_open,
             services::files::files_copy,
             services::files::export_csv,
+            detached::window_open,
+            detached::window_close_kind,
+            services::notes::notes_list,
+            services::notes::notes_read,
+            services::notes::notes_meta,
+            services::notes::notes_write,
+            services::notes::notes_create,
+            services::notes::notes_move,
+            services::notes::notes_pin,
+            services::notes::notes_trash,
+            services::notes::notes_purge,
+            services::notes::notes_folder_create,
+            services::notes::notes_folder_move,
+            services::notes::notes_folder_delete,
+            services::notes::notes_search,
             services::files::files_from_clipboard,
             services::weather::weather_forecast,
             services::weather::weather_geocode,

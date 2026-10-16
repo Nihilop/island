@@ -76,7 +76,7 @@ const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   timer: { icon: PhTimer, size: [520, 192] },
   todos: { icon: PhCheckCircle, size: [520, 276] },
   budget: { icon: PhWallet, size: [640, 420] },
-  notes: { icon: PhNote, size: [520, 260] },
+  notes: { icon: PhNote, size: [680, 420] },
   clipboard: { icon: PhClipboardText, size: [600, 236] },
   shelf: { icon: PhTray, size: [560, 236] },
   ask: { icon: PhSparkle, size: [560, 440] },

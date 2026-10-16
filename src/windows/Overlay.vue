@@ -28,6 +28,7 @@ import { initAsk } from "../tools/ask/store";
 import { initHello } from "../notch/hello";
 import { initNotifs } from "../tools/notifications/store";
 import { initBudget } from "../tools/budget/store";
+import { initTodos } from "../tools/todos/store";
 import { initLauncher } from "../launcher/store";
 import { initExtensionsHost } from "../extensions/install";
 
@@ -42,6 +43,7 @@ loadSettings().finally(() => {
   initHello();
   initNotifs();
   initBudget();
+  initTodos();
   initLauncher();
   void initExtensionsHost();
   watch(

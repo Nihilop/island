@@ -8,6 +8,7 @@
 
 import { reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { hold } from "./state";
 import { settings } from "./settings";
 import { presentation } from "./presentation";
@@ -112,6 +113,13 @@ export function initHello() {
     for (const [scope, last] of unlocked) if (Date.now() - last > max) unlocked.delete(scope);
   }, 5000);
   watch(presentation, (on) => on && unlocked.clear());
+  // Notes verrouillées (délai, mode présentation, verrou manuel) : leurs fenêtres
+  // détachées se ferment. L'activité dans une fenêtre de note prolonge le délai.
+  watch(
+    () => isLocked("notes"),
+    (locked) => locked && invoke("window_close_kind", { kind: "note" }).catch(() => {}),
+  );
+  listen<string>("hello://touch", (e) => touchScope(e.payload as HelloScope));
   // Le Coffre garde (ou non) sa session pour Hello côté Rust.
   watch(
     () => settings.hello.vault && hello.enrolled,
