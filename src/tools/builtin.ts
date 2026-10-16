@@ -6,6 +6,7 @@ import {
   PhBell,
   PhChartLineUp,
   PhCheckCircle,
+  PhWallet,
   PhClipboardText,
   PhCloudSun,
   PhCpu,
@@ -31,9 +32,11 @@ import VaultView from "./vault/VaultView.vue";
 import OverviewView from "./overview/OverviewView.vue";
 import TimerView from "./timer/TimerView.vue";
 import TodosView from "./todos/TodosView.vue";
+import BudgetView from "./budget/BudgetView.vue";
 import NotesView from "./notes/NotesView.vue";
 import ConvertView from "./convert/ConvertView.vue";
 import WeatherView from "./weather/WeatherView.vue";
+import MarketsView from "./markets/MarketsView.vue";
 import ClipboardView from "./clipboard/ClipboardView.vue";
 import ShelfView from "./shelf/ShelfView.vue";
 import SystemView from "./system/SystemView.vue";
@@ -50,9 +53,11 @@ const VIEWS: Record<string, Component> = {
   media: MediaView,
   timer: TimerView,
   todos: TodosView,
+  budget: BudgetView,
   notes: NotesView,
   convert: ConvertView,
   weather: WeatherView,
+  trading: MarketsView,
   clipboard: ClipboardView,
   shelf: ShelfView,
   system: SystemView,
@@ -70,6 +75,7 @@ const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   media: { icon: PhMusicNotes, size: [520, 232] },
   timer: { icon: PhTimer, size: [520, 192] },
   todos: { icon: PhCheckCircle, size: [520, 276] },
+  budget: { icon: PhWallet, size: [640, 420] },
   notes: { icon: PhNote, size: [520, 260] },
   clipboard: { icon: PhClipboardText, size: [600, 236] },
   shelf: { icon: PhTray, size: [560, 236] },

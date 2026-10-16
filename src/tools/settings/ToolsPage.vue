@@ -11,6 +11,7 @@ import Group from "../../ui/Group.vue";
 import { Switch } from "@/sdk/ui/switch";
 import VaultSettings from "../vault/VaultSettings.vue";
 import HelloSettings from "./HelloSettings.vue";
+import BudgetSettings from "../budget/BudgetSettings.vue";
 
 const ROW_H = 40;
 
@@ -67,9 +68,13 @@ function onHandleMove(e: PointerEvent) {
 function onHandleUp() {
   const d = drag.value;
   if (d && target.value !== d.from) {
-    const list = settings.tools;
-    const [item] = list.splice(d.from, 1);
-    list.splice(target.value, 0, item);
+    // Les indices sont ceux des lignes AFFICHÉES : `settings.tools` peut contenir des
+    // entrées sans outil (extension désinstallée…), qu'on garde à part, en fin de liste.
+    const visible = rows.value.map((r) => r.pref);
+    const [item] = visible.splice(d.from, 1);
+    visible.splice(target.value, 0, item);
+    const hidden = settings.tools.filter((p) => !visible.includes(p));
+    settings.tools = [...visible, ...hidden];
   }
   drag.value = null;
   release?.();
@@ -124,6 +129,8 @@ function onHandleUp() {
     </Group>
 
     <HelloSettings />
+
+    <BudgetSettings />
 
     <VaultSettings />
 

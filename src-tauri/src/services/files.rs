@@ -1,6 +1,6 @@
 // Fichiers pour l'Étagère (et plus tard le Convertisseur) : infos sur des chemins,
 // ouvrir avec l'app associée, copier une liste de fichiers dans le presse-papiers, et
-// coller depuis le presse-papiers (fichiers, ou image enregistrée en PNG).
+// coller depuis le presse-papiers (fichiers, ou image enregistrée en PNG) ; export CSV du Budget.
 
 use std::path::Path;
 
@@ -109,4 +109,14 @@ fn chrono_like_stamp() -> String {
     }
     #[cfg(not(target_os = "windows"))]
     format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
+}
+
+/// Écrit un export CSV (Budget › Rapports) à l'emplacement choisi dans la boîte de dialogue
+/// d'enregistrement. Extension `.csv` imposée : pas d'écriture de fichier arbitraire.
+#[tauri::command]
+pub fn export_csv(path: String, content: String) -> Result<(), String> {
+    if !path.to_lowercase().ends_with(".csv") {
+        return Err("notCsv".into());
+    }
+    std::fs::write(&path, content).map_err(|e| e.to_string())
 }

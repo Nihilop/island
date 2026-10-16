@@ -36,6 +36,7 @@ function toggle(scope: HelloScope, on: boolean) {
 const scopes: { id: HelloScope; label: string; help: string }[] = [
   { id: "vault", label: "hello.scope.vault", help: "hello.scope.vaultHelp" },
   { id: "notes", label: "hello.scope.notes", help: "hello.scope.notesHelp" },
+  { id: "budget", label: "hello.scope.budget", help: "hello.scope.budgetHelp" },
 ];
 </script>
 

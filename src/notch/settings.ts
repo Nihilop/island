@@ -34,7 +34,7 @@ export interface NotchSettings {
   /** Verrouillage automatique après inactivité (secondes) : Coffre et outils verrouillés par Windows Hello. */
   vaultTimeout: number;
   /** Windows Hello par outil : ouverture rapide du Coffre, verrou de la Note. */
-  hello: { vault: boolean; notes: boolean };
+  hello: { vault: boolean; notes: boolean; budget: boolean };
   /** Notification reçue notch fermé : pastille (minimal) ou bannière complète. */
   notifStyle: "minimal" | "full";
   /** Launcher : raccourci, touche Windows, apps qui le suspendent, plein écran, moteur web. */
@@ -85,6 +85,7 @@ export const DEFAULT_TOOLS: ToolPref[] = [
   { id: "media", enabled: true },
   { id: "timer", enabled: true },
   { id: "todos", enabled: true },
+  { id: "budget", enabled: true },
   { id: "notes", enabled: true },
   { id: "clipboard", enabled: true },
   { id: "shelf", enabled: true },
@@ -113,7 +114,7 @@ const DEFAULTS: NotchSettings = {
   ),
   autoUpdate: true,
   vaultTimeout: 15 * 60,
-  hello: { vault: false, notes: false },
+  hello: { vault: false, notes: false, budget: false },
   notifStyle: "minimal",
   extensions: { disabled: [], devMode: false, devFolders: [] },
   launcher: { shortcut: "Control+Space", winKey: false, exclude: [], fullscreenOff: true, engine: "google" },

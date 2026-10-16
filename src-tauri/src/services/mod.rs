@@ -16,6 +16,7 @@ pub mod files;
 pub mod fps;
 pub mod hardware;
 pub mod hello;
+pub mod markets;
 pub mod media;
 pub mod mixer;
 pub mod notifs;
