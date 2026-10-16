@@ -25,6 +25,7 @@ import { initPresentation } from "../notch/presentation";
 import { initDiscord } from "../tools/discord/store";
 import { initGaming } from "../tools/system/gaming";
 import { initActivity, setActivitySettings } from "../tools/activity/store";
+import { initAutomations } from "../automations/store";
 import { initAsk } from "../tools/ask/store";
 import { initHello } from "../notch/hello";
 import { initNotifs } from "../tools/notifications/store";
@@ -47,6 +48,7 @@ loadSettings().finally(() => {
   initTodos();
   initLauncher();
   void initActivity();
+  void initAutomations();
   // Options du service Activité (Rust) : poussées au démarrage et à chaque changement.
   watch(
     () => ({ trackApps: settings.activity.trackApps, discordDb: settings.activity.discordDb }),

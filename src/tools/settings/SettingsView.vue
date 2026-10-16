@@ -3,7 +3,7 @@
 // contenu de la catégorie à droite, défilant, avec un fondu de 28 px en bas.
 import { computed, nextTick, ref, watch, type Component } from "vue";
 import { motion } from "motion-v";
-import { PhClockCounterClockwise, PhGearSix, PhMagnifyingGlass, PhMonitor, PhPuzzlePiece, PhPlugs, PhSparkle, PhSquaresFour, PhTimer } from "@phosphor-icons/vue";
+import { PhClockCounterClockwise, PhGearSix, PhLightning, PhMagnifyingGlass, PhMonitor, PhPuzzlePiece, PhPlugs, PhSparkle, PhSquaresFour, PhTimer } from "@phosphor-icons/vue";
 import { spring } from "../../design/motion";
 import { t } from "../../notch/i18n";
 import { page, pendingSection, type SettingsPage } from "./nav";
@@ -14,6 +14,7 @@ import TimerPage from "./TimerPage.vue";
 import ConnectionsPage from "./ConnectionsPage.vue";
 import AiPage from "./AiPage.vue";
 import BackupPage from "./BackupPage.vue";
+import AutomationsPage from "./AutomationsPage.vue";
 import LauncherSettings from "../../launcher/LauncherSettings.vue";
 import ExtensionsPage from "../../extensions/ExtensionsPage.vue";
 
@@ -26,6 +27,7 @@ const PAGES: { id: SettingsPage; icon: Component; view: Component }[] = [
   { id: "timer", icon: PhTimer, view: TimerPage },
   { id: "ai", icon: PhSparkle, view: AiPage },
   { id: "connections", icon: PhPlugs, view: ConnectionsPage },
+  { id: "automations", icon: PhLightning, view: AutomationsPage },
   { id: "backup", icon: PhClockCounterClockwise, view: BackupPage },
 ];
 

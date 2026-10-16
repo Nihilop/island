@@ -2,10 +2,12 @@
 // seule (service `reserved`, qui empêche le menu Démarrer). Jamais les deux : la touche
 // Windows remplace le raccourci.
 //
-// Suspension : quand une app de la liste d'exclusion tourne (ex. UnrealEditor.exe, qui
-// utilise Ctrl+Espace) ou qu'une app est en plein écran, le raccourci est réellement
-// DÉSENREGISTRÉ (l'app reçoit la touche) et la touche Windows redevient native. Un thread
-// vérifie toutes les 1,5 s (instantané des process : ~1 ms).
+// Suspension : quand une app de la liste d'exclusion est AU PREMIER PLAN (défaut ; ou
+// simplement ouverte, au choix — ex. UnrealEditor.exe, qui utilise Ctrl+Espace) ou qu'une
+// app est en plein écran, le raccourci est réellement DÉSENREGISTRÉ (l'app reçoit la
+// touche) et la touche Windows redevient native. « Au premier plan » suit le service
+// Activité (événement Windows, réévaluation immédiate, coût nul) ; « ouverte » et le plein
+// écran sont relevés toutes les 1,5 s (instantané des process : ~1 ms).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -25,6 +27,16 @@ pub struct Config {
     exclude: Vec<String>,
     /// Suspendu quand une app est en plein écran.
     fullscreen_off: bool,
+    /// `focused` (défaut) : suspendu quand une app exclue est au premier plan ; `running` :
+    /// dès qu'elle tourne.
+    #[serde(default)]
+    exclude_when: String,
+}
+
+impl Config {
+    fn only_focused(&self) -> bool {
+        self.exclude_when != "running"
+    }
 }
 
 static CONFIG: Mutex<Option<Config>> = Mutex::new(None);
@@ -75,7 +87,26 @@ fn apply(app: &AppHandle) -> bool {
 
 /// Le launcher doit-il être suspendu maintenant ?
 fn should_suspend(cfg: &Config) -> bool {
-    (cfg.fullscreen_off && imp::fullscreen()) || (!cfg.exclude.is_empty() && imp::any_running(&cfg.exclude))
+    if cfg.fullscreen_off && imp::fullscreen() {
+        return true;
+    }
+    if cfg.exclude.is_empty() {
+        return false;
+    }
+    if cfg.only_focused() {
+        crate::services::activity::foreground_exe().is_some_and(|exe| cfg.exclude.contains(&exe))
+    } else {
+        imp::any_running(&cfg.exclude)
+    }
+}
+
+/// Réévalue la suspension tout de suite (changement d'app au premier plan).
+pub fn reevaluate(app: &AppHandle) {
+    let Some(cfg) = CONFIG.lock().unwrap_or_else(|p| p.into_inner()).clone() else { return };
+    let s = should_suspend(&cfg);
+    if s != SUSPENDED.swap(s, Ordering::Relaxed) {
+        apply(app);
+    }
 }
 
 fn start_monitor(app: &AppHandle) {

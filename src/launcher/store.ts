@@ -2,7 +2,9 @@
 // (délai 60 ms + numéro de séquence pour jeter les réponses périmées), sélection,
 // ouverture, icônes à la demande, et le préfixe `c:` (historique du presse-papiers).
 //
-// Préfixes : `a:` apps, `f:` fichiers, `d:` dossiers, `s:` réglages Windows, `c:` presse-papiers.
+// Préfixes : `a:` apps, `f:` fichiers, `d:` dossiers, `s:` réglages Windows, `c:` presse-papiers,
+// `n:` notes, `t:` tâches, `j:` jeux, `b:` budget (cf. native.ts). Commandes rapides en tête
+// (« todo … demain 18h », « timer 25 », « note … », « dépense 12,50 … »).
 
 import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,6 +13,7 @@ import { settings } from "../notch/settings";
 import { activeTool, close, hold, open, state } from "../notch/state";
 import { locale } from "../sdk/i18n";
 import { entries as clipEntries, copy as clipCopy } from "../tools/clipboard/store";
+import { PREFIXES, loadGames, nativeResults, quickRow, refreshNative, type NativeItem } from "./native";
 
 export type Kind = "app" | "setting" | "folder" | "file";
 
@@ -29,7 +32,8 @@ export type Row =
   | { type: "url"; key: string; url: string }
   | { type: "web"; key: string; query: string }
   | { type: "clip"; key: string; id: number; text: string }
-  | { type: "ext"; key: string; source: string; sourceName: string; item: ExternalItem };
+  | { type: "ext"; key: string; source: string; sourceName: string; item: ExternalItem }
+  | { type: "native"; key: string; item: NativeItem };
 
 // --- Sources externes (extensions) ---------------------------------------------------
 // Une source reçoit la requête (`query`) et répond plus tard par `setExternalResults` ;
@@ -109,6 +113,12 @@ const ENGINES = {
 
 const clipMode = computed(() => /^c:/i.test(query.value.trimStart()));
 
+/** Préfixe d'une source native (`n:` notes, `t:` tâches, `j:` jeux, `b:` budget) et le reste. */
+const nativePrefix = computed(() => {
+  const m = query.value.trimStart().match(/^([ntjb]):\s*(.*)$/i);
+  return m ? { source: PREFIXES[m[1].toLowerCase()], rest: m[2] } : null;
+});
+
 export const rows = computed<Row[]>(() => {
   const q = query.value.trim();
   if (clipMode.value) {
@@ -119,10 +129,15 @@ export const rows = computed<Row[]>(() => {
       .map((e) => ({ type: "clip" as const, key: `c${e.id}`, id: e.id, text: e.preview! }));
   }
   const out: Row[] = [];
+  const np = nativePrefix.value;
+  if (np) return nativeResults(np.rest, np.source).map((item) => ({ type: "native" as const, key: item.key, item }));
+  const quick = quickRow(q);
+  if (quick) out.push({ type: "native", key: quick.key, item: quick });
   if (launcher.calc) out.push({ type: "calc", key: "calc", value: launcher.calc });
   if (launcher.url) out.push({ type: "url", key: "url", url: launcher.url });
   const only = prefixed(q);
   if (!only) for (const h of launcher.hits) out.push({ type: "hit", key: h.id, hit: h });
+  if (!only && !quick) for (const item of nativeResults(q, null)) out.push({ type: "native", key: item.key, item });
   for (const [key, items] of external) {
     const s = sources.get(key);
     if (!s || (only && only.source.key !== key)) continue;
@@ -156,9 +171,11 @@ async function search() {
   launcher.actions = false;
 }
 
-watch(query, () => {
+watch(query, (q) => {
   window.clearTimeout(timer);
-  if (clipMode.value) {
+  // Notes : recherche plein texte côté Rust (asynchrone), sur la requête sans préfixe.
+  void refreshNative(nativePrefix.value ? nativePrefix.value.rest : q);
+  if (clipMode.value || nativePrefix.value) {
     launcher.selected = 0;
     return;
   }
@@ -206,6 +223,9 @@ export async function run(row: Row | null, mode: "open" | "admin" | "reveal" | "
         return;
       case "ext":
         sources.get(row.source)?.run(row.item.id);
+        break;
+      case "native":
+        await row.item.run();
         break;
       case "url":
         await invoke("launcher_open_url", { url: row.url });
@@ -334,6 +354,7 @@ export function stopCapture() {
 
 function reset() {
   query.value = "";
+  void loadGames();
   launcher.selected = 0;
   launcher.actions = false;
   invoke("launcher_opened").catch(() => {});
@@ -387,8 +408,8 @@ export function initLauncher() {
   watch(
     () => JSON.stringify(settings.launcher),
     async () => {
-      const { shortcut, winKey, exclude, fullscreenOff } = settings.launcher;
-      shortcutOk.value = await invoke<boolean>("launcher_config", { config: { shortcut, winKey, exclude, fullscreenOff } }).catch(() => false);
+      const { shortcut, winKey, exclude, fullscreenOff, excludeWhen } = settings.launcher;
+      shortcutOk.value = await invoke<boolean>("launcher_config", { config: { shortcut, winKey, exclude, fullscreenOff, excludeWhen } }).catch(() => false);
     },
     { immediate: true },
   );
