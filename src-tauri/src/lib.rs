@@ -13,10 +13,11 @@
 
 use tauri::Manager;
 
+mod detached;
+mod backup;
 mod extensions;
 mod host;
 mod launcher;
-mod migrate; // ménage de la v2.0.0 — à supprimer en v2.0.1
 mod overlay;
 mod services;
 mod store;
@@ -80,8 +81,6 @@ pub fn run() {
             // Historique du presse-papiers (en mémoire).
             services::cliphist::start(app.handle().clone());
             // Coffre Bitwarden : verrouillage automatique (glissant).
-            // Premier démarrage de la v2 : ménage du système d'extensions v1 (provisoire).
-            migrate::run(app.handle());
             vault::start(app.handle().clone());
             services::notifs::start(app.handle().clone());
             launcher::start(app.handle().clone());
@@ -157,11 +156,46 @@ pub fn run() {
             services::fps::imp::fps_unlock,
             services::files::file_open,
             services::files::files_copy,
+            services::files::export_csv,
+            detached::window_open,
+            backup::backup_current,
+            backup::backup_export,
+            backup::backup_inspect,
+            backup::backup_import,
+            backup::backup_open_folder,
+            detached::window_close_kind,
+            detached::window_args,
+            detached::window_fullscreen,
+            services::notes::notes_list,
+            services::notes::notes_read,
+            services::notes::notes_meta,
+            services::notes::notes_write,
+            services::notes::notes_create,
+            services::notes::notes_move,
+            services::notes::notes_pin,
+            services::notes::notes_trash,
+            services::notes::notes_purge,
+            services::notes::notes_folder_create,
+            services::notes::notes_folder_move,
+            services::notes::notes_folder_delete,
+            services::notes::notes_search,
             services::files::files_from_clipboard,
             services::weather::weather_forecast,
             services::weather::weather_geocode,
             services::weather::weather_locate,
+            services::markets::markets_stocks,
+            services::markets::markets_stock_search,
+            services::markets::markets_crypto,
+            services::markets::markets_crypto_search,
             services::desktop::master_volume,
+            services::capture::capture_displays,
+            services::capture::capture_select,
+            services::capture::capture_select_init,
+            services::capture::capture_select_done,
+            services::capture::capture_screenshot,
+            services::capture::capture_record_start,
+            services::capture::capture_record_stop,
+            services::capture::capture_record_state,
             vault::vault_status,
             vault::vault_install,
             vault::vault_set_server,
@@ -205,6 +239,8 @@ pub fn run() {
             extensions::services::ext2_clipboard_read,
             extensions::services::ext2_clipboard_write,
             extensions::services::ext2_http,
+            extensions::services::ext2_http_bytes,
+            extensions::services::ext2_cookies_clear,
             launcher::launcher_open,
             launcher::launcher_open_url,
             launcher::launcher_icons,

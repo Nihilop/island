@@ -31,11 +31,11 @@ node packages/sdk/bin/island.mjs pack . --key ma-cle.json
 
 L'utilisateur peut :
 
-- glisser le `.island` sur le notch ;
+- glisser le `.island` sur l'île ;
 - double-cliquer sur le fichier (association créée à la première installation) ;
 - passer par **Réglages › Extensions › Installer…**.
 
-Une fiche s'ouvre dans le notch : nom, auteur, état de la signature, permissions en clair,
+Une fiche s'ouvre dans l'île : nom, auteur, état de la signature, permissions en clair,
 ce que l'extension ajoute. Après acceptation, Island vérifie à nouveau le paquet, l'installe
 d'un coup et enregistre les permissions consenties.
 

@@ -7,6 +7,7 @@
 
 pub mod ai;
 pub mod apps;
+pub mod capture;
 pub mod cliphist;
 pub mod convert;
 pub mod desktop;
@@ -16,8 +17,10 @@ pub mod files;
 pub mod fps;
 pub mod hardware;
 pub mod hello;
+pub mod markets;
 pub mod media;
 pub mod mixer;
+pub mod notes;
 pub mod notifs;
 pub mod privacy;
 pub mod reserved;

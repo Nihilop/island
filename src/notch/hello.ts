@@ -8,6 +8,7 @@
 
 import { reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { hold } from "./state";
 import { settings } from "./settings";
 import { presentation } from "./presentation";
@@ -86,6 +87,15 @@ export async function unlockScope(scope: HelloScope) {
   unlocked.set(scope, Date.now());
 }
 
+/** Une seule confirmation Windows Hello pour plusieurs portées verrouillées (ex. export
+ *  d'une sauvegarde qui contient les notes et le budget). Rien à faire si aucune ne l'est. */
+export async function unlockScopes(scopes: HelloScope[]) {
+  const locked = scopes.filter(isLocked);
+  if (!locked.length) return;
+  await prompt(() => invoke("hello_verify"));
+  for (const s of locked) unlocked.set(s, Date.now());
+}
+
 export function lockScope(scope: HelloScope) {
   unlocked.delete(scope);
 }
@@ -112,6 +122,13 @@ export function initHello() {
     for (const [scope, last] of unlocked) if (Date.now() - last > max) unlocked.delete(scope);
   }, 5000);
   watch(presentation, (on) => on && unlocked.clear());
+  // Notes verrouillées (délai, mode présentation, verrou manuel) : leurs fenêtres
+  // détachées se ferment. L'activité dans une fenêtre de note prolonge le délai.
+  watch(
+    () => isLocked("notes"),
+    (locked) => locked && invoke("window_close_kind", { kind: "note" }).catch(() => {}),
+  );
+  listen<string>("hello://touch", (e) => touchScope(e.payload as HelloScope));
   // Le Coffre garde (ou non) sa session pour Hello côté Rust.
   watch(
     () => settings.hello.vault && hello.enrolled,

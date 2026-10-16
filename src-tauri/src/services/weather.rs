@@ -53,9 +53,10 @@ pub async fn weather_forecast(lat: f64, lon: f64, fahrenheit: bool) -> Result<Va
     }
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}\
-         &current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day\
-         &daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max\
-         &timezone=auto&forecast_days=7{}",
+         &current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day,cloud_cover\
+         &hourly=weather_code,precipitation_probability,temperature_2m,wind_speed_10m&forecast_hours=24\
+         &daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max\
+         &timezone=auto&timeformat=unixtime&forecast_days=7{}",
         if fahrenheit { "&temperature_unit=fahrenheit&wind_speed_unit=mph" } else { "" }
     );
     let v = tauri::async_runtime::spawn_blocking(move || get_json(&url, 8)).await.map_err(|e| e.to_string())??;

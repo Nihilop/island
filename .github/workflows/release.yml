@@ -50,7 +50,7 @@ jobs:
           releaseBody: |
             ## Island ${{ github.ref_name }}
 
-            A notch for Windows — attached to the top of your screen, it hosts your tools
+            An island for Windows — attached to the top of your screen, it hosts your tools
             (media, timer, clipboard, Bitwarden vault, launcher, notifications, …) and
             isolated, signed extensions.
 

@@ -307,9 +307,10 @@ pub fn ext2_uninstall(app: AppHandle, id: String) -> Result<(), String> {
     }
     if let Some(st) = state(&app, &id) {
         for key in st.secrets {
-            let _ = super::services::ext2_secret_delete(id.clone(), key);
+            let _ = super::services::secret_delete(&id, &key);
         }
     }
+    super::services::forget_cookies(&id);
     let _ = std::fs::remove_file(state_path(&app, &id));
     if let Ok(cfg) = app.path().app_config_dir() {
         let _ = std::fs::remove_file(cfg.join("storage").join(format!("ext2.{id}.json")));

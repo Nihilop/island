@@ -3,8 +3,8 @@
 //
 // ⚠️ Tauri considère comme « locale » (= mêmes droits que l'app) toute URL d'un protocole
 // enregistré. La sûreté repose donc sur l'ISOLATION DU DOCUMENT, garantie deux fois :
-//   1. l'hôte charge ces pages dans des iframes `sandbox="allow-scripts"` ;
-//   2. chaque réponse porte la directive CSP `sandbox allow-scripts` : même ouverte hors
+//   1. l'hôte charge ces pages dans des iframes `sandbox="allow-scripts allow-forms"` ;
+//   2. chaque réponse porte la directive CSP `sandbox allow-scripts allow-forms` : même ouverte hors
 //      iframe, la page a une origine opaque → en-tête Origin `null` → Tauri rejette tout
 //      appel IPC. La CSP interdit aussi tout réseau direct (`connect-src 'none'`) et ne
 //      permet de charger que les fichiers de CETTE extension.
@@ -50,12 +50,23 @@ fn status(code: StatusCode) -> Response<Cow<'static, [u8]>> {
     Response::builder().status(code).body(Cow::Borrowed(&[][..])).unwrap()
 }
 
-/// CSP d'une page d'extension : isolée, sans réseau, ressources de l'extension seulement.
-fn csp(origin: &str, id: &str) -> String {
-    let own = format!("{origin}/{id}/");
+/// CSP d'une page d'extension : isolée, sans réseau, ressources de l'extension seulement ;
+/// formulaires permis côté JavaScript (`allow-forms` : l'événement `submit` part) mais
+/// jamais envoyés nulle part (`form-action 'none'`) ;
+/// images distantes permises pour les domaines `images:<domaine>` consentis (HTTPS, sans
+/// cookie ni script : affichage seulement).
+fn csp(origin: &str, m: &super::Manifest) -> String {
+    let own = format!("{origin}/{}/", m.id);
+    let images: String = m
+        .permissions
+        .iter()
+        .filter_map(|p| p.strip_prefix("images:"))
+        .filter(|d| super::valid_host_pattern(d))
+        .map(|d| format!(" https://{d}"))
+        .collect();
     format!(
-        "sandbox allow-scripts; default-src 'none'; script-src {own}; style-src {own} 'unsafe-inline'; \
-         img-src {own} data: blob:; font-src {own} data:; media-src {own} data: blob:; connect-src 'none'; \
+        "sandbox allow-scripts allow-forms; default-src 'none'; script-src {own}; style-src {own} 'unsafe-inline'; \
+         img-src {own} data: blob:{images}; font-src {own} data:; media-src {own} data: blob:; connect-src 'none'; \
          frame-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none'"
     )
 }
@@ -93,7 +104,7 @@ fn serve(app: &AppHandle, req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, kind)
-        .header("Content-Security-Policy", csp(&origin, id))
+        .header("Content-Security-Policy", csp(&origin, &m))
         // Les modules JS d'une page à origine opaque sont chargés en mode CORS.
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header("X-Content-Type-Options", "nosniff")

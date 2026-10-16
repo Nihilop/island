@@ -20,6 +20,9 @@ export interface Tool {
   dock?: boolean;
   /** true = la vue occupe tout le notch ouvert (ni header ni dock). */
   bare?: boolean;
+  /** Fond décoratif derrière tout le notch ouvert (en-tête et dock compris), ex. le ciel de
+   *  la Météo. Posé à la taille finale de l'outil ; démonté quand l'outil se ferme. */
+  backdrop?: Component;
 }
 
 export const tools = shallowRef<Tool[]>([]);

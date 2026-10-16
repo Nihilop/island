@@ -43,9 +43,65 @@ const user = await island.http.json<{ login: string }>("https://api.github.com/u
 
 Permission `network:<domaine>` (`network:*.exemple.com` pour les sous-domaines). **HTTPS
 seulement**, aucune redirection suivie, réponse limitée à 5 Mo, adresses locales et privées
-refusées.
+refusées. `timeout` (secondes, 1 à 120, 20 par défaut) allonge le délai d'une requête.
 
-## Notch
+```ts
+// Corps binaire (vidéo, images, fichiers ; 64 Mo max), transféré sans copie.
+const r = await island.http.bytes({ url: "https://exemple.com/video/seg0001.ts", timeout: 90 });
+// r = { status, headers, body: ArrayBuffer }
+```
+
+**Session par cookie** (permission `cookies`) : Island retient les cookies posés par les
+domaines déclarés et les renvoie aux requêtes suivantes, comme un navigateur. Ils restent
+invisibles pour l'extension (ni `Set-Cookie` dans les réponses, ni `Cookie` accepté en
+entrée), sont gardés dans le trousseau Windows et effacés à la désinstallation.
+`island.http.clearCookies()` les oublie tous (déconnexion).
+
+## Fenêtres et événements
+
+```ts
+// Ouvre la fenêtre déclarée `player` (ou la ramène au premier plan) avec des arguments.
+await island.windows.open("player", { episode: 12 }, { title: "Lecteur" });
+
+// Dans la page de la fenêtre :
+const args = await island.windows.args<{ episode: number }>();
+island.windows.onArgs((a) => …); // rouverte avec d'autres arguments
+await island.windows.setTitle("Épisode 12");
+
+// Entre les pages de l'extension (île, fenêtres, logique) :
+island.events.on("progress", (p) => …);
+await island.events.emit("progress", { episode: 12, position: 340 });
+```
+
+| | Permission |
+|---|---|
+| `island.windows.open(id, args?, { title? })` | `windows` — fenêtre de [`contributes.windows`](./emplacements#fenetre) |
+| `island.windows.args()` / `onArgs(cb)` | aucune — dans la page d'une fenêtre |
+| `island.windows.setTitle(titre)` / `close()` | aucune — dans la page d'une fenêtre |
+| `island.events.emit(nom, données)` / `on(nom, cb)` | aucune — ne sort jamais de l'extension |
+
+## Capture
+
+Permission `capture`. **Island** affiche la sélection (zone dessinée, fenêtre survolée ou
+écran), capture et encode — l'extension pilote seulement. L'île n'apparaît jamais dans les
+captures.
+
+```ts
+const target = await island.capture.select("region"); // null si annulé (Échap)
+if (target) {
+  const shot = await island.capture.screenshot(target, { clipboard: true }); // PNG dans Images\Island
+  await island.capture.startRecording(target, { systemAudio: true, mic: false, quality: "medium", fps: 30, codec: "h264" });
+  const video = await island.capture.stopRecording(); // { path, durationMs } — MP4 dans Vidéos\Island
+}
+island.capture.onRecording((s) => …); // début / fin (activité en direct « REC »…)
+await island.capture.reveal(path);     // afficher une capture dans l'Explorateur
+```
+
+Vidéo : encodeur matériel de Windows (H.264 ou H.265), son du PC et micro mélangés. Un seul
+enregistrement à la fois ; pendant l'enregistrement, le contour de la zone est visible (pas
+dans la vidéo) et le voyant rouge de l'île est allumé.
+
+## Dans l'île
 
 | | Permission |
 |---|---|
@@ -63,7 +119,7 @@ refusées.
 import "@island/sdk/ui.css";
 ```
 
-Couleurs et typographie du notch (variables `--label`, `--label-2`, `--fill-1`…, `--green`,
+Couleurs et typographie de l'île (variables `--label`, `--label-2`, `--fill-1`…, `--green`,
 `--orange`, `--red`, `--blue`), fond transparent, et quelques classes : `.list`, `.item`,
 `.btn` (`.primary`), `.badge` (`.green`, `.orange`…), `.seg` (onglets), `.empty`, `.caption`,
 `.muted`, `.truncate`. Le thème clair est géré automatiquement.

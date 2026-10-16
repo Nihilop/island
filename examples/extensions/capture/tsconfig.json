@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "preserve",
+    "types": [],
+    "paths": {
+      "@island/sdk": ["../../../packages/sdk/src/index.ts"],
+      "@island/sdk/ui.css": ["../../../packages/sdk/src/ui.css"]
+    }
+  },
+  "include": ["src", "env.d.ts"]
+}

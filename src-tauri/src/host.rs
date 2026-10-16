@@ -259,6 +259,17 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
         GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
     };
 
+    // Fenêtre de premier plan : pas notre overlay, pas le shell, et elle doit couvrir
+    // RÉELLEMENT son moniteur (sinon : plein écran sur un AUTRE moniteur → on reste).
+    let hwnd = GetForegroundWindow();
+    if hwnd.0.is_null() || hwnd.0 as isize == overlay_hwnd {
+        return false;
+    }
+    // Fenêtre détachée d'Island en plein écran (lecteur d'une extension…) : c'est un vrai
+    // plein écran, même si Windows ne le signale pas comme tel.
+    if crate::detached::is_own_fullscreen(hwnd.0 as isize) {
+        return true;
+    }
     // Signal OFFICIEL de Windows — celui que le système utilise lui-même pour décider de
     // masquer les notifications. Un jeu / une app PLEIN ÉCRAN (exclusif OU borderless) met
     // l'état à BUSY / D3D_FULL_SCREEN / PRESENTATION ; un bureau normal — Y COMPRIS une app
@@ -274,13 +285,6 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
         return false;
     }
 
-    // L'état système confirme un plein écran ; on s'assure que c'est bien la fenêtre de
-    // premier plan (pas notre overlay, pas le shell) et qu'elle couvre RÉELLEMENT son
-    // moniteur (sinon : plein écran sur un AUTRE moniteur pendant qu'on bosse → on reste).
-    let hwnd = GetForegroundWindow();
-    if hwnd.0.is_null() || hwnd.0 as isize == overlay_hwnd {
-        return false;
-    }
     // Exclut TOUTE fenêtre de NOTRE processus (overlay compris) : quand la view d'une
     // extension s'ouvre, l'overlay passe plein écran et devient premier plan → sans ça il
     // était pris pour un « jeu plein écran » et le raccourci (ex. touche Win de Flow) était

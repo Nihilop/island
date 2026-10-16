@@ -33,6 +33,16 @@ pub fn valid_id(id: &str) -> bool {
         && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
 }
 
+/// Motif de domaine d'une permission (`network:`, `images:`) : `exemple.com` ou
+/// `*.exemple.com`, caractères `[a-z0-9.-]` seulement (il finit dans une CSP).
+pub(crate) fn valid_host_pattern(d: &str) -> bool {
+    let host = d.strip_prefix("*.").unwrap_or(d);
+    !host.is_empty()
+        && host.len() <= 253
+        && host.contains('.')
+        && host.split('.').all(|l| !l.is_empty() && !l.starts_with('-') && l.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
+}
+
 /// Chemin relatif sûr (pas d'absolu, pas de `..`, pas de lecteur).
 pub(crate) fn valid_rel(path: &str) -> bool {
     !path.is_empty()
@@ -57,9 +67,29 @@ fn default_size() -> [u32; 2] {
     [520, 300]
 }
 
+/// Fenêtre d'extension (permission `windows`) : une page ouverte dans sa propre fenêtre.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowDecl {
+    pub id: String,
+    pub view: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default = "default_window_size")]
+    pub size: [u32; 2],
+    #[serde(default)]
+    pub min_size: Option<[u32; 2]>,
+}
+
+fn default_window_size() -> [u32; 2] {
+    [960, 600]
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Contributes {
+    #[serde(default)]
+    pub windows: Vec<WindowDecl>,
     #[serde(default)]
     pub tools: Vec<ToolDecl>,
     #[serde(default)]
@@ -106,9 +136,25 @@ impl Manifest {
         paths.extend(self.icon.as_deref());
         paths.extend(self.contributes.tools.iter().map(|t| t.view.as_str()));
         paths.extend(self.contributes.tools.iter().filter_map(|t| t.icon.as_deref()));
+        paths.extend(self.contributes.windows.iter().map(|w| w.view.as_str()));
         paths.extend(self.locales.values().map(String::as_str));
         if let Some(bad) = paths.into_iter().find(|p| !valid_rel(p)) {
             return Err(format!("chemin invalide : {bad}"));
+        }
+        for p in &self.permissions {
+            let ok = match p.split_once(':') {
+                Some(("network" | "images", d)) => valid_host_pattern(d),
+                Some(_) => false,
+                None => !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase()),
+            };
+            if !ok {
+                return Err(format!("permission invalide : {p}"));
+            }
+        }
+        for w in &self.contributes.windows {
+            if !valid_id(&format!("x.{}", w.id)) {
+                return Err(format!("fenêtre invalide : {}", w.id));
+            }
         }
         for t in &self.contributes.tools {
             if !valid_id(&format!("x.{}", t.id)) {
@@ -213,6 +259,17 @@ mod tests {
         assert!(!valid_id("single"));
         assert!(!valid_id("Dev.Island"));
         assert!(!valid_id("__app__.x"));
+    }
+
+    #[test]
+    fn host_patterns() {
+        assert!(valid_host_pattern("s4.anilist.co"));
+        assert!(valid_host_pattern("*.example.org"));
+        assert!(!valid_host_pattern("example"));
+        assert!(!valid_host_pattern("a.com; script-src *"));
+        assert!(!valid_host_pattern("A.com"));
+        assert!(!valid_host_pattern("*.*.com"));
+        assert!(!valid_host_pattern("x.com/path"));
     }
 
     #[test]

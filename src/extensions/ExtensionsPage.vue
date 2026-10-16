@@ -23,6 +23,8 @@ import { Button } from "@/sdk/ui/button";
 import { Badge } from "@/sdk/ui/badge";
 import { all, extUrl, installed, type Manifest, type SettingDecl } from "./runtime";
 import { readSetting, writeSetting } from "./settings";
+import { commandShortcut, setCommandShortcut, shortcutPrefs, shortcutStatus } from "./slots";
+import ShortcutField from "../ui/ShortcutField.vue";
 import {
   addDevFolder,
   cancelInstall,
@@ -86,6 +88,7 @@ async function save(ext: Manifest, d: SettingDecl, value: unknown) {
 /** Libellé lisible d'une permission. */
 function permLabel(p: string): string {
   if (p.startsWith("network:")) return t("ext.perm.network", { host: p.slice(8) });
+  if (p.startsWith("images:")) return t("ext.perm.images", { host: p.slice(7) });
   const key = `ext.perm.${p}`;
   const s = t(key);
   return s === key ? p : s;
@@ -180,7 +183,7 @@ const errorText = (e: string) => {
               v-for="p in info.manifest.permissions"
               :key="p"
               variant="secondary"
-              :class="info.update?.newPermissions.includes(p) ? 'text-sys-orange' : ''"
+              :class="p === 'capture' ? 'text-sys-red' : info.update?.newPermissions.includes(p) ? 'text-sys-orange' : ''"
             >{{ permLabel(p) }}</Badge>
           </div>
         </Row>
@@ -240,11 +243,30 @@ const errorText = (e: string) => {
 
     <!-- Réglages de chaque extension active -->
     <template v-for="x in all" :key="`s-${x.manifest.id}`">
-      <Group v-if="active(x.manifest.id) && (x.manifest.contributes.settings.length || x.manifest.permissions.length)" :title="x.manifest.name">
+      <Group
+        v-if="active(x.manifest.id) && (x.manifest.contributes.settings.length || x.manifest.permissions.length || x.manifest.contributes.commands.length)"
+        :title="x.manifest.name"
+      >
         <Row v-if="x.manifest.permissions.length" :label="t('ext.permissions')">
           <div class="flex max-w-[300px] flex-wrap justify-end gap-1">
-            <Badge v-for="p in x.manifest.permissions" :key="p" variant="secondary">{{ permLabel(p) }}</Badge>
+            <Badge v-for="p in x.manifest.permissions" :key="p" variant="secondary" :class="p === 'capture' ? 'text-sys-red' : ''">{{ permLabel(p) }}</Badge>
           </div>
+        </Row>
+        <!-- Raccourcis des commandes (modifiables ; défaut = manifeste). -->
+        <Row
+          v-for="c in x.manifest.contributes.commands"
+          :key="`cmd-${c.id}`"
+          :label="c.title"
+          :help="shortcutStatus.get(`${x.manifest.id}:${c.id}`) === 'taken' ? t('ext.shortcut.taken') : c.shortcut ? t('ext.shortcut.default', { s: c.shortcut }) : undefined"
+        >
+          <Button
+            v-if="`${x.manifest.id}:${c.id}` in shortcutPrefs.map"
+            variant="ghost"
+            size="sm"
+            class="text-label-3"
+            @click="setCommandShortcut(x.manifest, c.id, null)"
+          >{{ t("ext.shortcut.reset") }}</Button>
+          <ShortcutField :model-value="commandShortcut(x.manifest, c)" @update:model-value="setCommandShortcut(x.manifest, c.id, $event)" />
         </Row>
         <Row v-for="d in x.manifest.contributes.settings" :key="d.key" :label="d.label" :help="d.help">
           <Switch v-if="d.type === 'switch'" :model-value="!!values.get(k(x.manifest, d.key))" @update:model-value="save(x.manifest, d, $event)" />

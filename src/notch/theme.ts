@@ -5,6 +5,7 @@
 // `data-theme-owner="notch"` signale au legacy appStore de ne plus toucher au thème.
 
 import { watch } from "vue";
+import { emit, listen } from "@tauri-apps/api/event";
 import { settings } from "./settings";
 
 const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -16,11 +17,20 @@ function apply() {
   root.classList.toggle("light", light);
   root.classList.toggle("dark", !light);
   root.style.colorScheme = light ? "light" : "dark";
+  // Les fenêtres détachées (notes…) suivent le thème du notch.
+  void emit("theme://changed", light ? "light" : "dark").catch(() => {});
 }
+
+/** Thème effectif courant (fenêtres détachées : état initial). */
+export const currentTheme = () => (document.documentElement.classList.contains("light") ? "light" : "dark");
 
 /** À appeler une fois les réglages chargés. */
 export function initTheme() {
   watch(() => settings.theme, apply, { immediate: true });
+  // Une fenêtre détachée bascule le thème : le notch, seul à écrire les réglages, applique.
+  listen<"dark" | "light">("theme://set", (e) => (settings.theme = e.payload));
+  // Une fenêtre détachée qui s'ouvre demande le thème courant.
+  listen("theme://get", apply);
   media.addEventListener("change", () => {
     if (settings.theme === "system") apply();
   });

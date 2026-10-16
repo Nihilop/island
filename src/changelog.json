@@ -1,5 +1,30 @@
 [
   {
+    "version": "2.1.0",
+    "date": "2026-10-16",
+    "highlight": true,
+    "items": {
+      "fr": [
+        "Notes : plusieurs notes rangées en dossiers, éditeur façon Notion (Markdown, blocs, sommaire), chaque note dans sa propre fenêtre.",
+        "Tâches : échéance (date et heure) et rappels.",
+        "Nouveaux outils : Budget (dépenses, récurrences, rapports) et Marchés (bourse et crypto).",
+        "Météo : un ciel animé qui montre le temps de la journée (pluie, neige, orage, chaleur…), le conseil du jour et les jours suivants en un clic.",
+        "Sauvegarde : exporte et restaure tes réglages et les données de tes outils.",
+        "Extensions : fenêtres dédiées, réponses binaires, images, raccourcis modifiables, et la capture d'écran et vidéo (extension Capture).",
+        "L'île se masque quand une fenêtre d'Island passe en plein écran."
+      ],
+      "en": [
+        "Notes: multiple notes in folders, a Notion-like editor (Markdown, blocks, outline), each note in its own window.",
+        "To-dos: due date (and time) with reminders.",
+        "New tools: Budget (expenses, recurring, reports) and Markets (stocks and crypto).",
+        "Weather: an animated sky showing the day's weather (rain, snow, storm, heat…), the tip of the day and upcoming days in one click.",
+        "Backup: export and restore your settings and tool data.",
+        "Extensions: dedicated windows, binary responses, images, editable shortcuts, and screen and video capture (Capture extension).",
+        "The island hides when an Island window goes fullscreen."
+      ]
+    }
+  },
+  {
     "version": "2.0.0",
     "date": "2026-10-14",
     "highlight": true,

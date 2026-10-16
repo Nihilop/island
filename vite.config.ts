@@ -19,6 +19,13 @@ export default defineConfig(async () => ({
     },
   },
 
+  // Pré-compilation des dépendances : la page d'Island seulement. Sans ça, Vite parcourt
+  // TOUS les .html du dépôt, dont les pages des extensions d'exemple (examples/extensions),
+  // qui ont leur propre build et leurs propres alias (`@island/sdk`…).
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
@@ -36,8 +43,9 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri` (et les extensions d'exemple, qui se
+      //    construisent à part : leurs `dist/` changent à chaque build)
+      ignored: ["**/src-tauri/**", "**/examples/**"],
     },
     fs: {
       allow: [workspaceRoot],

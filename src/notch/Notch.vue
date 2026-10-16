@@ -53,6 +53,11 @@ const viewStyle = computed(() => {
   return { width: `${s.w}px`, height: `${bare.value ? s.h : s.h - HEADER_H - DOCK_H}px` };
 });
 
+const backdropStyle = computed(() => {
+  const s = openShape(openSize.value);
+  return { width: `${s.w}px`, height: `${s.h}px` };
+});
+
 /** Forme « ligne » : style fermé ligne, ou mode focus rendu en ligne. */
 const lineMode = computed(() => (settings.focusMode && settings.focusStyle === "line") || settings.idleStyle === "line");
 
@@ -463,7 +468,22 @@ onBeforeUnmount(() => unsubs.forEach((u) => u()));
           leave-to-class="opacity-0 blur-[4px]"
         >
           <div v-if="state === 'open'" class="absolute inset-0 flex flex-col">
-            <Header v-if="!bare" />
+            <!-- Fond de l'outil (ciel de la Météo…) : taille finale, centré, sous tout le reste. -->
+            <Transition
+              enter-active-class="transition-opacity duration-500 ease-out delay-80"
+              enter-from-class="opacity-0"
+              leave-active-class="transition-opacity duration-200 ease-out"
+              leave-to-class="opacity-0"
+            >
+              <component
+                :is="tool.backdrop"
+                v-if="tool?.backdrop && !bare"
+                :key="tool.id"
+                class="absolute top-0 left-1/2 -translate-x-1/2"
+                :style="backdropStyle"
+              />
+            </Transition>
+            <Header v-if="!bare" class="relative" />
             <div class="relative min-h-0 flex-1 overflow-clip">
               <!-- Changement d'outil : l'ancien sort tout de suite, le nouveau entre une fois
                    la forme lancée. -->
@@ -482,7 +502,7 @@ onBeforeUnmount(() => unsubs.forEach((u) => u()));
                 />
               </Transition>
             </div>
-            <Dock v-if="!bare" :width="openShape(openSize).w" />
+            <Dock v-if="!bare" class="relative" :width="openShape(openSize).w" />
           </div>
         </Transition>
       </div>

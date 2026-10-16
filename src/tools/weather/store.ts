@@ -37,9 +37,38 @@ export const weather = reactive({
   loading: false,
   error: false,
   locating: false,
-  current: null as null | { temp: number; feels: number; code: number; wind: number; day: boolean },
-  days: [] as { date: string; code: number; max: number; min: number; rain: number }[],
+  current: null as null | { temp: number; feels: number; code: number; wind: number; day: boolean; clouds: number },
+  days: [] as Day[],
+  /** 24 prochaines heures (heure en cours comprise). */
+  hours: [] as Hour[],
+  /** Décalage horaire du lieu (s) : heures affichées à l'heure du lieu. */
+  offset: 0,
 });
+
+export interface Day {
+  /** AAAA-MM-JJ, au lieu. */
+  date: string;
+  code: number;
+  max: number;
+  min: number;
+  rain: number;
+  /** Lever / coucher (horodatage Unix, s). */
+  sunrise: number;
+  sunset: number;
+  wind: number;
+}
+
+export interface Hour {
+  /** Horodatage Unix (s). */
+  at: number;
+  code: number;
+  rain: number;
+  temp: number;
+  wind: number;
+}
+
+/** Heure (0-23) d'un horodatage, à l'heure du lieu. */
+export const hourAt = (at: number) => new Date((at + weather.offset) * 1000).getUTCHours();
 
 /** Recherche de lieu affichée (aussi quand la détection IP échoue sans lieu). */
 export const searching = ref(false);
@@ -74,20 +103,34 @@ export async function refresh() {
   try {
     const v = await invoke<any>("weather_forecast", { lat: loc.lat, lon: loc.lon, fahrenheit: fahrenheit.value });
     const c = v.current;
+    const off: number = v.utc_offset_seconds ?? 0;
+    weather.offset = off;
     weather.current = {
       temp: c.temperature_2m,
       feels: c.apparent_temperature,
       code: c.weather_code,
       wind: c.wind_speed_10m,
       day: c.is_day === 1,
+      clouds: c.cloud_cover ?? 0,
     };
     const d = v.daily;
-    weather.days = d.time.map((date: string, i: number) => ({
-      date,
+    weather.days = d.time.map((at: number, i: number) => ({
+      date: new Date((at + off) * 1000).toISOString().slice(0, 10),
       code: d.weather_code[i],
       max: d.temperature_2m_max[i],
       min: d.temperature_2m_min[i],
       rain: d.precipitation_probability_max?.[i] ?? 0,
+      sunrise: d.sunrise?.[i] ?? 0,
+      sunset: d.sunset?.[i] ?? 0,
+      wind: d.wind_speed_10m_max?.[i] ?? 0,
+    }));
+    const h = v.hourly;
+    weather.hours = (h?.time ?? []).map((at: number, i: number) => ({
+      at,
+      code: h.weather_code[i],
+      rain: h.precipitation_probability?.[i] ?? 0,
+      temp: h.temperature_2m[i],
+      wind: h.wind_speed_10m?.[i] ?? 0,
     }));
   } catch {
     weather.error = true;

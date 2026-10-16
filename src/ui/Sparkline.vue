@@ -1,12 +1,21 @@
 <script setup lang="ts">
 // Courbe d'une minute (160 × 22) : trait 1,5 px à 80 %, ligne de base, trous pour les
 // valeurs manquantes. Défilement fluide : la courbe est dessinée décalée d'un pas et
-// glisse d'un pas vers la gauche en 1 s linéaire à chaque nouvelle valeur.
+// glisse d'un pas vers la gauche en 1 s linéaire à chaque nouvelle valeur. `still` : courbe
+// fixe (série complète, ex. cours du jour), sans décalage ni défilement.
 import { computed, nextTick, ref, watch } from "vue";
 
 const props = withDefaults(
-  defineProps<{ values: (number | null)[]; max?: number; tick: number; color?: string; width?: number; height?: number }>(),
-  { max: 100, color: "var(--label)", width: 160, height: 22 },
+  defineProps<{
+    values: (number | null)[];
+    max?: number;
+    tick?: number;
+    still?: boolean;
+    color?: string;
+    width?: number;
+    height?: number;
+  }>(),
+  { max: 100, tick: 0, color: "var(--label)", width: 160, height: 22 },
 );
 
 const step = computed(() => props.width / (props.values.length - 1));
@@ -20,7 +29,7 @@ const path = computed(() => {
       pen = false;
       return;
     }
-    const x = (i + 1) * step.value; // décalé d'un pas (glisse vers la gauche)
+    const x = (props.still ? i : i + 1) * step.value; // décalé d'un pas (glisse vers la gauche)
     const y = 1 + h - (Math.min(props.max, Math.max(0, v)) / props.max) * h;
     d += `${pen ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)} `;
     pen = true;

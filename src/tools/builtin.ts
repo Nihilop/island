@@ -6,6 +6,7 @@ import {
   PhBell,
   PhChartLineUp,
   PhCheckCircle,
+  PhWallet,
   PhClipboardText,
   PhCloudSun,
   PhCpu,
@@ -31,9 +32,12 @@ import VaultView from "./vault/VaultView.vue";
 import OverviewView from "./overview/OverviewView.vue";
 import TimerView from "./timer/TimerView.vue";
 import TodosView from "./todos/TodosView.vue";
+import BudgetView from "./budget/BudgetView.vue";
 import NotesView from "./notes/NotesView.vue";
 import ConvertView from "./convert/ConvertView.vue";
 import WeatherView from "./weather/WeatherView.vue";
+import WeatherSky from "./weather/WeatherSky.vue";
+import MarketsView from "./markets/MarketsView.vue";
 import ClipboardView from "./clipboard/ClipboardView.vue";
 import ShelfView from "./shelf/ShelfView.vue";
 import SystemView from "./system/SystemView.vue";
@@ -50,9 +54,11 @@ const VIEWS: Record<string, Component> = {
   media: MediaView,
   timer: TimerView,
   todos: TodosView,
+  budget: BudgetView,
   notes: NotesView,
   convert: ConvertView,
   weather: WeatherView,
+  trading: MarketsView,
   clipboard: ClipboardView,
   shelf: ShelfView,
   system: SystemView,
@@ -63,6 +69,9 @@ const VIEWS: Record<string, Component> = {
 };
 import SettingsView from "./settings/SettingsView.vue";
 
+/** Fonds décoratifs (derrière tout le notch ouvert). */
+const BACKDROPS: Record<string, Component> = { weather: WeatherSky };
+
 // Taille ouverte (header + contenu + dock compris), en DIP.
 const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   overview: { icon: PhSquaresFour, size: [520, 252] },
@@ -70,14 +79,15 @@ const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   media: { icon: PhMusicNotes, size: [520, 232] },
   timer: { icon: PhTimer, size: [520, 192] },
   todos: { icon: PhCheckCircle, size: [520, 276] },
-  notes: { icon: PhNote, size: [520, 260] },
+  budget: { icon: PhWallet, size: [640, 420] },
+  notes: { icon: PhNote, size: [680, 420] },
   clipboard: { icon: PhClipboardText, size: [600, 236] },
   shelf: { icon: PhTray, size: [560, 236] },
   ask: { icon: PhSparkle, size: [560, 440] },
   convert: { icon: PhArrowsLeftRight, size: [520, 290] },
   trading: { icon: PhChartLineUp, size: [560, 380] },
   usage: { icon: PhGauge, size: [600, 320] },
-  weather: { icon: PhCloudSun, size: [520, 250] },
+  weather: { icon: PhCloudSun, size: [540, 300] },
   system: { icon: PhCpu, size: [600, 248] },
   discord: { icon: PhDiscordLogo, size: [520, 210] },
   vault: { icon: PhLockKey, size: [560, 324] },
@@ -92,6 +102,7 @@ export function registerBuiltinTools() {
       title: () => t(`tool.${id}`),
       size: { w: spec.size[0], h: spec.size[1] },
       view: VIEWS[id] ?? ComingSoon,
+      backdrop: BACKDROPS[id],
       defaultEnabled: enabled,
     });
   }
