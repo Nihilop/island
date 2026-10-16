@@ -20,6 +20,7 @@ const label = (() => {
 async function root(): Promise<Component> {
   if (label.startsWith("note-")) return (await import("./notes/NoteWindow.vue")).default;
   if (label.startsWith("ext-")) return (await import("./extensions/ExtWindow.vue")).default;
+  if (label === "capture-select") return (await import("./capture/CaptureSelect.vue")).default;
   return (await import("./windows/Overlay.vue")).default;
 }
 

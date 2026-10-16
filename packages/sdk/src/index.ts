@@ -29,6 +29,45 @@ export interface HttpBytesResponse {
   body: ArrayBuffer;
 }
 
+/** Capture (permission `capture`) : coordonnées en pixels physiques, relatives au moniteur. */
+export interface CaptureRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+export type CaptureTarget =
+  | { kind: "screen"; display: number }
+  | { kind: "region"; display: number; rect: CaptureRect }
+  | { kind: "window"; hwnd: number };
+export interface CaptureDisplay {
+  index: number;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale: number;
+  primary: boolean;
+}
+export interface RecordOptions {
+  fps?: 30 | 60;
+  codec?: "h264" | "hevc";
+  quality?: "low" | "medium" | "high";
+  systemAudio?: boolean;
+  mic?: boolean;
+}
+export interface RecordingState {
+  recording: boolean;
+  startedAt: number | null;
+  target: CaptureTarget | null;
+  /** Fin : fichier produit (absent si l'enregistrement a échoué). */
+  path?: string;
+  durationMs?: number;
+  /** Fin anormale : `targetClosed`, `encoderFailed`, `encoderTimeout`. */
+  error?: string;
+}
+
 export interface LiveSpec {
   /** Chemin d'une icône de l'extension (SVG monochrome, teinté par `color`). */
   icon?: string;
@@ -96,6 +135,22 @@ export interface Island {
     setTitle(title: string): Promise<void>;
     close(): Promise<void>;
   };
+  /** Permission `capture` (à haut risque) : Island affiche la sélection, capture et encode. */
+  capture: {
+    displays(): Promise<CaptureDisplay[]>;
+    /** Sélection dessinée par Island (zone, fenêtre ou écran) ; null si annulée. */
+    select(mode: "region" | "window" | "screen"): Promise<CaptureTarget | null>;
+    /** PNG dans Images\Island (et/ou presse-papiers). */
+    screenshot(target: CaptureTarget, opts?: { clipboard?: boolean; save?: boolean }): Promise<{ path: string | null; width: number; height: number }>;
+    /** MP4 dans Vidéos\Island (encodeur matériel de Windows). Un seul enregistrement à la fois. */
+    startRecording(target: CaptureTarget, opts?: RecordOptions): Promise<void>;
+    stopRecording(): Promise<{ path: string; durationMs: number }>;
+    state(): Promise<RecordingState>;
+    /** Début / fin d'un enregistrement. */
+    onRecording(cb: (state: RecordingState) => void): void;
+    /** Affiche une capture d'Island dans l'Explorateur. */
+    reveal(path: string): Promise<void>;
+  };
   /** Événements entre les pages de l'extension (notch, fenêtres, logique). */
   events: {
     emit(name: string, data?: unknown): Promise<void>;
@@ -159,7 +214,18 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
     new Promise<T>((ok, ko) => {
       const id = ++n;
       pending.set(id, { ok, ko });
-      port.postMessage({ t: "call", n: id, method, args });
+      const msg = { t: "call", n: id, method, args };
+      try {
+        port.postMessage(msg);
+      } catch {
+        // Argument non transmissible tel quel (proxy réactif de Vue…) : copie JSON.
+        try {
+          port.postMessage(JSON.parse(JSON.stringify(msg)));
+        } catch (e) {
+          pending.delete(id);
+          ko(e instanceof Error ? e : new Error(String(e)));
+        }
+      }
     });
   const on = (name: string, cb: (data: any) => void) => listeners.set(name, [...(listeners.get(name) ?? []), cb]);
 
@@ -226,8 +292,19 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
       setTitle: (title) => call("windows.setTitle", title),
       close: () => call("windows.close"),
     },
+    capture: {
+      displays: () => call("capture.displays"),
+      select: (mode) => call("capture.select", mode),
+      screenshot: (target, opts) => call("capture.screenshot", target, opts),
+      startRecording: (target, opts) => call("capture.startRecording", target, opts),
+      stopRecording: () => call("capture.stopRecording"),
+      state: () => call("capture.state"),
+      onRecording: (cb) => on("capture.recording", cb),
+      reveal: (path) => call("capture.reveal", path),
+    },
     events: {
-      emit: (name, data) => call("events.emit", name, data),
+      // Copie JSON : un objet réactif (proxy Vue…) ne passerait pas `postMessage`.
+      emit: (name, data) => call("events.emit", name, data === undefined ? null : JSON.parse(JSON.stringify(data))),
       on: (name, cb) => void bus.set(name, [...(bus.get(name) ?? []), cb]),
     },
     notify: (spec) => call("notify", spec),

@@ -12,6 +12,7 @@ import { computed, reactive } from "vue";
 import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { addMethods, emitTo, extUrl, installed, type Manifest } from "./runtime";
 import { addLauncherSource, removeLauncherSource, setExternalResults, type ExternalItem } from "../launcher/store";
+import { persisted } from "../notch/persist";
 
 // --- Activité en direct ----------------------------------------------------------------
 
@@ -94,16 +95,54 @@ addMethods({
 /** Raccourcis enregistrés par les extensions (accélérateur → commande). */
 const shortcuts = new Map<string, { ext: string; id: string }>();
 
+/** Raccourcis choisis par l'utilisateur (Réglages › Extensions), par `<extension>:<commande>` ;
+ *  "" = aucun raccourci. Absent = celui du manifeste. */
+export const { state: shortcutPrefs, ready: shortcutPrefsReady } = persisted("extShortcuts", { map: {} as Record<string, string> });
+
+const prefKey = (extId: string, cmdId: string) => `${extId}:${cmdId}`;
+
+/** Raccourci effectif d'une commande ("" = aucun). */
+export function commandShortcut(ext: Manifest, cmd: { id: string; shortcut?: string }): string {
+  return shortcutPrefs.map[prefKey(ext.id, cmd.id)] ?? cmd.shortcut ?? "";
+}
+
+/** État d'enregistrement des raccourcis : `taken` = refusé (déjà pris par une autre app). */
+export const shortcutStatus = reactive(new Map<string, "ok" | "taken">());
+
 async function bindShortcut(ext: Manifest, cmd: { id: string; shortcut?: string }) {
-  if (!cmd.shortcut || shortcuts.has(cmd.shortcut)) return;
+  const accel = commandShortcut(ext, cmd);
+  const key = prefKey(ext.id, cmd.id);
+  shortcutStatus.delete(key);
+  if (!accel) return;
+  if (shortcuts.has(accel)) return void shortcutStatus.set(key, "taken");
   try {
-    await register(cmd.shortcut, (e) => {
+    await register(accel, (e) => {
       if (e.state === "Pressed") emitTo(ext.id, "command", { id: cmd.id });
     });
-    shortcuts.set(cmd.shortcut, { ext: ext.id, id: cmd.id });
+    shortcuts.set(accel, { ext: ext.id, id: cmd.id });
+    shortcutStatus.set(key, "ok");
   } catch {
     // Pris par une autre app : la commande reste disponible dans le launcher.
+    shortcutStatus.set(key, "taken");
   }
+}
+
+async function unbindCommand(extId: string, cmdId: string) {
+  for (const [accel, c] of [...shortcuts]) {
+    if (c.ext !== extId || c.id !== cmdId) continue;
+    await unregister(accel).catch(() => {});
+    shortcuts.delete(accel);
+  }
+}
+
+/** Change le raccourci d'une commande (`null` = revenir à celui du manifeste, "" = aucun). */
+export async function setCommandShortcut(ext: Manifest, cmdId: string, accel: string | null) {
+  const cmd = ext.contributes.commands.find((c) => c.id === cmdId);
+  if (!cmd) return;
+  if (accel === null) delete shortcutPrefs.map[prefKey(ext.id, cmdId)];
+  else shortcutPrefs.map[prefKey(ext.id, cmdId)] = accel;
+  await unbindCommand(ext.id, cmdId);
+  await bindShortcut(ext, cmd);
 }
 
 /** Branche une extension sur les emplacements live / launcher / commandes ; renvoie de
@@ -143,7 +182,9 @@ export function registerExtensionSlots(ext: Manifest): () => void {
       },
       run: (id) => emitTo(ext.id, "command", { id }),
     });
-    for (const c of ext.contributes.commands) void bindShortcut(ext, c);
+    void shortcutPrefsReady.then(() => {
+      for (const c of ext.contributes.commands) void bindShortcut(ext, c);
+    });
   }
   return () => {
     keys.forEach(removeLauncherSource);

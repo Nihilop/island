@@ -90,7 +90,7 @@ pub fn ext2_read_text(app: AppHandle, id: String, path: String) -> Result<String
 
 // --- Presse-papiers (permission `clipboard`) ---------------------------------------------
 
-fn require(app: &AppHandle, id: &str, perm: &str) -> Result<(), String> {
+pub(crate) fn require(app: &AppHandle, id: &str, perm: &str) -> Result<(), String> {
     let m = manifest(app, id).ok_or("notFound")?;
     if m.permissions.iter().any(|p| p == perm) { Ok(()) } else { Err(format!("permission:{perm}")) }
 }

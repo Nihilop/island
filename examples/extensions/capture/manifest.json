@@ -1,0 +1,27 @@
+{
+  "id": "dev.island.capture",
+  "name": "Capture",
+  "version": "0.1.0",
+  "author": "Island",
+  "description": "Captures d'écran et vidéos d'une zone, d'une fenêtre ou de tout l'écran — avec le son du PC et le micro.",
+  "icon": "icons/capture.svg",
+  "main": "dist/main.js",
+  "permissions": ["capture", "notifications"],
+  "contributes": {
+    "tools": [{ "id": "capture", "title": "Capture", "icon": "icons/capture.svg", "view": "dist/capture.html", "size": [540, 300] }],
+    "live": [{ "id": "rec", "tool": "capture" }],
+    "commands": [
+      { "id": "shot", "title": "Capture : zone de l'écran", "shortcut": "Control+Alt+S" },
+      { "id": "record", "title": "Capture : enregistrer / arrêter", "shortcut": "Control+Alt+R" }
+    ],
+    "settings": [
+      { "key": "clipboard", "type": "switch", "label": "Copier les captures", "help": "Chaque capture d'écran va aussi dans le presse-papiers", "default": true },
+      { "key": "systemAudio", "type": "switch", "label": "Son du PC", "help": "Enregistré avec la vidéo", "default": true },
+      { "key": "mic", "type": "switch", "label": "Micro", "help": "Mélangé au son du PC", "default": false },
+      { "key": "quality", "type": "select", "label": "Qualité vidéo", "default": "medium", "options": [{ "value": "low", "label": "Légère" }, { "value": "medium", "label": "Standard" }, { "value": "high", "label": "Haute" }] },
+      { "key": "fps", "type": "select", "label": "Images par seconde", "default": "30", "options": [{ "value": "30", "label": "30" }, { "value": "60", "label": "60" }] },
+      { "key": "codec", "type": "select", "label": "Format", "help": "H.265 : fichiers ≈ 2× plus légers, moins compatibles", "default": "h264", "options": [{ "value": "h264", "label": "H.264 (MP4)" }, { "value": "hevc", "label": "H.265 (MP4)" }] }
+    ]
+  },
+  "locales": { "fr": "locales/fr.json", "en": "locales/en.json" }
+}

@@ -80,6 +80,27 @@ await island.events.emit("progress", { episode: 12, position: 340 });
 | `island.windows.setTitle(titre)` / `close()` | aucune — dans la page d'une fenêtre |
 | `island.events.emit(nom, données)` / `on(nom, cb)` | aucune — ne sort jamais de l'extension |
 
+## Capture
+
+Permission `capture`. **Island** affiche la sélection (zone dessinée, fenêtre survolée ou
+écran), capture et encode — l'extension pilote seulement. L'île n'apparaît jamais dans les
+captures.
+
+```ts
+const target = await island.capture.select("region"); // null si annulé (Échap)
+if (target) {
+  const shot = await island.capture.screenshot(target, { clipboard: true }); // PNG dans Images\Island
+  await island.capture.startRecording(target, { systemAudio: true, mic: false, quality: "medium", fps: 30, codec: "h264" });
+  const video = await island.capture.stopRecording(); // { path, durationMs } — MP4 dans Vidéos\Island
+}
+island.capture.onRecording((s) => …); // début / fin (activité en direct « REC »…)
+await island.capture.reveal(path);     // afficher une capture dans l'Explorateur
+```
+
+Vidéo : encodeur matériel de Windows (H.264 ou H.265), son du PC et micro mélangés. Un seul
+enregistrement à la fois ; pendant l'enregistrement, le contour de la zone est visible (pas
+dans la vidéo) et le voyant rouge de l'île est allumé.
+
 ## Dans l'île
 
 | | Permission |

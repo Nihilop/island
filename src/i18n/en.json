@@ -858,5 +858,16 @@
   "ext.window.error": "Extension window not found",
   "ext.perm.cookies": "Stay signed in (session cookies kept by Island)",
   "ext.perm.windows": "Open its own windows",
-  "ext.perm.images": "Show images from {host}"
+  "ext.perm.images": "Show images from {host}",
+  "capture.select.region": "Region",
+  "capture.select.window": "Window",
+  "capture.select.screen": "Screen",
+  "capture.select.confirm": "Confirm",
+  "capture.select.help.region": "Draw a region · Enter to confirm · Esc to cancel",
+  "capture.select.help.window": "Click a window · Esc to cancel",
+  "capture.select.help.screen": "Click for the whole screen · Esc to cancel",
+  "ext.perm.capture": "See and record the screen and sound",
+  "ext.shortcut.default": "Default: {s}",
+  "ext.shortcut.reset": "Default",
+  "ext.shortcut.taken": "Already used by another app or command"
 }

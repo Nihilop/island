@@ -80,6 +80,27 @@ await island.events.emit("progress", { episode: 12, position: 340 });
 | `island.windows.setTitle(title)` / `close()` | none — in a window's page |
 | `island.events.emit(name, data)` / `on(name, cb)` | none — never leaves the extension |
 
+## Capture
+
+Permission `capture`. **Island** shows the selection (drawn region, hovered window or
+screen), captures and encodes — the extension only drives. The island never appears in
+captures.
+
+```ts
+const target = await island.capture.select("region"); // null if cancelled (Esc)
+if (target) {
+  const shot = await island.capture.screenshot(target, { clipboard: true }); // PNG in Pictures\Island
+  await island.capture.startRecording(target, { systemAudio: true, mic: false, quality: "medium", fps: 30, codec: "h264" });
+  const video = await island.capture.stopRecording(); // { path, durationMs } — MP4 in Videos\Island
+}
+island.capture.onRecording((s) => …); // start / end (live “REC” activity…)
+await island.capture.reveal(path);     // show a capture in File Explorer
+```
+
+Video: Windows hardware encoder (H.264 or H.265), PC sound and mic mixed. One recording at
+a time; while recording, the region outline is visible (not in the video) and the island's
+red indicator is on.
+
 ## In the island
 
 | | Permission |

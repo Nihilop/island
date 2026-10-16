@@ -7,6 +7,7 @@
 
 pub mod ai;
 pub mod apps;
+pub mod capture;
 pub mod cliphist;
 pub mod convert;
 pub mod desktop;

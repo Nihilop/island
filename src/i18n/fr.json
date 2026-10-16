@@ -858,5 +858,16 @@
   "ext.window.error": "Fenêtre d'extension introuvable",
   "ext.perm.cookies": "Rester connectée (cookies de session gérés par Island)",
   "ext.perm.windows": "Ouvrir ses propres fenêtres",
-  "ext.perm.images": "Afficher des images de {host}"
+  "ext.perm.images": "Afficher des images de {host}",
+  "capture.select.region": "Zone",
+  "capture.select.window": "Fenêtre",
+  "capture.select.screen": "Écran",
+  "capture.select.confirm": "Valider",
+  "capture.select.help.region": "Dessine une zone · Entrée pour valider · Échap pour annuler",
+  "capture.select.help.window": "Clique une fenêtre · Échap pour annuler",
+  "capture.select.help.screen": "Clique pour tout l'écran · Échap pour annuler",
+  "ext.perm.capture": "Voir et enregistrer l'écran et le son",
+  "ext.shortcut.default": "Par défaut : {s}",
+  "ext.shortcut.reset": "Par défaut",
+  "ext.shortcut.taken": "Déjà utilisé par une autre app ou commande"
 }

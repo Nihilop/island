@@ -96,6 +96,13 @@ windows = { version = "0.61", features = [
   "UI_Notifications_Management",
   "ApplicationModel",
   "Security_Cryptography",
+  # Capture (services/capture) : encodeur Media Foundation (MediaTranscoder), fenêtres DWM, DPI.
+  "Media_Core",
+  "Media_MediaProperties",
+  "Media_Transcoding",
+  "Storage",
+  "Win32_Graphics_Dwm",
+  "Win32_UI_HiDpi",
 ] }
 
 # Secrets : Keychain (macOS) / Secret Service (Linux). Permet au crate de compiler

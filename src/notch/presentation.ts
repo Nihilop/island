@@ -7,9 +7,14 @@
 
 import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { settings } from "./settings";
 
 export const privacy = reactive({ mic: false, camera: false, screen: false });
+
+/** Enregistrement d'écran par Island lui-même (extension de capture) : Windows ne le
+ *  signale pas pour notre propre exe, on le compte à part (voyant rouge, présentation). */
+export const ownRecording = ref(false);
 
 /** Activation manuelle (non persistée). */
 const manual = ref(false);
@@ -35,10 +40,16 @@ let timer: number | undefined;
 async function poll() {
   const s = await invoke<{ mic: boolean; camera: boolean; screen: boolean }>("privacy_state").catch(() => null);
   if (!s) return;
+  s.screen ||= ownRecording.value;
   if (s.mic !== privacy.mic || s.camera !== privacy.camera || s.screen !== privacy.screen) Object.assign(privacy, s);
 }
 
 export function initPresentation() {
+  void listen<{ recording: boolean }>("capture://recording", (e) => {
+    ownRecording.value = e.payload.recording;
+    privacy.screen = e.payload.recording || privacy.screen;
+    if (!e.payload.recording) void poll();
+  });
   // Fin de l'enregistrement → le snooze tombe.
   watch(
     () => privacy.screen,

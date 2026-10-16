@@ -153,6 +153,35 @@ const methods: Record<string, Handler> = {
       args: args === undefined ? null : JSON.parse(JSON.stringify(args)),
     }).then(() => undefined);
   },
+  // Capture (permission `capture`, à haut risque) : Island sélectionne, capture et encode ;
+  // l'extension pilote seulement (cf. docs/internal/capture-spec.md). Revérifiée côté Rust.
+  "capture.displays": (ext) => (need(ext, "capture"), invoke("capture_displays", { id: ext.id })),
+  "capture.select": (ext, mode: unknown) => (need(ext, "capture"), invoke("capture_select", { id: ext.id, mode: String(mode) })),
+  "capture.screenshot": (ext, target: unknown, opts: any) =>
+    (need(ext, "capture"), invoke("capture_screenshot", { id: ext.id, target, opts: { clipboard: opts?.clipboard !== false, save: opts?.save !== false } })),
+  "capture.startRecording": (ext, target: unknown, opts: any) =>
+    (need(ext, "capture"),
+    invoke("capture_record_start", {
+      id: ext.id,
+      target,
+      opts: {
+        fps: opts?.fps === 60 ? 60 : 30,
+        codec: opts?.codec === "hevc" ? "hevc" : "h264",
+        quality: ["low", "medium", "high"].includes(opts?.quality) ? opts.quality : "medium",
+        systemAudio: !!opts?.systemAudio,
+        mic: !!opts?.mic,
+      },
+    })),
+  "capture.stopRecording": (ext) => (need(ext, "capture"), invoke("capture_record_stop", { id: ext.id })),
+  "capture.state": (ext) => (need(ext, "capture"), invoke("capture_record_state", { id: ext.id })),
+  // Afficher une capture dans l'Explorateur : seulement un PNG / MP4 rangé par Island dans
+  // un dossier « Island » (Images ou Vidéos, où qu'ils aient été déplacés).
+  "capture.reveal": (ext, path: unknown) => {
+    need(ext, "capture");
+    const p = String(path ?? "");
+    if (!/[\\/]Island[\\/][^\\/]+\.(png|mp4)$/i.test(p) || p.includes("..")) throw new Error("forbidden");
+    return invoke("reveal_path", { path: p });
+  },
   // Bus d'événements entre les pages d'UNE extension (notch, fenêtres) : relayé aux autres
   // fenêtres par un événement Tauri, jamais aux autres extensions.
   "events.emit": (ext, name: unknown, data: unknown) => {
@@ -233,6 +262,10 @@ let busReady = false;
 export function initExtBus() {
   if (busReady) return;
   busReady = true;
+  // Début / fin d'un enregistrement d'écran : prévient les extensions qui ont `capture`.
+  void listen("capture://recording", (e) => {
+    for (const x of installed.value) if (x.permissions.includes("capture")) emitTo(x.id, "capture.recording", e.payload);
+  });
   void listen<{ ext: string; from: string; name: string; data: unknown }>("ext2://msg", (e) => {
     if (e.payload.from === here) return;
     emitTo(e.payload.ext, "msg", { name: e.payload.name, data: e.payload.data });

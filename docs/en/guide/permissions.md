@@ -11,6 +11,7 @@
 | `clipboard` | `island.clipboard` |
 | `cookies` | cookie sessions on its `network:` domains (cookies kept by Island, never visible) |
 | `windows` | `island.windows.open`: its own windows (`contributes.windows`) |
+| `capture` | **high risk** (shown in red at install): `island.capture`, see and record the screen and sound |
 | `images:<domain>` | show HTTPS images from that domain (`<img>`, CSS) without `island.http` |
 
 Ask for the minimum: the user sees the list in plain language before installing, and an
