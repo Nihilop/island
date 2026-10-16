@@ -14,6 +14,7 @@
 use tauri::Manager;
 
 mod detached;
+mod backup;
 mod extensions;
 mod host;
 mod launcher;
@@ -160,6 +161,11 @@ pub fn run() {
             services::files::files_copy,
             services::files::export_csv,
             detached::window_open,
+            backup::backup_current,
+            backup::backup_export,
+            backup::backup_inspect,
+            backup::backup_import,
+            backup::backup_open_folder,
             detached::window_close_kind,
             services::notes::notes_list,
             services::notes::notes_read,

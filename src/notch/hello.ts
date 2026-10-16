@@ -87,6 +87,15 @@ export async function unlockScope(scope: HelloScope) {
   unlocked.set(scope, Date.now());
 }
 
+/** Une seule confirmation Windows Hello pour plusieurs portées verrouillées (ex. export
+ *  d'une sauvegarde qui contient les notes et le budget). Rien à faire si aucune ne l'est. */
+export async function unlockScopes(scopes: HelloScope[]) {
+  const locked = scopes.filter(isLocked);
+  if (!locked.length) return;
+  await prompt(() => invoke("hello_verify"));
+  for (const s of locked) unlocked.set(s, Date.now());
+}
+
 export function lockScope(scope: HelloScope) {
   unlocked.delete(scope);
 }

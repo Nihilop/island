@@ -99,6 +99,11 @@ fn with_index<T>(app: &AppHandle, f: impl FnOnce(&mut Index) -> T) -> T {
     f(g.as_mut().unwrap())
 }
 
+/// Oublie l'index en mémoire : relu depuis le disque au prochain accès (import d'une sauvegarde).
+pub(crate) fn forget_index() {
+    *INDEX.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
 fn save(app: &AppHandle, idx: &Index) {
     let _ = write_atomic(&dir(app).join("index.json"), &serde_json::to_string_pretty(idx).unwrap_or_default());
 }
