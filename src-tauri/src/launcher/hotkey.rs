@@ -87,7 +87,10 @@ fn apply(app: &AppHandle) -> bool {
 
 /// Le launcher doit-il être suspendu maintenant ?
 fn should_suspend(cfg: &Config) -> bool {
-    if cfg.fullscreen_off && imp::fullscreen() {
+    // Plein écran AU PREMIER PLAN (détection de l'île) : le signal brut de Windows reste
+    // « occupé » tant qu'un jeu plein écran tourne, même après un Alt+Tab — le launcher
+    // restait coupé jusqu'à ce que le jeu soit quitté.
+    if cfg.fullscreen_off && crate::host::fullscreen_active() {
         return true;
     }
     if cfg.exclude.is_empty() {
@@ -151,19 +154,12 @@ pub fn launcher_paste_text() -> Option<String> {
     arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok()
 }
 
-
 #[cfg(target_os = "windows")]
 mod imp {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
-    use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
-
-    pub fn fullscreen() -> bool {
-        matches!(unsafe { SHQueryUserNotificationState() }, Ok(s) if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE)
-    }
-
     /// Un des exécutables (minuscules) tourne-t-il ?
     pub fn any_running(names: &[String]) -> bool {
         unsafe {
@@ -188,9 +184,6 @@ mod imp {
 
 #[cfg(not(target_os = "windows"))]
 mod imp {
-    pub fn fullscreen() -> bool {
-        false
-    }
     pub fn any_running(_: &[String]) -> bool {
         false
     }

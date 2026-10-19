@@ -1,5 +1,18 @@
 [
   {
+    "version": "2.5.1",
+    "date": "2026-10-19",
+    "highlight": false,
+    "items": {
+      "fr": [
+        "Après un Alt+Tab hors d'un jeu ou d'une vidéo en plein écran, le raccourci du launcher remarche tout de suite et le fond animé repart (avant : seulement une fois le jeu quitté)."
+      ],
+      "en": [
+        "After Alt+Tabbing out of a fullscreen game or video, the launcher shortcut works again right away and the live wallpaper resumes (before: only once the game was closed)."
+      ]
+    }
+  },
+  {
     "version": "2.5.0",
     "date": "2026-10-19",
     "highlight": true,
