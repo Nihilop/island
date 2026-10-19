@@ -32,6 +32,7 @@ fn router(db: PgPool) -> Router {
         session_key: Arc::new(b"cle-de-test-cle-de-test-cle-de-test".to_vec()),
         public_url: "http://localhost".into(),
         secure_cookies: false,
+        admin_dist: None,
     })
 }
 

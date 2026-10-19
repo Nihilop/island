@@ -10,7 +10,9 @@
 //!   github    : client GitHub (device flow, OAuth web, identité)
 //!   session   : cookie de session signé du panneau d'administration
 //!   login     : connexion GitHub, compte courant, jetons, rôles
+//!   admin     : modération (signalements, éléments) et administration (comptes, journal)
 
+pub mod admin;
 pub mod auth;
 pub mod error;
 pub mod github;
@@ -48,6 +50,8 @@ pub struct AppState {
     pub public_url: String,
     /// Cookies `Secure` (PUBLIC_URL en https).
     pub secure_cookies: bool,
+    /// Panneau d'administration construit (`server/admin/dist`) ; None = page d'attente.
+    pub admin_dist: Option<std::path::PathBuf>,
 }
 
 /// Publication : le fichier entier passe par le serveur (jamais d'envoi direct au stockage).
@@ -67,11 +71,43 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/me", get(login::me))
         .route("/v1/me/tokens", get(login::tokens))
         .route("/v1/me/tokens/{id}", delete(login::revoke))
-        .route("/admin", get(login::admin_home))
+        .route("/v1/mod/summary", get(admin::summary))
+        .route("/v1/mod/reports", get(admin::reports))
+        .route("/v1/mod/reports/{id}/resolve", post(admin::resolve))
+        .route("/v1/mod/items", get(admin::items))
+        .route("/v1/mod/items/{id}/hide", post(admin::hide))
+        .route("/v1/mod/items/{id}/restore", post(admin::restore))
+        .route("/v1/admin/users", get(admin::users))
+        .route("/v1/admin/moderators", post(admin::add_moderator))
+        .route("/v1/admin/moderators/{id}", delete(admin::remove_moderator))
+        .route("/v1/admin/users/{id}/ban", post(admin::ban))
+        .route("/v1/admin/users/{id}/unban", post(admin::unban))
+        .route("/v1/admin/audit", get(admin::journal))
+        .route("/admin", get(admin_page))
         .route("/admin/login", get(login::admin_login))
         .route("/admin/callback", get(login::admin_callback))
         .route("/admin/logout", post(login::admin_logout))
+        .nest_service(
+            "/admin/assets",
+            tower_http::services::ServeDir::new(state.admin_dist.clone().unwrap_or_default().join("assets")),
+        )
         .with_state(state)
+}
+
+/// Le panneau (application Vue, routage par `#`) ou, s'il n'est pas construit, la page
+/// d'attente avec le lien de connexion.
+async fn admin_page(axum::extract::State(st): axum::extract::State<AppState>, user: Option<auth::User>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if let Some(dir) = &st.admin_dist {
+        if let Ok(html) = tokio::fs::read_to_string(dir.join("index.html")).await {
+            return (
+                [(axum::http::header::CACHE_CONTROL, "no-store"), (axum::http::header::X_FRAME_OPTIONS, "DENY")],
+                axum::response::Html(html),
+            )
+                .into_response();
+        }
+    }
+    login::admin_home(user).await.into_response()
 }
 
 /// Migrations embarquées (`server/migrations`).

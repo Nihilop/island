@@ -23,6 +23,8 @@ fn fail(msg: impl std::fmt::Display) -> ! {
 
 #[tokio::main]
 async fn main() {
+    // Développement : variables lues depuis `server/.env` s'il existe (exclu du dépôt).
+    let _ = dotenvy::dotenv();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "island_store=info,tower_http=info".into()))
         .init();
@@ -68,6 +70,7 @@ async fn main() {
         session_key: Arc::new(session_key),
         secure_cookies: public_url.starts_with("https://"),
         public_url,
+        admin_dist: Some(std::path::PathBuf::from(env("ADMIN_DIST").unwrap_or_else(|| "admin/dist".into()))),
     };
     if state.clamav.is_none() {
         tracing::warn!("CLAMAV_URL absent : les fichiers publiés ne sont pas analysés (scan: skipped)");

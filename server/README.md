@@ -1,10 +1,10 @@
 # Magasin d'Island — spécification (v1, en cours)
 
 Serveur du magasin d'Island : catalogue de **scènes de fonds animés** et d'**extensions**,
-publication par les auteurs, téléchargement et mises à jour depuis l'app. Statut : étape 3
+publication par les auteurs, téléchargement et mises à jour depuis l'app. Statut : étape 4
 (**scènes** de bout en bout, **connexion GitHub** — device flow pour le CLI et l'app, OAuth
-web pour le panneau —, rôles, jetons) ; le panneau d'administration et les extensions
-suivent.
+web pour le panneau —, rôles, jetons, **panneau d'administration**) ; l'écran Magasin dans
+Island et les extensions suivent.
 
 ## Développement
 
@@ -15,7 +15,12 @@ export DATABASE_URL=postgres://island:island@localhost:5433/island_store
 cargo run -- token moi --role admin        # compte + jeton d'API (affiché une seule fois)
 cargo run                                  # API sur http://127.0.0.1:8080
 cargo test                                 # tests (une base neuve par test)
+cd admin && pnpm install && pnpm build     # panneau, servi ensuite sur http://127.0.0.1:8080/admin
 ```
+
+Configuration locale : `server/.env` (lu au démarrage, jamais commité). Panneau en
+développement avec rechargement à chaud : `cd admin && pnpm dev` (http://127.0.0.1:5180/admin/,
+API relayée vers le serveur) — la connexion GitHub, elle, passe par le serveur (8080).
 
 Connexion GitHub (facultative en développement) : créer une **OAuth App** GitHub
 (*Settings › Developer settings › OAuth Apps*), cocher **Enable Device Flow**, URL de
@@ -274,7 +279,7 @@ dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
 2. ✅ Serveur : squelette Axum, Postgres + migrations, stockage local, **scènes** (catalogue,
    recherche, fiche, téléchargement, publication via jeton, signalement), tests d'API.
 3. ✅ Auth GitHub (device flow, jetons ; OAuth web), rôles, admin par `ADMIN_GITHUB_ID`.
-4. Panneau d'administration : comptes, modérateurs, signalements, journal.
+4. ✅ Panneau d'administration : comptes, modérateurs, signalements, journal.
 5. Écran Magasin dans Island + `island publish` dans le SDK.
 6. Extensions : types autorisés, file de modération (fichiers, différences), signature du
    magasin, état `Store` dans l'app, mises à jour.

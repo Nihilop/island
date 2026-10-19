@@ -1,0 +1,21 @@
+{
+  "name": "island-store-admin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Panneau d'administration du magasin d'Island (servi par le serveur sur /admin).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.5.38"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
+    "vue-tsc": "^3.3.5"
+  }
+}

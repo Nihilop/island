@@ -189,13 +189,23 @@ pub struct Callback {
 
 pub async fn admin_callback(State(st): State<AppState>, headers: HeaderMap, Query(q): Query<Callback>) -> ApiResult<Response> {
     let gh = github(&st)?;
-    let expected = session::cookie(&headers, session::STATE_COOKIE).and_then(|c| session::verify(&st.session_key, c));
-    let (Some(code), Some(state), Some(expected)) = (q.code, q.state, expected) else {
-        return Err(ApiError::bad("invalidState"));
+    // Le `state` du retour doit être celui du cookie posé au départ (même navigateur, moins
+    // de 10 min). Sinon : page explicite avec « Réessayer » (cause journalisée).
+    let cookie = session::cookie(&headers, session::STATE_COOKIE);
+    let expected = cookie.and_then(|c| session::verify(&st.session_key, c));
+    let why = match (&q.code, &q.state, cookie, &expected) {
+        (None, _, _, _) | (_, None, _, _) => Some("retour incomplet (ni code ni state)"),
+        (_, _, None, _) => Some("cookie de state absent (autre navigateur ou adresse, cookies bloqués)"),
+        (_, _, Some(_), None) => Some("cookie de state expiré (plus de 10 min) ou invalide"),
+        (_, Some(s), _, Some(e)) if s != e => Some("state différent (connexion relancée entre-temps ?)"),
+        _ => None,
     };
-    if state != expected {
-        return Err(ApiError::bad("invalidState"));
+    if let Some(why) = why {
+        tracing::warn!("retour OAuth refusé : {why}");
+        let body = format!("<p>La connexion n'a pas pu être vérifiée : {}.</p><p><a href=\"/admin/login\">Réessayer</a></p>", esc(why));
+        return Ok((StatusCode::BAD_REQUEST, Html(page("Connexion refusée", &body))).into_response());
     }
+    let (code, _) = (q.code.unwrap_or_default(), q.state);
     let access = gh.exchange(&code, &redirect_uri(&st)).await.map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, e))?;
     let who = gh.identity(&access).await.map_err(|e| ApiError::new(StatusCode::BAD_GATEWAY, format!("github:{e}")))?;
     let clear_state = session::set_cookie(session::STATE_COOKIE, "", 0, "Lax", st.secure_cookies);
