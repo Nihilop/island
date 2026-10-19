@@ -11,7 +11,29 @@ export interface Background {
 }
 export interface Water { strength: number; speed: number; scale: number }
 export interface Parallax { mouse: number; drift: number; zoom: number }
-export interface Particles { kind: "snow" | "rain" | "fireflies"; density: number; speed: number; size: number; color: string; opacity: number }
+export type ParticleShape = "dot" | "streak" | "glow";
+export interface Particles {
+  shape: ParticleShape;
+  density: number;
+  /** 0..1, échelle exponentielle (~10 → ~1000 px/s). */
+  speed: number;
+  size: number;
+  color: string;
+  opacity: number;
+  /** Degrés : 90 = vers le bas, 270 = vers le haut. */
+  direction: number;
+  spread: number;
+  turbulence: number;
+  flicker: number;
+}
+
+/** Préréglages de particules de l'éditeur : de simples jeux de réglages. */
+export const PARTICLE_PRESETS: Record<"snow" | "rain" | "fireflies" | "embers", Omit<Particles, "density" | "opacity">> = {
+  snow: { shape: "dot", speed: 0.35, size: 1, color: "#ffffff", direction: 90, spread: 0.2, turbulence: 0.4, flicker: 0 },
+  rain: { shape: "streak", speed: 0.92, size: 1, color: "#9fb3c8", direction: 100, spread: 0.05, turbulence: 0, flicker: 0 },
+  fireflies: { shape: "glow", speed: 0.08, size: 1.6, color: "#7affc8", direction: 270, spread: 0.6, turbulence: 0.9, flicker: 0.6 },
+  embers: { shape: "glow", speed: 0.4, size: 1.2, color: "#ffb36b", direction: 265, spread: 0.3, turbulence: 0.6, flicker: 0.9 },
+};
 export interface ColorAdjust { hue: number; saturation: number; brightness: number; contrast: number }
 export interface Ripple { radius: number; strength: number; duration: number }
 export interface Trail { width: number; fade: number; color: string; intensity: number }
@@ -42,7 +64,7 @@ export interface SceneEntry {
 export const DEFAULTS = {
   water: (): Water => ({ strength: 0.4, speed: 0.4, scale: 0.4 }),
   parallax: (): Parallax => ({ mouse: 0.5, drift: 0.3, zoom: 1.06 }),
-  particles: (): Particles => ({ kind: "snow", density: 0.4, speed: 0.5, size: 1, color: "#ffffff", opacity: 0.8 }),
+  particles: (): Particles => ({ ...PARTICLE_PRESETS.snow, density: 0.4, opacity: 0.8 }),
   color: (): ColorAdjust => ({ hue: 0, saturation: 1, brightness: 1, contrast: 1 }),
   ripple: (): Ripple => ({ radius: 260, strength: 0.6, duration: 1.4 }),
   trail: (): Trail => ({ width: 10, fade: 0.5, color: "#7cc8ff", intensity: 0.8 }),
@@ -58,6 +80,11 @@ export function newScene(name: string): Scene {
   };
 }
 
+/** Forme ramenée à dot / streak / glow (le Rust lit l'ancien `kind` — snow, rain… — dans `shape`). */
+function oldParticles(p: Particles): Particles {
+  return { ...p, shape: (["dot", "streak", "glow"] as const)[shapeCode(p.shape) - 1] };
+}
+
 /** Complète une scène lue (champs absents = désactivés), comme `serde(default)`. */
 export function normalize(s: Partial<Scene>): Scene {
   const base = newScene(s.name ?? "");
@@ -65,7 +92,11 @@ export function normalize(s: Partial<Scene>): Scene {
     ...base,
     ...s,
     background: { ...base.background, ...s.background },
-    effects: { ...base.effects, ...s.effects },
+    effects: {
+      ...base.effects,
+      ...s.effects,
+      particles: s.effects?.particles ? oldParticles({ ...DEFAULTS.particles(), ...s.effects.particles }) : null,
+    },
     interactions: { ...base.interactions, ...s.interactions },
   } as Scene;
 }
@@ -74,7 +105,7 @@ export function normalize(s: Partial<Scene>): Scene {
 
 export const RIPPLES = 8;
 export const TRAIL = 32;
-export const VEC4S = 14 + RIPPLES + TRAIL;
+export const VEC4S = 15 + RIPPLES + TRAIL;
 
 export function hex(s: string): [number, number, number] {
   const h = s.replace(/^#/, "");
@@ -94,6 +125,11 @@ export interface Frame {
 
 const c = (v: number | undefined | null, lo: number, hi: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v as number)) : lo);
 
+/** Comme `Particles::shape_code` (Rust) : 1 point, 2 trait, 3 halo. */
+function shapeCode(s: string): number {
+  return s === "streak" || s === "rain" ? 2 : s === "glow" || s === "fireflies" || s === "embers" ? 3 : 1;
+}
+
 export function pack(s: Scene, f: Frame): Float32Array {
   const u = new Float32Array(VEC4S * 4);
   const set = (i: number, v: number[]) => u.set(v, i * 4);
@@ -110,8 +146,9 @@ export function pack(s: Scene, f: Frame): Float32Array {
   set(6, e.parallax ? [c(e.parallax.mouse, 0, 1), c(e.parallax.drift, 0, 1), c(e.parallax.zoom, 1, 1.3), 0] : [0, 0, 1, 0]);
   if (e.particles) {
     const p = e.particles;
-    set(7, [p.kind === "rain" ? 2 : p.kind === "fireflies" ? 3 : 1, c(p.density, 0, 1), c(p.speed, 0, 2), c(p.size, 0.2, 4)]);
+    set(7, [shapeCode(p.shape), c(p.density, 0, 1), c(p.speed, 0, 1), c(p.size, 0.2, 4)]);
     set(8, [...hex(p.color), c(p.opacity, 0, 1)]);
+    set(14, [(c(p.direction, -360, 360) * Math.PI) / 180, c(p.turbulence, 0, 1), c(p.spread, 0, 1), c(p.flicker, 0, 1)]);
   }
   set(9, e.color ? [c(e.color.hue, -180, 180), c(e.color.saturation, 0, 2), c(e.color.brightness, 0, 2), c(e.color.contrast, 0, 2)] : [0, 1, 1, 1]);
   set(10, [c(e.grain ?? 0, 0, 1), c(e.vignette ?? 0, 0, 1), 0, 0]);
@@ -121,7 +158,7 @@ export function pack(s: Scene, f: Frame): Float32Array {
     set(12, [1, c(it.trail.width, 1, 80), c(it.trail.fade, 0.05, 3), 0]);
     set(13, [...hex(it.trail.color), c(it.trail.intensity, 0, 2)]);
   }
-  f.ripples.slice(0, RIPPLES).forEach(([x, y, t0], i) => set(14 + i, [x, y, t0, 1]));
-  f.trail.slice(0, TRAIL).forEach(([x, y, t], i) => set(14 + RIPPLES + i, [x, y, t, 1]));
+  f.ripples.slice(0, RIPPLES).forEach(([x, y, t0], i) => set(15 + i, [x, y, t0, 1]));
+  f.trail.slice(0, TRAIL).forEach(([x, y, t], i) => set(15 + RIPPLES + i, [x, y, t, 1]));
   return u;
 }

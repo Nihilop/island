@@ -8,7 +8,10 @@ import { normalize, type Scene, type SceneEntry } from "./scene";
 import { t } from "../notch/i18n";
 
 export interface WallpaperState {
-  active: string | null;
+  /** Scène de « Tous les écrans » (null = fond Windows). */
+  all: string | null;
+  /** Écrans réglés à part : id d'écran → scène ("" = fond Windows sur cet écran). */
+  screens: Record<string, string>;
   fps: number;
   pauseInGame: boolean;
   running: boolean;
@@ -18,7 +21,7 @@ export interface WallpaperState {
 
 export const wallpaper = reactive({
   scenes: [] as SceneEntry[],
-  state: { active: null, fps: 30, pauseInGame: true, running: false, paused: false, error: null } as WallpaperState,
+  state: { all: null, screens: {}, fps: 30, pauseInGame: true, running: false, paused: false, error: null } as WallpaperState,
   loaded: false,
 });
 
@@ -48,7 +51,26 @@ export function watchWallpaper() {
   void listen<Pick<WallpaperState, "running" | "paused" | "error">>("wallpaper://status", (e) => Object.assign(wallpaper.state, e.payload));
 }
 
-export const apply = (id: string | null) => invoke("wallpaper_apply", { id });
+/** `display` absent = tous les écrans (les réglages par écran sont oubliés). */
+export const apply = (id: string | null, display: string | null = null) => invoke("wallpaper_apply", { id, display });
+
+/** Scène affichée sur un écran (null = fond Windows). */
+export function sceneOn(display: string): string | null {
+  const s = wallpaper.state.screens[display];
+  return s === undefined ? wallpaper.state.all : s || null;
+}
+
+export interface Display {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  work: [number, number, number, number];
+  scale: number;
+  primary: boolean;
+}
+export const displays = () => invoke<Display[]>("hw_displays");
 export const getScene = (id: string) => invoke<Scene>("wallpaper_get", { id }).then(normalize);
 export const saveScene = (id: string, scene: Scene) => invoke("wallpaper_save", { id, scene });
 export const deleteScene = (id: string) => invoke("wallpaper_delete", { id });

@@ -95,7 +95,7 @@ const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   usage: { icon: PhGauge, size: [600, 320] },
   weather: { icon: PhCloudSun, size: [540, 300] },
   activity: { icon: PhGameController, size: [560, 340] },
-  wallpaper: { icon: PhImageSquare, size: [560, 210] },
+  wallpaper: { icon: PhImageSquare, size: [600, 470] },
   system: { icon: PhCpu, size: [600, 248] },
   discord: { icon: PhDiscordLogo, size: [520, 210] },
   vault: { icon: PhLockKey, size: [560, 324] },

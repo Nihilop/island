@@ -112,7 +112,7 @@ async function read(a: Action): Promise<unknown> {
       // Par écran : la restauration remet l'image de chacun.
       return invoke<DesktopWallpaper[]>("desktop_wallpaper_get");
     case "scene":
-      return (await invoke<{ active: string | null }>("wallpaper_state")).active;
+      return (await invoke<{ all: string | null }>("wallpaper_state")).all;
     default:
       return null;
   }
@@ -144,7 +144,7 @@ async function write(a: Action, value: unknown) {
       }
       return invoke("desktop_wallpaper_set", { path: String(value), display: null });
     case "scene":
-      return invoke("wallpaper_apply", { id: value ?? null });
+      return invoke("wallpaper_apply", { id: value ?? null, display: null });
   }
 }
 

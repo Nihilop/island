@@ -93,17 +93,51 @@ impl Default for Parallax {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Particles {
-    /// "snow" | "rain" | "fireflies".
-    pub kind: String,
+    /// Forme : "dot" (point doux), "streak" (trait étiré dans la direction), "glow" (halo
+    /// lumineux, ajouté à l'image). `kind` : ancien nom (snow/rain/fireflies/embers),
+    /// converti par `shape_code`. Neige, pluie, lucioles… sont des préréglages de l'éditeur.
+    #[serde(alias = "kind")]
+    pub shape: String,
     pub density: f32,
+    /// 0..1, échelle exponentielle : de ~10 px/s (lucioles) à ~1000 px/s (pluie).
     pub speed: f32,
     pub size: f32,
     pub color: String,
     pub opacity: f32,
+    /// Direction du mouvement (degrés, 90 = vers le bas, 270 = vers le haut).
+    pub direction: f32,
+    /// Écart de direction entre les plans (0..1).
+    pub spread: f32,
+    /// Balancement / errance de chaque particule (0..1).
+    pub turbulence: f32,
+    /// Scintillement (0..1).
+    pub flicker: f32,
 }
 impl Default for Particles {
     fn default() -> Self {
-        Self { kind: "snow".into(), density: 0.4, speed: 0.5, size: 1.0, color: "#ffffff".into(), opacity: 0.8 }
+        Self {
+            shape: "dot".into(),
+            density: 0.4,
+            speed: 0.35,
+            size: 1.0,
+            color: "#ffffff".into(),
+            opacity: 0.8,
+            direction: 90.0,
+            spread: 0.2,
+            turbulence: 0.4,
+            flicker: 0.0,
+        }
+    }
+}
+
+impl Particles {
+    /// 1 point, 2 trait, 3 halo (les anciens types y sont ramenés).
+    pub fn shape_code(&self) -> f32 {
+        match self.shape.as_str() {
+            "streak" | "rain" => 2.0,
+            "glow" | "fireflies" | "embers" => 3.0,
+            _ => 1.0,
+        }
     }
 }
 
@@ -193,8 +227,8 @@ impl Scene {
 
 pub const RIPPLES: usize = 8;
 pub const TRAIL: usize = 32;
-/// Nombre de vec4 de `struct U` (14 champs + ondulations + traînée).
-pub const VEC4S: usize = 14 + RIPPLES + TRAIL;
+/// Nombre de vec4 de `struct U` (15 champs + ondulations + traînée).
+pub const VEC4S: usize = 15 + RIPPLES + TRAIL;
 
 /// `#rrggbb` → rgb 0..1 (espace sRGB, comme dans le navigateur ; pas de conversion linéaire).
 pub fn hex(s: &str) -> [f32; 3] {
@@ -247,14 +281,10 @@ pub fn pack(s: &Scene, f: &Frame) -> [[f32; 4]; VEC4S] {
         None => [0.0, 0.0, 1.0, 0.0],
     };
     if let Some(p) = &e.particles {
-        let kind = match p.kind.as_str() {
-            "rain" => 2.0,
-            "fireflies" => 3.0,
-            _ => 1.0,
-        };
-        u[7] = [kind, c01(p.density, 0.0, 1.0), c01(p.speed, 0.0, 2.0), c01(p.size, 0.2, 4.0)];
+        u[7] = [p.shape_code(), c01(p.density, 0.0, 1.0), c01(p.speed, 0.0, 1.0), c01(p.size, 0.2, 4.0)];
         let c = hex(&p.color);
         u[8] = [c[0], c[1], c[2], c01(p.opacity, 0.0, 1.0)];
+        u[14] = [c01(p.direction, -360.0, 360.0).to_radians(), c01(p.turbulence, 0.0, 1.0), c01(p.spread, 0.0, 1.0), c01(p.flicker, 0.0, 1.0)];
     }
     u[9] = match &e.color {
         Some(c) => [c01(c.hue, -180.0, 180.0), c01(c.saturation, 0.0, 2.0), c01(c.brightness, 0.0, 2.0), c01(c.contrast, 0.0, 2.0)],
@@ -271,10 +301,10 @@ pub fn pack(s: &Scene, f: &Frame) -> [[f32; 4]; VEC4S] {
         u[13] = [c[0], c[1], c[2], c01(t.intensity, 0.0, 2.0)];
     }
     for (i, (x, y, t0)) in f.ripples.iter().take(RIPPLES).enumerate() {
-        u[14 + i] = [*x, *y, *t0, 1.0];
+        u[15 + i] = [*x, *y, *t0, 1.0];
     }
     for (i, (x, y, t)) in f.trail.iter().take(TRAIL).enumerate() {
-        u[14 + RIPPLES + i] = [*x, *y, *t, 1.0];
+        u[15 + RIPPLES + i] = [*x, *y, *t, 1.0];
     }
     u
 }
@@ -288,7 +318,7 @@ pub fn presets() -> Vec<(&'static str, Scene)> {
         ..Default::default()
     };
     let mut aurora = g("Aurore", "#06121f", "#1d3b4f", 70.0);
-    aurora.effects.particles = Some(Particles { kind: "fireflies".into(), density: 0.35, speed: 0.6, size: 1.6, color: "#7affc8".into(), opacity: 0.7 });
+    aurora.effects.particles = Some(Particles { shape: "glow".into(), density: 0.35, speed: 0.08, size: 1.6, color: "#7affc8".into(), opacity: 0.7, direction: 270.0, spread: 0.6, turbulence: 0.9, flicker: 0.6 });
     aurora.effects.parallax = Some(Parallax { mouse: 0.4, drift: 0.5, zoom: 1.05 });
     aurora.effects.vignette = Some(0.5);
     aurora.interactions.trail = Some(Trail { color: "#7affc8".into(), ..Default::default() });
@@ -300,14 +330,31 @@ pub fn presets() -> Vec<(&'static str, Scene)> {
     snow.interactions.ripple = Some(Ripple::default());
 
     let mut rain = g("Pluie", "#10141a", "#2b3442", 95.0);
-    rain.effects.particles = Some(Particles { kind: "rain".into(), density: 0.55, speed: 1.0, size: 1.0, color: "#9fb3c8".into(), opacity: 0.45 });
+    rain.effects.particles = Some(Particles { shape: "streak".into(), density: 0.55, speed: 0.92, size: 1.0, color: "#9fb3c8".into(), opacity: 0.45, direction: 100.0, spread: 0.05, turbulence: 0.0, flicker: 0.0 });
     rain.effects.water = Some(Water { strength: 0.25, speed: 0.3, scale: 0.6 });
     rain.effects.grain = Some(0.2);
     rain.interactions.ripple = Some(Ripple { radius: 200.0, strength: 0.8, duration: 1.2 });
 
     let mut dusk = g("Crépuscule", "#ff7a59", "#3a1c5c", 120.0);
     dusk.effects.water = Some(Water { strength: 0.5, speed: 0.25, scale: 0.3 });
+    dusk.effects.particles = Some(Particles { shape: "glow".into(), density: 0.25, speed: 0.4, size: 1.2, color: "#ffb36b".into(), opacity: 0.8, direction: 265.0, spread: 0.3, turbulence: 0.6, flicker: 0.9 });
     dusk.effects.color = Some(ColorAdjust { hue: 0.0, saturation: 1.15, brightness: 1.0, contrast: 1.05 });
     dusk.interactions.trail = Some(Trail { color: "#ffd2a8".into(), width: 14.0, ..Default::default() });
     vec![("preset-aurora", aurora), ("preset-snow", snow), ("preset-rain", rain), ("preset-dusk", dusk)]
+}
+
+#[cfg(test)]
+mod tests {
+    /// Le shader partagé est du WGSL valide, et `struct U` fait exactement la taille que
+    /// `pack` remplit (sinon le moteur et l'aperçu liraient des uniformes décalés).
+    #[test]
+    fn shader_is_valid_and_matches_pack() {
+        let module = naga::front::wgsl::parse_str(include_str!("scene.wgsl")).expect("WGSL invalide");
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+            .validate(&module)
+            .expect("shader refusé par le validateur");
+        let u = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("U")).expect("struct U");
+        let size = u.1.inner.size(module.to_ctx());
+        assert_eq!(size as usize, super::VEC4S * 16);
+    }
 }

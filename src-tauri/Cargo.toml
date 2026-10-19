@@ -122,3 +122,6 @@ keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] } # test : le shader des fonds animés est valide

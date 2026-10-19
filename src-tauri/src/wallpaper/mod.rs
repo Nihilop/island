@@ -1,12 +1,13 @@
-// Fonds animés (outil core) : scènes enregistrées, scène active, moteur natif.
+// Fonds animés (outil core) : scènes enregistrées, affectation par écran, moteur natif.
 //
 //   scene.rs   : format de scène v1 (données bornées) + uniformes + préréglages
 //   scene.wgsl : shader unique, partagé avec l'aperçu de l'éditeur
 //   engine.rs  : thread de rendu (fenêtres du calque du bureau, wgpu, pause, souris)
 //
 // Rangement : `<app_data>/wallpapers/scenes/<id>/scene.json` (+ l'image de fond copiée à
-// côté). Les préréglages (`preset-*`) sont en lecture seule. Scène active et options dans
-// le store `__app__` (clé `wallpaper`) : restaurées au démarrage par le Rust lui-même —
+// côté). Les préréglages (`preset-*`) sont en lecture seule. Affectation et options dans
+// le store `__app__` (clé `wallpaper`) : une scène pour « Tous les écrans », que chaque
+// écran peut remplacer par la sienne. Restaurées au démarrage par le Rust lui-même —
 // masquer l'outil du dock n'arrête pas un fond appliqué.
 // Le fond STATIQUE n'est pas ici : c'est le service `desktop` (utilisé aussi par les
 // automatisations et les extensions).
@@ -15,6 +16,7 @@ pub mod scene;
 #[cfg(target_os = "windows")]
 mod engine;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -28,8 +30,12 @@ const KEY: &str = "wallpaper";
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Prefs {
-    /// Scène appliquée (None = fond Windows normal).
-    pub active: Option<String>,
+    /// Scène de « Tous les écrans » (None = fond Windows). `active` : ancien nom.
+    #[serde(alias = "active")]
+    pub all: Option<String>,
+    /// Écrans réglés à part : id d'écran (`hardware::displays`) → scène ; "" = fond Windows
+    /// sur cet écran.
+    pub screens: BTreeMap<String, String>,
     /// Images par seconde (15–60).
     pub fps: u32,
     /// Pause pendant un jeu (service Activité).
@@ -38,7 +44,7 @@ pub struct Prefs {
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { active: None, fps: 30, pause_in_game: true }
+        Self { all: None, screens: BTreeMap::new(), fps: 30, pause_in_game: true }
     }
 }
 
@@ -133,7 +139,7 @@ pub fn wallpaper_get(app: AppHandle, id: String) -> Result<Scene, String> {
     load(&app, &id).map(|(s, _)| s)
 }
 
-/// Enregistre une scène (id choisi par l'éditeur). Si c'est la scène active, le fond suit.
+/// Enregistre une scène (id choisi par l'éditeur). Si elle est affichée, le fond suit.
 #[tauri::command]
 pub fn wallpaper_save(app: AppHandle, id: String, scene: Scene) -> Result<(), String> {
     scene.check()?;
@@ -151,8 +157,8 @@ pub fn wallpaper_save(app: AppHandle, id: String, scene: Scene) -> Result<(), St
     let json = serde_json::to_vec_pretty(&s).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("scene.json"), json).map_err(|e| e.to_string())?;
     let _ = app.emit("wallpaper://changed", ());
-    if prefs(&app).active.as_deref() == Some(&id) {
-        show(&app, &id)?;
+    if prefs(&app).uses(&id) {
+        push(&app);
     }
     Ok(())
 }
@@ -161,10 +167,13 @@ pub fn wallpaper_save(app: AppHandle, id: String, scene: Scene) -> Result<(), St
 pub fn wallpaper_delete(app: AppHandle, id: String) -> Result<(), String> {
     let dir = scene_dir(&app, &id)?;
     let mut p = prefs(&app);
-    if p.active.as_deref() == Some(&id) {
-        p.active = None;
+    if p.uses(&id) {
+        if p.all.as_deref() == Some(&id) {
+            p.all = None;
+        }
+        p.screens.retain(|_, v| v != &id);
         save_prefs(&app, &p);
-        stop(&app);
+        push(&app);
     }
     let _ = std::fs::remove_dir_all(dir);
     let _ = app.emit("wallpaper://changed", ());
@@ -212,20 +221,42 @@ pub struct State {
     error: Option<String>,
 }
 
-fn show(app: &AppHandle, id: &str) -> Result<(), String> {
-    let (s, image) = load(app, id)?;
-    #[cfg(target_os = "windows")]
-    engine::send(app, engine::Cmd::Show { scene: Box::new(s), image });
-    #[cfg(not(target_os = "windows"))]
-    let _ = (s, image);
-    Ok(())
+impl Prefs {
+    fn uses(&self, id: &str) -> bool {
+        self.all.as_deref() == Some(id) || self.screens.values().any(|v| v == id)
+    }
+    fn any(&self) -> bool {
+        self.all.is_some() || self.screens.values().any(|v| !v.is_empty())
+    }
 }
 
-fn stop(app: &AppHandle) {
+/// Envoie l'affectation au moteur (une scène illisible = fond Windows sur cet écran).
+fn push(app: &AppHandle) {
+    let p = prefs(app);
     #[cfg(target_os = "windows")]
-    engine::send(app, engine::Cmd::Stop);
+    {
+        let mut cache: BTreeMap<String, Option<engine::Loaded>> = BTreeMap::new();
+        let mut get = |id: &str| -> Option<engine::Loaded> {
+            cache
+                .entry(id.to_string())
+                .or_insert_with(|| match load(app, id) {
+                    Ok((scene, image)) => Some(engine::Loaded { id: id.to_string(), scene: Box::new(scene), image }),
+                    Err(e) => {
+                        eprintln!("[wallpaper] scène {id} : {e}");
+                        None
+                    }
+                })
+                .clone()
+        };
+        if !p.any() {
+            return engine::send(app, engine::Cmd::Stop);
+        }
+        let all = p.all.as_deref().and_then(&mut get);
+        let screens = p.screens.iter().map(|(d, id)| (d.clone(), if id.is_empty() { None } else { get(id) })).collect();
+        engine::send(app, engine::Cmd::Show { all, screens });
+    }
     #[cfg(not(target_os = "windows"))]
-    let _ = app;
+    let _ = (app, p);
 }
 
 fn send_options(app: &AppHandle, p: &Prefs) {
@@ -244,16 +275,28 @@ pub fn wallpaper_state(app: AppHandle) -> State {
     State { prefs: prefs(&app), running: st.running, paused: st.paused, error: st.error }
 }
 
-/// Applique une scène (None = retour au fond Windows).
+/// Applique une scène (None = fond Windows). `display` None = tous les écrans (les réglages
+/// par écran sont oubliés) ; sinon cet écran seulement.
 #[tauri::command]
-pub fn wallpaper_apply(app: AppHandle, id: Option<String>) -> Result<(), String> {
-    let mut p = prefs(&app);
-    match &id {
-        Some(i) => show(&app, i)?,
-        None => stop(&app),
+pub fn wallpaper_apply(app: AppHandle, id: Option<String>, display: Option<String>) -> Result<(), String> {
+    if let Some(i) = &id {
+        load(&app, i)?;
     }
-    p.active = id;
+    let mut p = prefs(&app);
+    match display {
+        None => {
+            p.all = id;
+            p.screens.clear();
+        }
+        Some(d) => {
+            if !crate::services::hardware::displays().iter().any(|x| x.id == d) {
+                return Err("invalidDisplay".into());
+            }
+            p.screens.insert(d, id.unwrap_or_default());
+        }
+    }
     save_prefs(&app, &p);
+    push(&app);
     Ok(())
 }
 
@@ -266,21 +309,20 @@ pub fn wallpaper_set_options(app: AppHandle, fps: u32, pause_in_game: bool) {
     send_options(&app, &p);
 }
 
-/// Démarrage : restaure la scène active ; à la fermeture, rend le fond à Windows.
+/// Démarrage : restaure l'affectation ; à la fermeture, rend le fond à Windows.
 pub fn start(app: &AppHandle) {
     let p = prefs(app);
     send_options(app, &p);
-    if let Some(id) = &p.active {
-        if let Err(e) = show(app, id) {
-            eprintln!("[wallpaper] scène {id} : {e}");
-        }
+    if p.any() {
+        push(app);
     }
     let plugin = tauri::plugin::Builder::<tauri::Wry>::new("island-wallpaper")
         .on_event(|app, ev| {
             // Le thread de rendu détruit ses fenêtres et redessine le fond statique ; on lui
             // laisse le temps avant que le processus ne disparaisse.
-            if matches!(ev, tauri::RunEvent::Exit) && prefs(app).active.is_some() {
-                stop(app);
+            if matches!(ev, tauri::RunEvent::Exit) && prefs(app).any() {
+                #[cfg(target_os = "windows")]
+                engine::send(app, engine::Cmd::Stop);
                 std::thread::sleep(std::time::Duration::from_millis(300));
             }
         })

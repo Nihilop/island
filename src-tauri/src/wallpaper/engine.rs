@@ -7,6 +7,7 @@
 // aucune image n'est alors calculée. La souris est LUE à chaque image (pas de hook) et
 // seulement prise en compte quand elle est sur le bureau visible.
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
@@ -29,9 +30,18 @@ use super::scene::{self, Frame, Scene};
 use crate::services::desktop::windows as desktop;
 use crate::services::hardware::{displays, DisplayInfo};
 
+/// Une scène chargée, prête pour le moteur (image de fond résolue en chemin absolu).
+#[derive(Clone)]
+pub struct Loaded {
+    pub id: String,
+    pub scene: Box<Scene>,
+    pub image: Option<PathBuf>,
+}
+
 pub enum Cmd {
-    /// Affiche une scène (image de fond déjà résolue en chemin absolu).
-    Show { scene: Box<Scene>, image: Option<PathBuf> },
+    /// Affectation : `all` pour tous les écrans, `screens` pour ceux réglés à part (None =
+    /// fond Windows sur cet écran). Résolue à chaque changement d'écrans.
+    Show { all: Option<Loaded>, screens: BTreeMap<String, Option<Loaded>> },
     Stop,
     Options { fps: u32, pause_in_game: bool },
 }
@@ -227,10 +237,12 @@ impl Drop for Win {
     }
 }
 
-/// Un écran : sa fenêtre enfant du calque, sa surface et ses uniformes. Les champs sont
-/// libérés dans l'ordre : la surface AVANT sa fenêtre (`win` en dernier).
+/// Un écran : sa scène, sa fenêtre enfant du calque, sa surface et ses uniformes. Les
+/// champs sont libérés dans l'ordre : la surface AVANT sa fenêtre (`_win` en dernier).
 struct Output {
     display: DisplayInfo,
+    scene: Box<Scene>,
+    image: (f32, f32),
     hwnd: HWND,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -240,7 +252,8 @@ struct Output {
     _win: Win,
 }
 
-fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, view: &wgpu::TextureView) -> Result<Output, String> {
+fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, scene: &Loaded, tex: &(wgpu::TextureView, (f32, f32))) -> Result<Output, String> {
+    let view = &tex.0;
     register_class();
     // Coordonnées du calque (il couvre tout le bureau virtuel, origine variable).
     let mut p = POINT { x: d.x, y: d.y };
@@ -289,7 +302,7 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, view: &wgpu::TextureVi
         mapped_at_creation: false,
     });
     let bind = bind_group(gpu, &uniforms, view);
-    Ok(Output { display: d.clone(), hwnd, surface, config, uniforms, bind, paused: false, _win: Win(hwnd) })
+    Ok(Output { display: d.clone(), scene: scene.scene.clone(), image: tex.1, hwnd, surface, config, uniforms, bind, paused: false, _win: Win(hwnd) })
 }
 
 fn bind_group(gpu: &Gpu, uniforms: &wgpu::Buffer, view: &wgpu::TextureView) -> wgpu::BindGroup {
@@ -304,7 +317,7 @@ fn bind_group(gpu: &Gpu, uniforms: &wgpu::Buffer, view: &wgpu::TextureView) -> w
     })
 }
 
-fn render(gpu: &Gpu, o: &mut Output, sc: &Scene, f: &Frame) {
+fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
     let frame = match o.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
@@ -313,7 +326,7 @@ fn render(gpu: &Gpu, o: &mut Output, sc: &Scene, f: &Frame) {
         }
         _ => return,
     };
-    let u = scene::pack(sc, f);
+    let u = scene::pack(&o.scene, f);
     let bytes = unsafe { std::slice::from_raw_parts(u.as_ptr() as *const u8, std::mem::size_of_val(&u)) };
     gpu.queue.write_buffer(&o.uniforms, 0, bytes);
     let view = frame.texture.create_view(&Default::default());
@@ -381,10 +394,34 @@ fn covered(d: &DisplayInfo) -> bool {
 // --- Boucle ------------------------------------------------------------------------------
 
 struct Live {
-    scene: Box<Scene>,
-    view: wgpu::TextureView,
-    image: (f32, f32),
+    all: Option<Loaded>,
+    screens: BTreeMap<String, Option<Loaded>>,
+    /// Une texture par scène affichée (partagée par les écrans qui la montrent).
+    textures: HashMap<String, (wgpu::TextureView, (f32, f32))>,
     outputs: Vec<Output>,
+}
+
+impl Live {
+    fn resolve(&self, d: &DisplayInfo) -> Option<&Loaded> {
+        match self.screens.get(&d.id) {
+            Some(s) => s.as_ref(),
+            None => self.all.as_ref(),
+        }
+    }
+
+    /// (ondulation, traînée, parallaxe souris, durée max de la traînée) sur l'ensemble des écrans.
+    fn interactive(&self) -> (bool, bool, bool, f32) {
+        let (mut ripple, mut trail, mut follow, mut fade) = (false, false, false, 0.05f32);
+        for o in &self.outputs {
+            ripple |= o.scene.interactions.ripple.is_some();
+            if let Some(t) = &o.scene.interactions.trail {
+                trail = true;
+                fade = fade.max(t.fade);
+            }
+            follow |= o.scene.effects.parallax.as_ref().is_some_and(|p| p.mouse > 0.0);
+        }
+        (ripple, trail, follow, fade)
+    }
 }
 
 fn pump() {
@@ -397,9 +434,50 @@ fn pump() {
     }
 }
 
-fn build_outputs(gpu: &Gpu, view: &wgpu::TextureView) -> Result<Vec<Output>, String> {
-    let layer = HWND(desktop::wallpaper_layer().ok_or("noDesktopLayer")? as *mut _);
-    displays().iter().map(|d| create_output(gpu, layer, d, view)).collect()
+/// (Re)construit les écrans d'après l'affectation. Un écran qui garde une scène garde sa
+/// fenêtre (pas de clignotement) ; un écran qui n'en a plus perd la sienne, et le fond
+/// statique est redessiné.
+fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
+    let mut old: Vec<Output> = std::mem::take(&mut l.outputs).into_iter().filter(|o| unsafe { IsWindow(Some(o.hwnd)) }.as_bool()).collect();
+    let had = old.len();
+    let mut kept = 0;
+    let mut layer: Option<HWND> = None;
+    let mut textures = std::mem::take(&mut l.textures);
+    let mut used: HashMap<String, (wgpu::TextureView, (f32, f32))> = HashMap::new();
+    let mut out = Vec::new();
+    for d in displays() {
+        let Some(sc) = l.resolve(&d).cloned() else { continue };
+        if !used.contains_key(&sc.id) {
+            let tex = textures.remove(&sc.id).unwrap_or_else(|| gpu.texture(sc.image.as_ref()));
+            used.insert(sc.id.clone(), tex);
+        }
+        let tex = &used[&sc.id];
+        if let Some(i) = old.iter().position(|o| o.display == d) {
+            let mut o = old.swap_remove(i);
+            o.scene = sc.scene.clone();
+            o.image = tex.1;
+            o.bind = bind_group(gpu, &o.uniforms, &tex.0);
+            kept += 1;
+            out.push(o);
+            continue;
+        }
+        let parent = match layer {
+            Some(h) => h,
+            None => {
+                let h = HWND(desktop::wallpaper_layer().ok_or("noDesktopLayer")? as *mut _);
+                layer = Some(h);
+                h
+            }
+        };
+        out.push(create_output(gpu, parent, &d, &sc, tex)?);
+    }
+    l.textures = used;
+    l.outputs = out;
+    drop(old);
+    if kept < had {
+        desktop::repaint_wallpaper();
+    }
+    Ok(())
 }
 
 fn run(app: AppHandle, rx: Receiver<Cmd>) {
@@ -429,7 +507,7 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
             }
         };
         match cmd {
-            Some(Cmd::Show { scene, image }) => {
+            Some(Cmd::Show { all, screens }) => {
                 if gpu.is_none() {
                     match Gpu::new() {
                         Ok(g) => gpu = Some(g),
@@ -440,23 +518,23 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
                     }
                 }
                 let g = gpu.as_ref().unwrap();
-                let (view, size) = g.texture(image.as_ref());
-                // Même écrans : on garde les fenêtres (pas de clignotement), on rebranche la texture.
-                let outputs = match live.take() {
-                    Some(mut l) if l.outputs.iter().all(|o| unsafe { IsWindow(Some(o.hwnd)) }.as_bool()) => {
-                        for o in &mut l.outputs {
-                            o.bind = bind_group(g, &o.uniforms, &view);
-                        }
-                        Ok(std::mem::take(&mut l.outputs))
-                    }
-                    _ => build_outputs(g, &view),
-                };
-                match outputs {
-                    Ok(outputs) => {
-                        live = Some(Live { scene, view, image: size, outputs });
+                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: HashMap::new(), outputs: Vec::new() });
+                // Nouvelle affectation : textures rechargées (l'image a pu changer).
+                l.textures.clear();
+                l.all = all;
+                l.screens = screens;
+                match layout(g, &mut l) {
+                    Ok(()) if !l.outputs.is_empty() => {
+                        live = Some(l);
+                        all_paused = false;
                         set_status(&app, Status { running: true, paused: false, error: None });
                     }
-                    Err(e) => set_status(&app, Status { running: false, paused: false, error: Some(e) }),
+                    Ok(()) => set_status(&app, Status::default()),
+                    Err(e) => {
+                        drop(l);
+                        desktop::repaint_wallpaper();
+                        set_status(&app, Status { running: false, paused: false, error: Some(e) });
+                    }
                 }
             }
             Some(Cmd::Stop) => {
@@ -481,18 +559,14 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
         // Écrans branchés / débranchés, Explorer redémarré : on reconstruit.
         if last_layout.elapsed() > Duration::from_secs(2) {
             last_layout = Instant::now();
-            let now = displays();
-            let same = now.len() == l.outputs.len() && now.iter().zip(&l.outputs).all(|(d, o)| *d == o.display);
+            let now: Vec<DisplayInfo> = displays().into_iter().filter(|d| l.resolve(d).is_some()).collect();
+            let same = now.len() == l.outputs.len() && now.iter().all(|d| l.outputs.iter().any(|o| o.display == *d));
             let alive = l.outputs.iter().all(|o| unsafe { IsWindow(Some(o.hwnd)) }.as_bool());
             if !same || !alive {
-                l.outputs.clear();
-                match build_outputs(g, &l.view) {
-                    Ok(o) => l.outputs = o,
-                    Err(e) => {
-                        live = None;
-                        set_status(&app, Status { running: false, paused: false, error: Some(e) });
-                        continue;
-                    }
+                if let Err(e) = layout(g, l) {
+                    live = None;
+                    set_status(&app, Status { running: false, paused: false, error: Some(e) });
+                    continue;
                 }
             }
         }
@@ -509,30 +583,28 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
                 set_status(&app, Status { running: true, paused: p, error: None });
             }
         }
-        if all_paused {
+        if all_paused || l.outputs.is_empty() {
             std::thread::sleep(Duration::from_millis(250));
             continue;
         }
 
         // Souris : position, clic (front montant), traînée — seulement sur le bureau visible.
         let t = t0.elapsed().as_secs_f32();
-        let interactive = l.scene.interactions.ripple.is_some() || l.scene.interactions.trail.is_some();
-        let follow = l.scene.effects.parallax.as_ref().is_some_and(|p| p.mouse > 0.0);
-        let on_desktop = if interactive || follow { desktop::cursor_on_desktop() } else { None };
+        let (want_ripple, want_trail, follow, max_fade) = l.interactive();
+        let on_desktop = if want_ripple || want_trail { desktop::cursor_on_desktop() } else { None };
         let cursor = if follow { desktop::cursor() } else { None };
         let down = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } as u16 & 0x8000 != 0;
         if let Some(p) = on_desktop {
-            if l.scene.interactions.ripple.is_some() && down && !was_down {
+            if want_ripple && down && !was_down {
                 ripples.insert(0, (p.x, p.y, t));
                 ripples.truncate(scene::RIPPLES);
             }
-            if l.scene.interactions.trail.is_some() && trail.first().is_none_or(|(x, y, _)| (x - p.x).abs() + (y - p.y).abs() > 2) {
+            if want_trail && trail.first().is_none_or(|(x, y, _)| (x - p.x).abs() + (y - p.y).abs() > 2) {
                 trail.insert(0, (p.x, p.y, t));
                 trail.truncate(scene::TRAIL);
             }
         }
         was_down = down;
-        let max_fade = l.scene.interactions.trail.as_ref().map(|t| t.fade).unwrap_or(0.0).max(0.05);
         trail.retain(|(_, _, ts)| t - ts < max_fade + 0.1);
         ripples.retain(|(_, _, ts)| t - ts < 6.0);
 
@@ -543,8 +615,8 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
             // Parallaxe : le curseur partout (on ne voit le fond que là où il est visible) ;
             // interactions : seulement quand il survole le bureau.
             let mouse = cursor.map(|p| ((p.x - dx) as f32, (p.y - dy) as f32));
-            let f = Frame { width: o.config.width as f32, height: o.config.height as f32, image: l.image, time: t, mouse, ripples: &rl, trail: &tl };
-            render(g, o, &l.scene, &f);
+            let f = Frame { width: o.config.width as f32, height: o.config.height as f32, image: o.image, time: t, mouse, ripples: &rl, trail: &tl };
+            render(g, o, &f);
         }
 
         let budget = Duration::from_secs_f64(1.0 / fps as f64);

@@ -15,7 +15,7 @@ import { Switch } from "@/sdk/ui/switch";
 import { Button } from "@/sdk/ui/button";
 import Param from "./Param.vue";
 import { Preview } from "./preview";
-import { DEFAULTS, newScene, type Scene } from "./scene";
+import { DEFAULTS, newScene, PARTICLE_PRESETS, type Scene } from "./scene";
 import { apply, getScene, imageBitmap, importImage, newId, saveScene } from "./api";
 import { t } from "../notch/i18n";
 
@@ -131,6 +131,12 @@ const effectRows: { k: Toggle; label: string }[] = [
   { k: "grain", label: "wall.fx.grain" },
   { k: "vignette", label: "wall.fx.vignette" },
 ];
+
+/** Préréglage de particules : remplit les réglages (densité et opacité gardées). */
+function particlePreset(k: keyof typeof PARTICLE_PRESETS) {
+  const p = scene.value.effects.particles;
+  if (p) Object.assign(p, PARTICLE_PRESETS[k]);
+}
 
 // --- Enregistrer / appliquer ---------------------------------------------------------------
 
@@ -288,17 +294,24 @@ onBeforeUnmount(() => {
                 <Param v-model="scene.effects.parallax.zoom" :label="t('wall.p.zoom')" :min="1" :max="1.3" />
               </div>
               <div v-else-if="row.k === 'particles' && scene.effects.particles" class="space-y-1 pt-1">
+                <div class="flex flex-wrap gap-1">
+                  <Button v-for="k in (['snow', 'rain', 'fireflies', 'embers'] as const)" :key="k" size="sm" variant="outline" @click="particlePreset(k)">{{ t(`wall.pk.${k}`) }}</Button>
+                </div>
                 <Segmented
-                  v-model="scene.effects.particles.kind"
+                  v-model="scene.effects.particles.shape"
                   size="sm"
                   :options="[
-                    { value: 'snow', label: t('wall.pk.snow') },
-                    { value: 'rain', label: t('wall.pk.rain') },
-                    { value: 'fireflies', label: t('wall.pk.fireflies') },
+                    { value: 'dot', label: t('wall.shape.dot') },
+                    { value: 'streak', label: t('wall.shape.streak') },
+                    { value: 'glow', label: t('wall.shape.glow') },
                   ]"
                 />
                 <Param v-model="scene.effects.particles.density" :label="t('wall.p.density')" :min="0" :max="1" />
-                <Param v-model="scene.effects.particles.speed" :label="t('wall.p.speed')" :min="0" :max="2" />
+                <Param v-model="scene.effects.particles.speed" :label="t('wall.p.speed')" :min="0" :max="1" />
+                <Param v-model="scene.effects.particles.direction" :label="t('wall.p.direction')" :min="0" :max="360" :step="1" unit="°" :digits="0" />
+                <Param v-model="scene.effects.particles.spread" :label="t('wall.p.spread')" :min="0" :max="1" />
+                <Param v-model="scene.effects.particles.turbulence" :label="t('wall.p.turbulence')" :min="0" :max="1" />
+                <Param v-model="scene.effects.particles.flicker" :label="t('wall.p.flicker')" :min="0" :max="1" />
                 <Param v-model="scene.effects.particles.size" :label="t('wall.p.size')" :min="0.2" :max="4" />
                 <Param v-model="scene.effects.particles.opacity" :label="t('wall.p.opacity')" :min="0" :max="1" />
                 <div class="flex items-center gap-3 py-1">

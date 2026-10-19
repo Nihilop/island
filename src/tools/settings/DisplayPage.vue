@@ -19,7 +19,7 @@ onMounted(watchWallpaper);
 const sceneOptions = computed(() => [{ value: null as string | null, label: t("wall.none") }, ...wallpaper.scenes.map((e) => ({ value: e.id as string | null, label: e.scene.name }))]);
 const wallBusy = ref(false);
 const activeScene = computed({
-  get: () => wallpaper.state.active,
+  get: () => wallpaper.state.all,
   set: async (id: string | null) => {
     wallBusy.value = true;
     await applyWallpaper(id).catch(() => {});

@@ -15,13 +15,14 @@ struct U {
   grad_b: vec4f,      // couleur B
   water: vec4f,       // intensité (0 = off), vitesse, échelle, -
   parallax: vec4f,    // souris, dérive, zoom, -
-  particles: vec4f,   // type (0 off, 1 neige, 2 pluie, 3 lucioles), densité, vitesse, taille
+  particles: vec4f,   // forme (0 off, 1 point, 2 trait, 3 halo), densité, vitesse (0..1), taille
   pcolor: vec4f,      // couleur des particules, opacité
   color: vec4f,       // teinte (°), saturation, luminosité, contraste
   post: vec4f,        // grain, vignette, -, -
   ripple: vec4f,      // actif, rayon (px), force, durée (s)
   trail: vec4f,       // actif, largeur (px), durée (s), -
   trail_color: vec4f, // couleur, intensité
+  particles2: vec4f,  // direction (rad), turbulence, dispersion, scintillement
   ripples: array<vec4f, 8>,    // x, y, t0, actif
   trail_pts: array<vec4f, 32>, // x, y, t, actif (plus récent en premier)
 }
@@ -86,55 +87,63 @@ fn background(uv: vec2f) -> vec3f {
   return select(u.grad_a.rgb, c, inside);
 }
 
+// Particules procédurales : 3 plans de grilles qui défilent dans la direction choisie, une
+// particule (au plus) par case. Forme : point doux, trait étiré dans la direction, ou halo
+// lumineux (ajouté à l'image). Neige, pluie, lucioles, braises ne sont que des réglages.
+// Chaque pixel regarde sa case ET les 3 voisines du côté le plus proche : un halo qui
+// déborde de sa case n'est plus tranché net. Le centre reste dans [0.15, 0.85] de sa case et
+// le rayon est borné à 0.2 case, ce qui garantit que ces 4 cases suffisent.
 fn particles(c: vec3f, px: vec2f, t: f32, k: f32) -> vec3f {
-  let kind = u.particles.x;
-  if (kind < 0.5) {
+  let shape = u.particles.x;
+  if (shape < 0.5) {
     return c;
   }
   let dens = u.particles.y;
-  let spd = u.particles.z;
   let size = max(u.particles.w, 0.1);
+  let turb = u.particles2.y;
+  let spread = u.particles2.z;
+  let flicker = u.particles2.w;
+  let streak = shape > 1.5 && shape < 2.5;
+  let glow = shape > 2.5;
+  // Vitesse exponentielle : 0 → 10 px/s, 1 → 1000 px/s (pour 1080 p).
+  let speed = 10.0 * pow(100.0, u.particles.z);
   var acc = 0.0;
   for (var layer = 0; layer < 3; layer++) {
     let lf = f32(layer);
     let cell = (110.0 - lf * 28.0) * k;
     let depth = 0.45 + lf * 0.35;
-    var p = px;
-    if (kind < 1.5) {
-      p.y -= t * 45.0 * spd * depth * k;
-      p.x += sin(t * 0.5 + lf * 1.7) * 25.0 * k;
-    } else if (kind < 2.5) {
-      p.y -= t * 700.0 * spd * depth * k;
-      p.x -= p.y * 0.08;
-    } else {
-      p += vec2f(sin(t * 0.21 + lf * 2.1), cos(t * 0.17 + lf)) * 40.0 * k;
+    let ang = u.particles2.x + (lf - 1.0) * spread * 0.6;
+    let dir = vec2f(cos(ang), sin(ang));
+    let perp = vec2f(-dir.y, dir.x);
+    // La grille avance dans `dir` : on échantillonne à rebours.
+    let gp = (px - dir * t * speed * depth * k) / cell;
+    let id0 = floor(gp);
+    let side = select(vec2f(-1.0), vec2f(1.0), fract(gp) >= vec2f(0.5));
+    let rad = min(size * (1.6 + lf * 1.1) * k, cell * 0.2);
+    for (var n = 0; n < 4; n++) {
+      let id = id0 + side * vec2f(f32(n & 1), f32(n >> 1u));
+      if (hash21(id + lf * 3.1) > dens) {
+        continue;
+      }
+      let h = hash22(id + lf * 17.0);
+      // Errance : balancement de travers et léger va-et-vient dans la direction.
+      let w = t * (0.5 + h.y) + h.x * 6.28;
+      let local = h * 0.7 + 0.15 + (perp * sin(w) * 0.3 + dir * cos(w * 0.7) * 0.12) * turb;
+      let q = (gp - id - clamp(local, vec2f(0.15), vec2f(0.85))) * cell;
+      var a = 0.0;
+      if (streak) {
+        a = smoothstep(rad * 0.6, 0.0, length(vec2f(dot(q, dir) * 0.07, dot(q, perp)))) * 0.6;
+      } else if (glow) {
+        a = exp(-dot(q, q) / (rad * rad * 0.9));
+      } else {
+        a = smoothstep(rad, rad * 0.25, length(q));
+      }
+      let f = mix(1.0, 0.5 + 0.5 * sin(t * (2.0 + h.y * 7.0) + h.x * 50.0) * sin(t * 1.3 + h.y * 20.0), flicker);
+      acc += a * f * (0.45 + lf * 0.3);
     }
-    let id = floor(p / cell);
-    let f = fract(p / cell);
-    if (hash21(id + lf * 3.1) > dens) {
-      continue;
-    }
-    let h = hash22(id + lf * 17.0);
-    var center = h * 0.8 + 0.1;
-    if (kind > 2.5) {
-      center += vec2f(sin(t * 0.7 * spd + h.x * 6.28), cos(t * 0.6 * spd + h.y * 6.28)) * 0.15;
-    }
-    let rad = size * (1.6 + lf * 1.1) * k;
-    var a = 0.0;
-    if (kind > 1.5 && kind < 2.5) {
-      let q = (f - center) * vec2f(1.0, 0.07) * cell;
-      a = smoothstep(rad * 0.6, 0.0, length(q)) * 0.6;
-    } else if (kind > 2.5) {
-      let d = length(f - center) * cell;
-      a = exp(-d * d / (rad * rad * 3.0)) * (0.55 + 0.45 * sin(t * 1.7 * spd + h.x * 40.0));
-    } else {
-      let d = length(f - center) * cell;
-      a = smoothstep(rad, rad * 0.25, d);
-    }
-    acc += a * (0.45 + lf * 0.3);
   }
   let amt = clamp(acc * u.pcolor.a, 0.0, 1.0);
-  if (kind > 2.5) {
+  if (glow) {
     return c + u.pcolor.rgb * amt;
   }
   return mix(c, u.pcolor.rgb, amt);
