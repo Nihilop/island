@@ -155,6 +155,7 @@ pub struct ItemRow {
     versions: i64,
     open_reports: i64,
     updated_at: DateTime<Utc>,
+    thumbnail: Option<String>,
     #[serde(skip)]
     total: i64,
 }
@@ -166,7 +167,7 @@ pub async fn items(State(st): State<AppState>, user: User, Query(p): Query<Pagin
         "SELECT i.id, i.kind, i.name, i.status, u.login AS owner, u.banned AS owner_banned, i.downloads,
                 (SELECT count(*) FROM versions v WHERE v.item_id = i.id) AS versions,
                 (SELECT count(*) FROM reports r WHERE r.item_id = i.id AND r.resolved_at IS NULL) AS open_reports,
-                i.updated_at, count(*) OVER () AS total
+                i.updated_at, (SELECT a.file_key FROM assets a WHERE a.item_id = i.id AND a.kind = 'thumbnail' AND a.position = 0) AS thumbnail, count(*) OVER () AS total
          FROM items i JOIN users u ON u.id = i.owner_id
          WHERE ($1::text IS NULL OR i.status = $1) AND ($2::text IS NULL OR i.name ILIKE $2 OR u.login ILIKE $2 OR i.id = $3)
          ORDER BY i.updated_at DESC LIMIT $4 OFFSET $5",
@@ -179,7 +180,11 @@ pub async fn items(State(st): State<AppState>, user: User, Query(p): Query<Pagin
     .fetch_all(&st.db)
     .await?;
     let total = rows.first().map(|r| r.total).unwrap_or(0);
-    Ok(Json(Paged { items: rows, page: p.page(), total }))
+    let rows = rows.into_iter().map(|mut r| {
+        r.thumbnail = crate::items::thumbnail_url(&st, &r.id, r.thumbnail.take());
+        r
+    });
+    Ok(Json(Paged { items: rows.collect(), page: p.page(), total }))
 }
 
 async fn set_item_status(st: &AppState, user: &User, id: &str, from: &str, to: &str, action: &str) -> ApiResult<StatusCode> {

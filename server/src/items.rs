@@ -56,6 +56,21 @@ pub struct Card {
     pub author_avatar: Option<String>,
     /// Dernière version publiée.
     pub version: Option<String>,
+    /// URL de la vignette (CDN en production) ; la base y met la clé de stockage.
+    pub thumbnail: Option<String>,
+}
+
+/// Clé de stockage de la vignette → URL à afficher : le CDN si le stockage en a un, sinon la
+/// route du serveur.
+pub fn thumbnail_url(st: &AppState, id: &str, key: Option<String>) -> Option<String> {
+    key.map(|k| st.storage.public_url(&k).unwrap_or_else(|| format!("/v1/items/{id}/thumbnail")))
+}
+
+impl Card {
+    fn resolve(mut self, st: &AppState) -> Self {
+        self.thumbnail = thumbnail_url(st, &self.id, self.thumbnail.take());
+        self
+    }
 }
 
 #[derive(Serialize)]
@@ -98,7 +113,8 @@ pub struct Detail {
 
 const CARD_SELECT: &str = "SELECT i.id, i.kind, i.name, i.summary, i.tags, i.downloads, i.updated_at,
         u.login AS author, u.avatar_url AS author_avatar,
-        (SELECT v.version FROM versions v WHERE v.item_id = i.id AND v.status = 'approved' ORDER BY v.id DESC LIMIT 1) AS version
+        (SELECT v.version FROM versions v WHERE v.item_id = i.id AND v.status = 'approved' ORDER BY v.id DESC LIMIT 1) AS version,
+        (SELECT a.file_key FROM assets a WHERE a.item_id = i.id AND a.kind = 'thumbnail' AND a.position = 0) AS thumbnail
     FROM items i JOIN users u ON u.id = i.owner_id";
 
 /// Visible publiquement : publié, auteur non banni, au moins une version approuvée.
@@ -153,7 +169,7 @@ pub async fn list(State(st): State<AppState>, Query(p): Query<ListQuery>) -> Api
     }
     let rows: Vec<Row> = sql.build_query_as().fetch_all(&st.db).await?;
     let total = rows.first().map(|r| r.total).unwrap_or(0);
-    Ok(Json(Page { items: rows.into_iter().map(|r| r.card).collect(), page, total }))
+    Ok(Json(Page { items: rows.into_iter().map(|r| r.card.resolve(&st)).collect(), page, total }))
 }
 
 async fn visible_card(st: &AppState, id: &str) -> ApiResult<Card> {
@@ -161,6 +177,7 @@ async fn visible_card(st: &AppState, id: &str) -> ApiResult<Card> {
         .bind(id)
         .fetch_optional(&st.db)
         .await?
+        .map(|c| c.resolve(st))
         .ok_or_else(ApiError::not_found)
 }
 
@@ -553,18 +570,24 @@ pub struct Mine {
     pub downloads: i64,
     pub updated_at: DateTime<Utc>,
     pub versions: i64,
+    pub thumbnail: Option<String>,
 }
 
 pub async fn mine(State(st): State<AppState>, user: User) -> ApiResult<Json<Vec<Mine>>> {
     let rows = sqlx::query_as::<_, Mine>(
         "SELECT i.id, i.kind, i.name, i.status, i.downloads, i.updated_at,
-                (SELECT count(*) FROM versions v WHERE v.item_id = i.id) AS versions
+                (SELECT count(*) FROM versions v WHERE v.item_id = i.id) AS versions,
+                (SELECT a.file_key FROM assets a WHERE a.item_id = i.id AND a.kind = 'thumbnail' AND a.position = 0) AS thumbnail
          FROM items i WHERE i.owner_id = $1 AND i.status <> 'removed' ORDER BY i.updated_at DESC",
     )
     .bind(user.id)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(rows))
+    let rows = rows.into_iter().map(|mut r| {
+        r.thumbnail = thumbnail_url(&st, &r.id, r.thumbnail.take());
+        r
+    });
+    Ok(Json(rows.collect()))
 }
 
 // --- Signalements ---------------------------------------------------------------------------

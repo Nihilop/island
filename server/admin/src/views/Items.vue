@@ -17,6 +17,8 @@ interface Item {
   versions: number;
   openReports: number;
   updatedAt: string;
+  /** URL de la vignette (CDN en production). */
+  thumbnail: string | null;
 }
 
 const emit = defineEmits<{ changed: [] }>();
@@ -77,8 +79,9 @@ const toggle = (i: Item) =>
           <tr v-for="i in data.items" :key="i.id">
             <td style="width: 72px">
               <img
-                v-if="i.status === 'published' && !i.ownerBanned"
-                :src="`/v1/items/${i.id}/thumbnail`"
+                v-if="i.thumbnail"
+                :src="i.thumbnail"
+                onerror="this.style.visibility = 'hidden'"
                 alt=""
                 loading="lazy"
                 style="width: 64px; height: 36px; object-fit: cover; border-radius: 4px; background: var(--line)"
