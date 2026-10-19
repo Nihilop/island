@@ -7,18 +7,24 @@
 //!   sanitize  : retrait des métadonnées des images (EXIF, GPS, blocs texte), sans recompression
 //!   scan      : analyse antivirus ClamAV (`clamd`, optionnelle)
 //!   items     : catalogue, fiche, téléchargement, publication, signalements
+//!   github    : client GitHub (device flow, OAuth web, identité)
+//!   session   : cookie de session signé du panneau d'administration
+//!   login     : connexion GitHub, compte courant, jetons, rôles
 
 pub mod auth;
 pub mod error;
+pub mod github;
 pub mod items;
+pub mod login;
 pub mod sanitize;
 pub mod scan;
+pub mod session;
 pub mod storage;
 
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use sqlx::PgPool;
 
@@ -32,6 +38,16 @@ pub struct AppState {
     pub clamav: Option<String>,
     /// Faire confiance à `X-Forwarded-For` (derrière le proxy de la plateforme).
     pub trust_proxy: bool,
+    /// None = connexion GitHub indisponible (`githubNotConfigured`).
+    pub github: Option<github::GitHub>,
+    /// Identifiant numérique GitHub du super admin.
+    pub admin_github_id: Option<i64>,
+    /// Clé de signature des cookies (`SESSION_KEY`).
+    pub session_key: Arc<Vec<u8>>,
+    /// URL publique (retour de l'OAuth web : `<PUBLIC_URL>/admin/callback`).
+    pub public_url: String,
+    /// Cookies `Secure` (PUBLIC_URL en https).
+    pub secure_cookies: bool,
 }
 
 /// Publication : le fichier entier passe par le serveur (jamais d'envoi direct au stockage).
@@ -46,6 +62,15 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/items/{id}/thumbnail", get(items::thumbnail))
         .route("/v1/items/{id}/reports", post(items::report))
         .route("/v1/me/items", get(items::mine))
+        .route("/v1/auth/device", post(login::device))
+        .route("/v1/auth/token", post(login::token))
+        .route("/v1/me", get(login::me))
+        .route("/v1/me/tokens", get(login::tokens))
+        .route("/v1/me/tokens/{id}", delete(login::revoke))
+        .route("/admin", get(login::admin_home))
+        .route("/admin/login", get(login::admin_login))
+        .route("/admin/callback", get(login::admin_callback))
+        .route("/admin/logout", post(login::admin_logout))
         .with_state(state)
 }
 

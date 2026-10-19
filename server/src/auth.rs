@@ -1,7 +1,13 @@
-//! Jetons d'API (`Authorization: Bearer ist_…`) : générés aléatoirement, montrés une seule
-//! fois, stockés HACHÉS (SHA-256). Un compte banni n'est plus authentifié. La connexion
-//! GitHub (device flow) qui délivre ces jetons arrive à l'étape 3 ; d'ici là, la commande
-//! `island-store token` en crée pour le développement.
+//! Authentification d'une requête, de deux façons :
+//! - **jeton d'API** (`Authorization: Bearer ist_…`, CLI et app) : généré aléatoirement,
+//!   montré une seule fois, stocké HACHÉ (SHA-256) ; délivré par la connexion GitHub
+//!   (`login.rs`) ou, en développement, par `island-store token` ;
+//! - **cookie de session** du panneau d'administration (`session.rs`), réservé aux
+//!   modérateurs. Une requête qui MODIFIE quelque chose avec ce cookie doit aussi porter
+//!   l'en-tête `X-Island-Admin` (qu'un autre site ne peut pas ajouter) : protection CSRF en
+//!   plus du `SameSite=Strict`.
+//!
+//! Un compte banni n'est jamais authentifié ; le rôle est relu en base à chaque requête.
 
 use axum::extract::{FromRequestParts, OptionalFromRequestParts};
 use axum::http::request::Parts;
@@ -49,7 +55,7 @@ pub async fn create_token(db: &sqlx::PgPool, user_id: i64, name: &str) -> Result
 }
 
 async fn authenticate(parts: &Parts, state: &AppState) -> Result<Option<User>, ApiError> {
-    let Some(header) = parts.headers.get(axum::http::header::AUTHORIZATION) else { return Ok(None) };
+    let Some(header) = parts.headers.get(axum::http::header::AUTHORIZATION) else { return session_user(parts, state).await };
     let token = header.to_str().ok().and_then(|h| h.strip_prefix("Bearer ")).ok_or_else(ApiError::unauthorized)?;
     let row: Option<(i64, String, String)> = sqlx::query_as(
         "UPDATE tokens t SET last_used_at = now() FROM users u
@@ -64,6 +70,28 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<Option<User>, A
         // Jeton présent mais inconnu / révoqué : refus explicite (pas « anonyme »).
         None => Err(ApiError::unauthorized()),
     }
+}
+
+/// Compte du cookie de session (modérateurs et admin seulement), sinon None.
+async fn session_user(parts: &Parts, state: &AppState) -> Result<Option<User>, ApiError> {
+    let Some(id) = crate::session::cookie(&parts.headers, crate::session::COOKIE)
+        .and_then(|c| crate::session::verify(&state.session_key, c))
+        .and_then(|v| v.parse::<i64>().ok())
+    else {
+        return Ok(None);
+    };
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "UPDATE users SET last_seen_at = now() WHERE id = $1 AND NOT banned AND role IN ('moderator', 'admin') RETURNING id, login, role",
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((id, login, role)) = row else { return Ok(None) };
+    let safe = matches!(parts.method, axum::http::Method::GET | axum::http::Method::HEAD);
+    if !safe && !parts.headers.contains_key("x-island-admin") {
+        return Err(ApiError::new(axum::http::StatusCode::FORBIDDEN, "csrf"));
+    }
+    Ok(Some(User { id, login, role }))
 }
 
 impl FromRequestParts<AppState> for User {

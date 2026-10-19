@@ -22,7 +22,17 @@ use tower::ServiceExt;
 
 fn router(db: PgPool) -> Router {
     let dir = std::env::temp_dir().join(format!("island-store-test-{}", uuid_like()));
-    app(AppState { db, storage: Arc::new(Storage::Local(dir)), clamav: None, trust_proxy: true })
+    app(AppState {
+        db,
+        storage: Arc::new(Storage::Local(dir)),
+        clamav: None,
+        trust_proxy: true,
+        github: None,
+        admin_github_id: None,
+        session_key: Arc::new(b"cle-de-test-cle-de-test-cle-de-test".to_vec()),
+        public_url: "http://localhost".into(),
+        secure_cookies: false,
+    })
 }
 
 fn uuid_like() -> String {

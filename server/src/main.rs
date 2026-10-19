@@ -37,11 +37,41 @@ async fn main() {
     }
 
     let storage = Storage::from_config(&env("STORAGE").unwrap_or_else(|| "local:./data/files".into())).unwrap_or_else(|e| fail(e));
-    let state = AppState { db, storage: Arc::new(storage), clamav: env("CLAMAV_URL"), trust_proxy: env("TRUST_PROXY").as_deref() == Some("1") };
+    let bind = env("BIND").unwrap_or_else(|| "127.0.0.1:8080".into());
+    let public_url = env("PUBLIC_URL").unwrap_or_else(|| format!("http://{bind}"));
+    let session_key = match env("SESSION_KEY") {
+        Some(k) if k.len() >= 32 => k.into_bytes(),
+        Some(_) => fail("SESSION_KEY trop courte (32 caractères au moins)"),
+        None => {
+            // Développement : clé éphémère (les sessions ne survivent pas à un redémarrage).
+            tracing::warn!("SESSION_KEY absent : clé éphémère, sessions perdues au redémarrage");
+            let mut b = [0u8; 32];
+            getrandom::getrandom(&mut b).expect("getrandom");
+            b.to_vec()
+        }
+    };
+    let github = env("GITHUB_CLIENT_ID").map(|id| island_store::github::GitHub::from_env(id, env("GITHUB_CLIENT_SECRET")));
+    if github.is_none() {
+        tracing::warn!("GITHUB_CLIENT_ID absent : connexion GitHub indisponible (jetons de développement seulement)");
+    }
+    let admin_github_id = env("ADMIN_GITHUB_ID").map(|v| v.parse::<i64>().unwrap_or_else(|_| fail("ADMIN_GITHUB_ID : identifiant numérique attendu")));
+    if admin_github_id.is_none() {
+        tracing::warn!("ADMIN_GITHUB_ID absent : aucun super admin");
+    }
+    let state = AppState {
+        db,
+        storage: Arc::new(storage),
+        clamav: env("CLAMAV_URL"),
+        trust_proxy: env("TRUST_PROXY").as_deref() == Some("1"),
+        github,
+        admin_github_id,
+        session_key: Arc::new(session_key),
+        secure_cookies: public_url.starts_with("https://"),
+        public_url,
+    };
     if state.clamav.is_none() {
         tracing::warn!("CLAMAV_URL absent : les fichiers publiés ne sont pas analysés (scan: skipped)");
     }
-    let bind = env("BIND").unwrap_or_else(|| "127.0.0.1:8080".into());
     let listener = tokio::net::TcpListener::bind(&bind).await.unwrap_or_else(|e| fail(format!("{bind} : {e}")));
     tracing::info!("magasin d'Island sur http://{bind}");
     let router = app(state).layer(TraceLayer::new_for_http());
