@@ -33,6 +33,7 @@ import { initBudget } from "../tools/budget/store";
 import { initTodos } from "../tools/todos/store";
 import { initLauncher } from "../launcher/store";
 import { initExtensionsHost } from "../extensions/install";
+import { initWallpaperShare } from "../wallpaper/share";
 
 registerBuiltinTools();
 
@@ -56,6 +57,7 @@ loadSettings().finally(() => {
     { immediate: true },
   );
   void initExtensionsHost();
+  initWallpaperShare();
   watch(
     () => settings.vaultTimeout,
     (seconds) => invoke("vault_set_timeout", { seconds }).catch(() => {}),

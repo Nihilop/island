@@ -112,3 +112,41 @@ export function fillCss(l: Layer): string {
 export function openEditor(title: string, id?: string) {
   return invoke("window_open", { kind: "wallpaper", key: "editor", title, size: [1120, 700], minSize: [860, 540], args: { id: id ?? null } });
 }
+
+// --- Partage (.islandscene) ---------------------------------------------------------------
+
+export interface Imported {
+  id: string;
+  name: string;
+}
+
+/** Message lisible d'une erreur d'export / import (codes de `share.rs`). */
+export function shareError(e: unknown): string {
+  const code = String(e);
+  if (code.startsWith("missingFile:")) return t("wall.share.missingFile", { f: code.slice(12) });
+  if (code.startsWith("invalidImage:")) return t("wall.share.invalidImage", { f: code.slice(13) });
+  const known = ["corrupt", "tooLarge", "sceneTooNew", "notFound", "invalidPath"];
+  return known.includes(code) ? t(`wall.share.${code}`) : code;
+}
+
+/** Enregistre la scène dans un fichier `.islandscene` choisi par l'utilisateur. */
+export async function exportScene(id: string, name: string): Promise<boolean> {
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const safe = name.replace(/[\\/:*?"<>|]+/g, " ").trim() || "scene";
+  const path = await save({ defaultPath: `${safe}.islandscene`, filters: [{ name: t("wall.share.file"), extensions: ["islandscene"] }] });
+  if (!path) return false;
+  await invoke("wallpaper_export", { id, path });
+  return true;
+}
+
+export const importScene = (path: string) => invoke<Imported>("wallpaper_import", { path });
+
+/** Choisit un ou plusieurs `.islandscene` et les importe. */
+export async function pickAndImport(): Promise<Imported[]> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ multiple: true, filters: [{ name: t("wall.share.file"), extensions: ["islandscene"] }] });
+  const paths = Array.isArray(picked) ? picked : picked ? [picked] : [];
+  const out: Imported[] = [];
+  for (const p of paths) out.push(await importScene(p));
+  return out;
+}

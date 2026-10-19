@@ -383,3 +383,50 @@ pub(crate) fn start_fullscreen_monitor(app: AppHandle) {
     #[cfg(not(target_os = "windows"))]
     let _ = app;
 }
+
+/// Associe une extension de fichier à Island dans HKCU (per-utilisateur, sans admin) :
+/// double-clic → Island reçoit le chemin dans son argv (instance unique). Sert aux paquets
+/// d'extension (`.island`) et aux scènes partagées (`.islandscene`).
+#[cfg(target_os = "windows")]
+pub(crate) fn register_file_assoc(app: &AppHandle, ext: &str, prog_id: &str, label: &str) -> Result<(), String> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
+    use winreg::RegKey;
+
+    let exe = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .to_string();
+    // Icône dédiée aux fichiers d'Island si elle est bundlée (resource), sinon celle de l'exe.
+    let icon = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("icons").join("island-file.ico"))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("{exe},0"));
+    let command = format!("\"{exe}\" \"%1\"");
+
+    let classes = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags("Software\\Classes", KEY_READ | KEY_WRITE)
+        .map_err(|e| e.to_string())?;
+    // Déjà en place (même exe) : rien à écrire, pas de notification au shell.
+    let current: Option<String> = classes.open_subkey(format!("{prog_id}\\shell\\open\\command")).ok().and_then(|k| k.get_value("").ok());
+    let linked: Option<String> = classes.open_subkey(ext).ok().and_then(|k| k.get_value("").ok());
+    if current.as_deref() == Some(command.as_str()) && linked.as_deref() == Some(prog_id) {
+        return Ok(());
+    }
+
+    classes.create_subkey(ext).map_err(|e| e.to_string())?.0.set_value("", &prog_id).map_err(|e| e.to_string())?;
+    let prog = classes.create_subkey(prog_id).map_err(|e| e.to_string())?.0;
+    prog.set_value("", &label).map_err(|e| e.to_string())?;
+    prog.create_subkey("DefaultIcon").map_err(|e| e.to_string())?.0.set_value("", &icon).map_err(|e| e.to_string())?;
+    prog.create_subkey("shell\\open\\command").map_err(|e| e.to_string())?.0.set_value("", &command).map_err(|e| e.to_string())?;
+
+    // Notifie le shell que les associations ont changé (prise en compte immédiate).
+    unsafe {
+        use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
+    }
+    Ok(())
+}

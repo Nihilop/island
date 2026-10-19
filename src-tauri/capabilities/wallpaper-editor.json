@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "wallpaper-editor",
-  "description": "Éditeur de fonds animés : sélecteur de fichier pour choisir l'image de fond.",
+  "description": "Éditeur de fonds animés : sélecteur de fichier (image d'un calque) et enregistrement (partage .islandscene).",
   "windows": [
     "wallpaper-editor"
   ],
   "permissions": [
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

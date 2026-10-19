@@ -42,6 +42,7 @@ pub fn run() {
         // .island transmet l'argv à l'instance vivante au lieu d'en lancer une 2ᵉ.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             extensions::install::handle_argv(app, &argv);
+            wallpaper::share::handle_argv(app, &argv);
         }))
         .register_uri_scheme_protocol(extensions::protocol::SCHEME, extensions::protocol::handle)
         .plugin(tauri_plugin_opener::init())
@@ -112,6 +113,8 @@ pub fn run() {
             // Double-clic au démarrage : un .island dans l'argv → modal d'install.
             let argv: Vec<String> = std::env::args().collect();
             extensions::install::handle_argv(app.handle(), &argv);
+            // Double-clic au démarrage : un .islandscene dans l'argv → importé.
+            wallpaper::share::handle_argv(app.handle(), &argv);
 
             Ok(())
         })
@@ -224,6 +227,9 @@ pub fn run() {
             wallpaper::wallpaper_import_image,
             wallpaper::wallpaper_image,
             wallpaper::wallpaper_save_mask,
+            wallpaper::share::wallpaper_export,
+            wallpaper::share::wallpaper_import,
+            wallpaper::share::wallpaper_take_imported,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,
             wallpaper::wallpaper_set_options,

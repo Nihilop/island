@@ -49,6 +49,13 @@
         ],
         "name": "Island Extension",
         "description": "Paquet d'extension Island"
+      },
+      {
+        "ext": [
+          "islandscene"
+        ],
+        "name": "Island Scene",
+        "description": "Scène de fond animé Island"
       }
     ],
     "resources": [

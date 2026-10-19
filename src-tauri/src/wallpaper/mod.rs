@@ -3,6 +3,7 @@
 //   scene.rs       : format de scène (calques, données bornées) + placement + uniformes + préréglages
 //   layer.wgsl     : passe d'un calque ; composite.wgsl : passe finale (partagés avec l'aperçu)
 //   engine.rs      : thread de rendu (fenêtres du calque du bureau, wgpu, pause, souris)
+//   share.rs       : partage (`.islandscene` : export, import vérifié, double-clic)
 //
 // Rangement : `<app_data>/wallpapers/scenes/<id>/scene.json` (+ les images des calques
 // copiées à côté). Les préréglages (`preset-*`) sont en lecture seule. Affectation et options dans
@@ -13,6 +14,7 @@
 // automatisations et les extensions).
 
 pub mod scene;
+pub mod share;
 #[cfg(target_os = "windows")]
 mod engine;
 
@@ -334,6 +336,11 @@ pub fn wallpaper_set_options(app: AppHandle, fps: u32, pause_in_game: bool) {
 
 /// Démarrage : restaure l'affectation ; à la fermeture, rend le fond à Windows.
 pub fn start(app: &AppHandle) {
+    // Double-clic sur un `.islandscene` → Island (HKCU, réécrit seulement si besoin).
+    #[cfg(target_os = "windows")]
+    if let Err(e) = crate::host::register_file_assoc(app, ".islandscene", "Island.Scene", "Scène Island") {
+        eprintln!("[wallpaper] association .islandscene : {e}");
+    }
     let p = prefs(app);
     send_options(app, &p);
     if p.any() {

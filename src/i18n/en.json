@@ -1147,5 +1147,18 @@
   "wall.brush.invert": "Invert",
   "wall.brush.fill": "All",
   "wall.brush.clear": "None",
-  "wall.brush.done": "Done"
+  "wall.brush.done": "Done",
+  "wall.share.export": "Share",
+  "wall.share.import": "Import a scene",
+  "wall.share.file": "Island scene",
+  "wall.share.imported": "Scene imported: {name}",
+  "wall.share.importedBody": "It's in Live wallpapers, ready to apply or edit.",
+  "wall.share.importFailed": "Couldn't import the scene",
+  "wall.share.corrupt": "This file isn't a valid Island scene.",
+  "wall.share.tooLarge": "This file is too large.",
+  "wall.share.sceneTooNew": "This scene comes from a newer version of Island: update Island.",
+  "wall.share.notFound": "File not found.",
+  "wall.share.invalidPath": "The file must end with .islandscene.",
+  "wall.share.missingFile": "A file is missing from the scene ({f}).",
+  "wall.share.invalidImage": "An image in the scene can't be read ({f})."
 }

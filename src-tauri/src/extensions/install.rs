@@ -340,53 +340,7 @@ pub fn ext2_take_pending() -> Option<String> {
 /// Écrit l'association `.island → Island` dans HKCU (per-utilisateur, sans admin).
 #[cfg(target_os = "windows")]
 pub(crate) fn register_island_assoc(app: &AppHandle) -> Result<(), String> {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
-    use winreg::RegKey;
-
-    let exe = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .to_string_lossy()
-        .to_string();
-    // Icône dédiée aux .island si elle est bundlée (resource), sinon celle de l'exe.
-    let icon = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|d| d.join("icons").join("island-file.ico"))
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("{exe},0"));
-
-    let classes = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey_with_flags("Software\\Classes", KEY_READ | KEY_WRITE)
-        .map_err(|e| e.to_string())?;
-
-    classes
-        .create_subkey(".island")
-        .map_err(|e| e.to_string())?
-        .0
-        .set_value("", &"Island.Extension")
-        .map_err(|e| e.to_string())?;
-
-    let prog = classes.create_subkey("Island.Extension").map_err(|e| e.to_string())?.0;
-    prog.set_value("", &"Extension Island").map_err(|e| e.to_string())?;
-    prog.create_subkey("DefaultIcon")
-        .map_err(|e| e.to_string())?
-        .0
-        .set_value("", &icon)
-        .map_err(|e| e.to_string())?;
-    prog.create_subkey("shell\\open\\command")
-        .map_err(|e| e.to_string())?
-        .0
-        .set_value("", &format!("\"{exe}\" \"%1\""))
-        .map_err(|e| e.to_string())?;
-
-    // Notifie le shell que les associations ont changé (prise en compte immédiate).
-    unsafe {
-        use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
-        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
-    }
-    Ok(())
+    crate::host::register_file_assoc(app, ".island", "Island.Extension", "Extension Island")
 }
 
 #[cfg(test)]

@@ -4,12 +4,12 @@
 // recherche au-delà d'une page). Un clic applique la scène à la cible, un second la retire.
 // Masquer l'outil du dock n'arrête pas le fond.
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { PhCaretDown, PhCaretLeft, PhCaretRight, PhMonitor, PhPause, PhPencilSimple, PhPlus, PhStop, PhTrash, PhWarning } from "@phosphor-icons/vue";
+import { PhCaretDown, PhCaretLeft, PhCaretRight, PhDownloadSimple, PhMonitor, PhPause, PhPencilSimple, PhPlus, PhShareNetwork, PhStop, PhTrash, PhWarning } from "@phosphor-icons/vue";
 import IconButton from "../../ui/IconButton.vue";
 import TextField from "../../ui/TextField.vue";
 import { Spinner } from "@/sdk/ui/spinner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/sdk/ui/collapsible";
-import { apply, deleteScene, displays as listDisplays, fillCss, imageUrl, openEditor, sceneOn, thumbLayer, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
+import { apply, deleteScene, displays as listDisplays, exportScene, fillCss, imageUrl, openEditor, pickAndImport, sceneOn, shareError, thumbLayer, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
 import type { SceneEntry } from "../../wallpaper/scene";
 import { t } from "../../notch/i18n";
 
@@ -121,6 +121,35 @@ async function run(key: string, fn: () => Promise<unknown>) {
 const pick = (e: SceneEntry) => run(e.id, () => apply(current.value === e.id ? null : e.id, target.value));
 const stop = () => run("stop", () => apply(null));
 const edit = (e?: SceneEntry) => void openEditor(t("wall.editor"), e?.id);
+/** Partager : enregistre la scène dans un `.islandscene`. */
+async function share(e: SceneEntry) {
+  if (busy.value) return;
+  busy.value = e.id;
+  error.value = null;
+  try {
+    await exportScene(e.id, e.scene.name);
+  } catch (err) {
+    error.value = shareError(err);
+  } finally {
+    busy.value = null;
+  }
+}
+
+async function importFiles() {
+  if (busy.value) return;
+  busy.value = "import";
+  error.value = null;
+  try {
+    const done = await pickAndImport();
+    // La nouvelle scène est en tête de liste (les tiennes d'abord, récentes d'abord).
+    if (done.length) page.value = 0;
+  } catch (err) {
+    error.value = shareError(err);
+  } finally {
+    busy.value = null;
+  }
+}
+
 async function remove(e: SceneEntry) {
   if (!window.confirm(t("wall.deleteConfirm", { name: e.scene.name }))) return;
   await run(e.id, () => deleteScene(e.id));
@@ -137,6 +166,7 @@ onMounted(async () => {
     <Teleport defer to="#notch-header-actions">
       <span v-if="anyActive && wallpaper.state.paused" class="type-caption mr-1 flex items-center gap-1 text-label-3"><PhPause :size="11" weight="fill" />{{ t("wall.paused") }}</span>
       <IconButton v-if="anyActive" :icon="PhStop" :label="t('wall.stop')" :disabled="busy === 'stop'" @click="stop" />
+      <IconButton :icon="PhDownloadSimple" :label="t('wall.share.import')" :disabled="busy === 'import'" @click="importFiles" />
       <IconButton :icon="PhPlus" :label="t('wall.new')" @click="edit()" />
     </Teleport>
 
@@ -204,6 +234,7 @@ onMounted(async () => {
         <div class="type-caption mt-1 truncate" :class="current === e.id ? 'font-medium text-label' : 'text-label-2'">{{ e.scene.name }}</div>
         <div class="absolute top-1 right-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           <IconButton :icon="PhPencilSimple" :label="e.preset ? t('wall.editCopy') : t('wall.edit')" class="bg-black/50! text-white!" @click.stop="edit(e)" />
+          <IconButton :icon="PhShareNetwork" :label="t('wall.share.export')" class="bg-black/50! text-white!" @click.stop="share(e)" />
           <IconButton v-if="!e.preset" :icon="PhTrash" :label="t('wall.delete')" class="bg-black/50! text-white!" @click.stop="remove(e)" />
         </div>
       </div>

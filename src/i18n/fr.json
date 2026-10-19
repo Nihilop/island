@@ -1147,5 +1147,18 @@
   "wall.brush.invert": "Inverser",
   "wall.brush.fill": "Tout",
   "wall.brush.clear": "Rien",
-  "wall.brush.done": "Terminé"
+  "wall.brush.done": "Terminé",
+  "wall.share.export": "Partager",
+  "wall.share.import": "Importer une scène",
+  "wall.share.file": "Scène Island",
+  "wall.share.imported": "Scène importée : {name}",
+  "wall.share.importedBody": "Elle est dans Fonds animés, prête à appliquer ou à modifier.",
+  "wall.share.importFailed": "Import de la scène impossible",
+  "wall.share.corrupt": "Ce fichier n'est pas une scène Island valide.",
+  "wall.share.tooLarge": "Ce fichier est trop volumineux.",
+  "wall.share.sceneTooNew": "Cette scène vient d'une version plus récente d'Island : mets Island à jour.",
+  "wall.share.notFound": "Fichier introuvable.",
+  "wall.share.invalidPath": "Le fichier doit finir par .islandscene.",
+  "wall.share.missingFile": "Il manque un fichier dans la scène ({f}).",
+  "wall.share.invalidImage": "Une image de la scène est illisible ({f})."
 }

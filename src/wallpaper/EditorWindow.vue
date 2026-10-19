@@ -9,7 +9,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { PhCheck, PhMinus, PhMonitor, PhWarning, PhX } from "@phosphor-icons/vue";
+import { PhCheck, PhMinus, PhMonitor, PhShareNetwork, PhWarning, PhX } from "@phosphor-icons/vue";
 import IconButton from "../ui/IconButton.vue";
 import { Button } from "@/sdk/ui/button";
 import Outliner from "./Outliner.vue";
@@ -18,7 +18,7 @@ import ScenePanel from "./ScenePanel.vue";
 import MaskPainter from "./MaskPainter.vue";
 import { Preview } from "./preview";
 import { DEFAULTS, layerBox, layerId, maskNames, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
-import { apply, getScene, imageBitmap, importImage, newId, saveScene } from "./api";
+import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, shareError } from "./api";
 import { t } from "../notch/i18n";
 
 const win = getCurrentWindow();
@@ -322,6 +322,21 @@ async function saveAndApply() {
   }
 }
 
+const sharing = ref(false);
+/** Partager : enregistre la scène (si besoin) puis l'écrit dans un `.islandscene`. */
+async function share() {
+  if (sharing.value) return;
+  sharing.value = true;
+  try {
+    if ((dirty.value || isNew.value) && !(await save())) return;
+    await exportScene(id.value, scene.value.name);
+  } catch (e) {
+    error.value = shareError(e);
+  } finally {
+    sharing.value = false;
+  }
+}
+
 async function close() {
   if (dirty.value && !window.confirm(t("wall.discard"))) return;
   await win.close();
@@ -381,6 +396,7 @@ onBeforeUnmount(() => {
       </span>
       <div class="flex-1 self-stretch" data-tauri-drag-region />
       <Button size="sm" :loading="saving" :disabled="!dirty && !isNew" @click="save">{{ t("common.save") }}</Button>
+      <Button size="sm" :loading="sharing" @click="share"><PhShareNetwork />{{ t("wall.share.export") }}</Button>
       <Button size="sm" variant="default" :loading="applying" @click="saveAndApply"><PhMonitor />{{ t("wall.apply") }}</Button>
       <div class="mx-1 h-4 w-px bg-separator" />
       <IconButton :icon="PhMinus" :label="t('notes.minimize')" @click="win.minimize()" />
