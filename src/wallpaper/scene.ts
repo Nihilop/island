@@ -11,7 +11,8 @@ export type ParticleShape = "dot" | "streak" | "glow";
 
 export interface Fill { mode: "solid" | "gradient"; colors: [string, string]; angle: number }
 export interface Transform { fit: Fit; anchor: Anchor; x: number; y: number; width: number; rotation: number }
-export interface Water { strength: number; speed: number; scale: number }
+export interface Water { strength: number; speed: number; scale: number; mask: string | null }
+export interface Heat { strength: number; speed: number; scale: number; direction: number; mask: string | null }
 export interface Parallax { mouse: number; drift: number; zoom: number }
 export interface ColorAdjust { hue: number; saturation: number; brightness: number; contrast: number }
 export interface Particles {
@@ -41,10 +42,12 @@ export interface Layer {
   blend: Blend;
   depth: number;
   image: string | null;
+  /** Masque du calque (zone visible ; zone d'apparition pour des particules). */
+  mask: string | null;
   fill: Fill;
   particles: Particles | null;
   transform: Transform;
-  effects: { water: Water | null; color: ColorAdjust | null };
+  effects: { water: Water | null; heat: Heat | null; color: ColorAdjust | null };
 }
 
 export interface Scene {
@@ -78,7 +81,8 @@ export const PARTICLE_PRESETS: Record<"snow" | "rain" | "fireflies" | "embers", 
 
 /** Valeurs par défaut quand on active un effet (mêmes que `scene.rs`). */
 export const DEFAULTS = {
-  water: (): Water => ({ strength: 0.4, speed: 0.4, scale: 0.4 }),
+  water: (): Water => ({ strength: 0.4, speed: 0.4, scale: 0.4, mask: null }),
+  heat: (): Heat => ({ strength: 0.5, speed: 0.5, scale: 0.5, direction: 270, mask: null }),
   parallax: (): Parallax => ({ mouse: 0.5, drift: 0.3, zoom: 1.06 }),
   particles: (): Particles => ({ ...PARTICLE_PRESETS.snow, density: 0.4, opacity: 0.8 }),
   color: (): ColorAdjust => ({ hue: 0, saturation: 1, brightness: 1, contrast: 1 }),
@@ -101,10 +105,11 @@ export function newLayer(kind: LayerKind, name: string): Layer {
     blend: "normal",
     depth: kind === "particles" ? 0.5 : 0,
     image: null,
+    mask: null,
     fill: DEFAULTS.fill(),
     particles: kind === "particles" ? DEFAULTS.particles() : null,
     transform: DEFAULTS.transform(),
-    effects: { water: null, color: null },
+    effects: { water: null, heat: null, color: null },
   };
 }
 
@@ -122,7 +127,11 @@ export function normalize(s: Partial<Scene>): Scene {
       fill: { ...base.fill, ...l.fill },
       transform: { ...base.transform, ...l.transform },
       particles: l.particles ? { ...DEFAULTS.particles(), ...l.particles } : base.particles,
-      effects: { water: l.effects?.water ?? null, color: l.effects?.color ?? null },
+      effects: {
+        water: l.effects?.water ? { ...DEFAULTS.water(), ...l.effects.water } : null,
+        heat: l.effects?.heat ? { ...DEFAULTS.heat(), ...l.effects.heat } : null,
+        color: l.effects?.color ?? null,
+      },
     } as Layer;
   });
   return {
@@ -141,7 +150,7 @@ export function normalize(s: Partial<Scene>): Scene {
 
 export const RIPPLES = 8;
 export const TRAIL = 32;
-export const LAYER_VEC4S = 11;
+export const LAYER_VEC4S = 12;
 export const COMPOSITE_VEC4S = 7 + RIPPLES + TRAIL;
 
 export function hex(s: string): [number, number, number] {
@@ -229,8 +238,13 @@ export function packLayer(s: Scene, l: Layer, f: Frame, tex: [number, number]): 
     set(9, [...hex(p.color), c(p.opacity, 0, 1)]);
     set(10, [rad(c(p.direction, -360, 360)), c(p.turbulence, 0, 1), c(p.spread, 0, 1), c(p.flicker, 0, 1)]);
   }
+  const ht = l.effects.heat;
+  if (ht) set(11, [c(ht.strength, 0, 1), c(ht.speed, 0, 1), c(ht.scale, 0, 1), rad(c(ht.direction, -360, 360))]);
   return u;
 }
+
+/** Masques d'un calque, dans l'ordre des liaisons du shader (calque, eau, chaleur). */
+export const maskNames = (l: Layer): [string | null, string | null, string | null] => [l.mask, l.effects.water?.mask ?? null, l.effects.heat?.mask ?? null];
 
 export function packComposite(s: Scene, f: Frame): Float32Array {
   const u = new Float32Array(COMPOSITE_VEC4S * 4);

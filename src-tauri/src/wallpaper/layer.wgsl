@@ -6,6 +6,9 @@
 // Le placement (ajustement, ancrage, parallaxe, zoom) est calculé côté CPU (`scene.rs::
 // layer_box` et son jumeau `scene.ts::layerBox`) : ici, un rectangle centre + demi-taille +
 // rotation, en pixels de la surface (origine en haut à gauche).
+//
+// Masques (niveaux de gris, dans le repère du calque, blanc par défaut) : zone visible du
+// calque (zone d'apparition pour des particules), zone de l'eau, zone de la chaleur.
 
 struct L {
   res: vec4f,        // largeur, hauteur (surface), largeur, hauteur (image)
@@ -19,11 +22,15 @@ struct L {
   particles: vec4f,  // forme (1 point, 2 trait, 3 halo), densité, vitesse (0..1), taille
   pcolor: vec4f,     // couleur des particules, opacité
   particles2: vec4f, // direction (rad), turbulence, dispersion, scintillement
+  heat: vec4f,       // intensité (0 = off), vitesse, finesse, direction (rad)
 }
 
 @group(0) @binding(0) var<uniform> u: L;
 @group(0) @binding(1) var img: texture_2d<f32>;
 @group(0) @binding(2) var smp: sampler;
+@group(0) @binding(3) var mask_layer: texture_2d<f32>;
+@group(0) @binding(4) var mask_water: texture_2d<f32>;
+@group(0) @binding(5) var mask_heat: texture_2d<f32>;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
@@ -47,6 +54,24 @@ fn hue_rotate(c: vec3f, deg: f32) -> vec3f {
   let k = vec3f(0.57735);
   let ca = cos(a);
   return c * ca + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - ca);
+}
+
+fn vnoise(p: vec2f) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let s = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2f(1.0, 0.0)), s.x), mix(hash21(i + vec2f(0.0, 1.0)), hash21(i + vec2f(1.0, 1.0)), s.x), s.y);
+}
+
+fn mask(tex: texture_2d<f32>, uv: vec2f) -> f32 {
+  return textureSampleLevel(tex, smp, clamp(uv, vec2f(0.0), vec2f(1.0)), 0.0).r;
+}
+
+// Un déplacement en px de la surface, exprimé dans le repère du calque (0..1).
+fn px_to_uv(d: vec2f) -> vec2f {
+  let r = -u.box2.x;
+  let q = vec2f(d.x * cos(r) - d.y * sin(r), d.x * sin(r) + d.y * cos(r));
+  return q / max(u.box.zw * 2.0, vec2f(0.0001));
 }
 
 // Position dans le calque (0..1) d'un pixel de la surface.
@@ -119,17 +144,28 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let kind = u.info.y;
   let k = u.box2.z;
   let px = pos.xy;
-  var uv = local_uv(px);
+  let base = local_uv(px);
+  var uv = base;
 
-  // Eau : ondulations superposées, sur ce calque seulement.
+  // Eau : ondulations superposées, sur ce calque seulement (dans la zone de son masque).
   if (u.water.x > 0.0) {
     let f = 6.0 + u.water.z * 30.0;
     let s = t * (0.3 + u.water.y * 2.0);
-    let a = u.water.x * 0.008;
+    let a = u.water.x * 0.008 * mask(mask_water, base);
     uv += vec2f(
-      sin(uv.y * f + s) + sin(uv.y * f * 0.53 - s * 1.3) * 0.5,
-      cos(uv.x * f * 0.9 + s * 1.1) + cos(uv.x * f * 0.37 + s * 0.7) * 0.5,
+      sin(base.y * f + s) + sin(base.y * f * 0.53 - s * 1.3) * 0.5,
+      cos(base.x * f * 0.9 + s * 1.1) + cos(base.x * f * 0.37 + s * 0.7) * 0.5,
     ) * a;
+  }
+
+  // Chaleur : remous de bruit qui filent dans la direction choisie (air au-dessus d'une
+  // flamme). Mesurés en px de l'écran, pour une même finesse quelle que soit la taille du
+  // calque.
+  if (u.heat.x > 0.0) {
+    let dir = vec2f(cos(u.heat.w), sin(u.heat.w));
+    let q = px / (r.y * 0.04) * (0.4 + u.heat.z * 1.6) - dir * t * (0.4 + u.heat.y * 3.0);
+    let n = vec2f(vnoise(q) + 0.5 * vnoise(q * 2.03 + 7.1), vnoise(q + 13.7) + 0.5 * vnoise(q * 1.97 + 3.3)) - 0.75;
+    uv += px_to_uv(n * u.heat.x * 16.0 * k * mask(mask_heat, base));
   }
 
   var c = vec4f(0.0);
@@ -154,6 +190,6 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   rgb = mix(vec3f(l), rgb, u.color.y);
   rgb = clamp(((rgb - 0.5) * u.color.w + 0.5) * u.color.z, vec3f(0.0), vec3f(1.0));
 
-  let a = clamp(c.a * u.info.z, 0.0, 1.0);
+  let a = clamp(c.a * u.info.z * mask(mask_layer, base), 0.0, 1.0);
   return vec4f(rgb * a, a);
 }

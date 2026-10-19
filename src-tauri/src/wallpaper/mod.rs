@@ -199,7 +199,30 @@ pub fn wallpaper_import_image(app: AppHandle, id: String, path: String) -> Resul
     Ok(name)
 }
 
-/// Octets de l'image de fond (aperçu, vignettes).
+/// Enregistre un masque peint dans l'éditeur (PNG en base64) ; renvoie son nom. Validé
+/// (vraie image, 4096 px max), normalisé en niveaux de gris. Un nouveau fichier à chaque
+/// fois (l'aperçu ne garde pas l'ancien en cache) ; les anciens partent au prochain
+/// enregistrement de la scène.
+#[tauri::command]
+pub fn wallpaper_save_mask(app: AppHandle, id: String, data: String) -> Result<String, String> {
+    use base64::Engine;
+    let dir = scene_dir(&app, &id)?;
+    if data.len() > 24 * 1024 * 1024 {
+        return Err("tooLarge".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|_| "invalidImage")?;
+    let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).map_err(|_| "invalidImage")?;
+    if img.width() > 4096 || img.height() > 4096 {
+        return Err("tooLarge".into());
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let name = format!("mask-{stamp}.png");
+    img.to_luma8().save(dir.join(&name)).map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
+/// Octets d'une image ou d'un masque de la scène (aperçu, vignettes).
 #[tauri::command]
 pub fn wallpaper_image(app: AppHandle, id: String, name: String) -> Result<tauri::ipc::Response, String> {
     if !scene::valid_image_name(&name) {

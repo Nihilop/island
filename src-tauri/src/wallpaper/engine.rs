@@ -107,10 +107,15 @@ struct Gpu {
     /// Un pipeline de calque par mode de fusion (`scene::blend_index`).
     layer_pipelines: [wgpu::RenderPipeline; 4],
     composite_pipeline: wgpu::RenderPipeline,
-    layout: wgpu::BindGroupLayout,
+    /// Calque : uniformes, image, échantillonneur, masques (calque, eau, chaleur).
+    layer_layout: wgpu::BindGroupLayout,
+    /// Passe finale : uniformes, image composée, échantillonneur.
+    composite_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    /// Texture 1×1 des calques sans image.
+    /// Texture 1×1 transparente des calques sans image.
     blank: Tex,
+    /// Texture 1×1 blanche : « pas de masque » (effet / calque partout).
+    white: Tex,
 }
 
 /// Couleur prémultipliée : normal, ajout, superposition (screen), produit (multiply).
@@ -145,26 +150,27 @@ impl Gpu {
         }))
         .map_err(|e| e.to_string())?;
         let entry = |binding, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                entry(0, wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }),
-                entry(
-                    1,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-                entry(2, wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)),
-            ],
+        let texture = wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        };
+        let uniform = wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None };
+        let sampling = wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering);
+        let layer_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("layer"),
+            entries: &[entry(0, uniform), entry(1, texture), entry(2, sampling), entry(3, texture), entry(4, texture), entry(5, texture)],
         });
-        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-        let pipeline = |module: &wgpu::ShaderModule, format, blend: Option<wgpu::BlendState>| {
+        let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("composite"),
+            entries: &[entry(0, uniform), entry(1, texture), entry(2, sampling)],
+        });
+        let layer_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layer_layout)], immediate_size: 0 });
+        let composite_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&composite_layout)], immediate_size: 0 });
+        let pipeline = |module: &wgpu::ShaderModule, pl: &wgpu::PipelineLayout, format, blend: Option<wgpu::BlendState>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
-                layout: Some(&pl),
+                layout: Some(pl),
                 vertex: wgpu::VertexState { module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
@@ -181,8 +187,8 @@ impl Gpu {
         };
         let layer = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("layer"), source: wgpu::ShaderSource::Wgsl(include_str!("layer.wgsl").into()) });
         let composite = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("composite"), source: wgpu::ShaderSource::Wgsl(include_str!("composite.wgsl").into()) });
-        let layer_pipelines = [0, 1, 2, 3].map(|i| pipeline(&layer, TEX_FORMAT, Some(blend_state(i))));
-        let composite_pipeline = pipeline(&composite, SURFACE_FORMAT, None);
+        let layer_pipelines = [0, 1, 2, 3].map(|i| pipeline(&layer, &layer_pl, TEX_FORMAT, Some(blend_state(i))));
+        let composite_pipeline = pipeline(&composite, &composite_pl, SURFACE_FORMAT, None);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -191,7 +197,8 @@ impl Gpu {
             ..Default::default()
         });
         let blank = upload(&device, &queue, &image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0])));
-        Ok(Self { instance, adapter, device, queue, layer_pipelines, composite_pipeline, layout, sampler, blank })
+        let white = upload(&device, &queue, &image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 255, 255, 255])));
+        Ok(Self { instance, adapter, device, queue, layer_pipelines, composite_pipeline, layer_layout, composite_layout, sampler, blank, white })
     }
 
     fn upload(&self, rgba: &image::RgbaImage) -> Tex {
@@ -205,14 +212,31 @@ impl Gpu {
         Some(self.upload(&img.to_rgba8()))
     }
 
-    fn bind(&self, buf: &wgpu::Buffer, view: &wgpu::TextureView) -> wgpu::BindGroup {
+    fn bind_composite(&self, buf: &wgpu::Buffer, view: &wgpu::TextureView) -> wgpu::BindGroup {
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &self.layout,
+            layout: &self.composite_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+            ],
+        })
+    }
+
+    /// Calque : image + masques (calque, eau, chaleur).
+    fn bind_layer(&self, buf: &wgpu::Buffer, image: &wgpu::TextureView, masks: [&wgpu::TextureView; 3]) -> wgpu::BindGroup {
+        let tex = |binding, view| wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(view) };
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.layer_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
+                tex(1, image),
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                tex(3, masks[0]),
+                tex(4, masks[1]),
+                tex(5, masks[2]),
             ],
         })
     }
@@ -268,8 +292,8 @@ fn upload(device: &wgpu::Device, queue: &wgpu::Queue, rgba: &image::RgbaImage) -
 /// Textures des images de calques, par `<scène>/<fichier>` (partagées entre écrans).
 type Textures = HashMap<String, Tex>;
 
-fn layer_tex<'a>(gpu: &'a Gpu, textures: &'a Textures, sc: &Loaded, l: &scene::Layer) -> &'a Tex {
-    l.image.as_ref().and_then(|f| textures.get(&format!("{}/{f}", sc.id))).unwrap_or(&gpu.blank)
+fn file_tex<'a>(textures: &'a Textures, sc: &Loaded, f: Option<&String>) -> Option<&'a Tex> {
+    f.and_then(|f| textures.get(&format!("{}/{f}", sc.id)))
 }
 
 fn load_textures(gpu: &Gpu, sc: &Loaded, textures: &mut Textures) {
@@ -350,9 +374,15 @@ impl Output {
             .layers
             .iter()
             .map(|l| {
-                let t = layer_tex(gpu, textures, sc, l);
+                let t = if l.kind == "image" { file_tex(textures, sc, l.image.as_ref()) } else { None }.unwrap_or(&gpu.blank);
+                let mask = |f: Option<&String>| &file_tex(textures, sc, f).unwrap_or(&gpu.white).0;
+                let masks = [
+                    mask(l.mask.as_ref()),
+                    mask(l.effects.water.as_ref().and_then(|w| w.mask.as_ref())),
+                    mask(l.effects.heat.as_ref().and_then(|h| h.mask.as_ref())),
+                ];
                 let uniforms = gpu.buffer(scene::LAYER_VEC4S);
-                let bind = gpu.bind(&uniforms, &t.0);
+                let bind = gpu.bind_layer(&uniforms, &t.0, masks);
                 LayerGpu { uniforms, bind, tex: t.1 }
             })
             .collect();
@@ -400,7 +430,7 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, sc: &Loaded, textures:
     surface.configure(&gpu.device, &config);
     let target = gpu.target(config.width, config.height);
     let comp_uniforms = gpu.buffer(scene::COMPOSITE_VEC4S);
-    let comp_bind = gpu.bind(&comp_uniforms, &target);
+    let comp_bind = gpu.bind_composite(&comp_uniforms, &target);
     let mut o = Output {
         display: d.clone(),
         scene: sc.scene.clone(),

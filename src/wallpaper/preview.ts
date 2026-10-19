@@ -6,7 +6,7 @@
 
 import layerShader from "../../src-tauri/src/wallpaper/layer.wgsl?raw";
 import compositeShader from "../../src-tauri/src/wallpaper/composite.wgsl?raw";
-import { blendIndex, COMPOSITE_VEC4S, LAYER_VEC4S, packComposite, packLayer, RIPPLES, TRAIL, type Frame, type Layer, type Scene } from "./scene";
+import { blendIndex, COMPOSITE_VEC4S, LAYER_VEC4S, maskNames, packComposite, packLayer, RIPPLES, TRAIL, type Frame, type Layer, type Scene } from "./scene";
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- types WebGPU absents du lib DOM. */
 type GPU = any;
@@ -34,15 +34,18 @@ interface Tex {
 export class Preview {
   private device: GPU;
   private ctx: GPU;
-  private layout: GPU;
+  private layerLayout: GPU;
+  private compositeLayout: GPU;
   private layerPipelines: GPU[];
   private compositePipeline: GPU;
   private sampler: GPU;
   private blank: Tex;
+  /** « Pas de masque ». */
+  private white: Tex;
   private target: GPU = null;
   private compUniforms: GPU;
   private compBind: GPU = null;
-  private layerRes = new Map<string, { uniforms: GPU; bind: GPU; image: string | null; tex: [number, number] }>();
+  private layerRes = new Map<string, { uniforms: GPU; bind: GPU; key: string; tex: [number, number] }>();
   private images = new Map<string, Tex | "loading">();
   private raf = 0;
   private t0 = performance.now();
@@ -63,27 +66,25 @@ export class Preview {
     this.device = device;
     this.ctx = canvas.getContext("webgpu");
     this.ctx.configure({ device, format: CANVAS_FORMAT, alphaMode: "opaque" });
-    this.layout = device.createBindGroupLayout({
-      entries: [
-        { binding: 0, visibility: 2, buffer: { type: "uniform" } }, // FRAGMENT
-        { binding: 1, visibility: 2, texture: { sampleType: "float" } },
-        { binding: 2, visibility: 2, sampler: { type: "filtering" } },
-      ],
-    });
-    const pl = device.createPipelineLayout({ bindGroupLayouts: [this.layout] });
+    // Visibilité 2 = FRAGMENT. Calque : + masques (calque, eau, chaleur) en 3, 4, 5.
+    const tex = (binding: number) => ({ binding, visibility: 2, texture: { sampleType: "float" } });
+    const base = [{ binding: 0, visibility: 2, buffer: { type: "uniform" } }, tex(1), { binding: 2, visibility: 2, sampler: { type: "filtering" } }];
+    this.layerLayout = device.createBindGroupLayout({ entries: [...base, tex(3), tex(4), tex(5)] });
+    this.compositeLayout = device.createBindGroupLayout({ entries: base });
     const layerModule = device.createShaderModule({ code: layerShader });
     const compModule = device.createShaderModule({ code: compositeShader });
-    const pipeline = (module: GPU, format: string, blend?: unknown) =>
+    const pipeline = (module: GPU, layout: GPU, format: string, blend?: unknown) =>
       device.createRenderPipeline({
-        layout: pl,
+        layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
         vertex: { module, entryPoint: "vs" },
         fragment: { module, entryPoint: "fs", targets: [{ format, ...(blend ? { blend } : {}) }] },
         primitive: { topology: "triangle-list" },
       });
-    this.layerPipelines = BLENDS.map((b) => pipeline(layerModule, FORMAT, b));
-    this.compositePipeline = pipeline(compModule, CANVAS_FORMAT);
+    this.layerPipelines = BLENDS.map((b) => pipeline(layerModule, this.layerLayout, FORMAT, b));
+    this.compositePipeline = pipeline(compModule, this.compositeLayout, CANVAS_FORMAT);
     this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
     this.blank = this.upload(null);
+    this.white = this.upload(null, [255, 255, 255, 255]);
     this.compUniforms = device.createBuffer({ size: COMPOSITE_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(canvas);
@@ -124,16 +125,29 @@ export class Preview {
     return [this.canvas.width, this.canvas.height];
   }
 
-  private upload(bitmap: ImageBitmap | null): Tex {
+  /** Remplace une image / un masque en cache (masque tout juste enregistré). */
+  putImage(name: string, bitmap: ImageBitmap) {
+    this.images.set(name, this.upload(bitmap));
+  }
+
+  private overrides = new Map<string, Tex>();
+  /** Masque en cours de peinture (slot 0 calque, 1 eau, 2 chaleur) ; null = retiré. */
+  setOverride(layerId: string, slot: number, bitmap: ImageBitmap | null) {
+    const k = `${layerId}:${slot}`;
+    if (bitmap) this.overrides.set(k, this.upload(bitmap));
+    else this.overrides.delete(k);
+  }
+
+  private upload(bitmap: ImageBitmap | null, pixel = [0, 0, 0, 0]): Tex {
     const [w, h] = bitmap ? [bitmap.width, bitmap.height] : [1, 1];
     const tex = this.device.createTexture({ size: [w, h], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT });
     if (bitmap) this.device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: tex }, [w, h]);
-    else this.device.queue.writeTexture({ texture: tex }, new Uint8Array([0, 0, 0, 0]), { bytesPerRow: 4 }, [1, 1]);
+    else this.device.queue.writeTexture({ texture: tex }, new Uint8Array(pixel), { bytesPerRow: 4 }, [1, 1]);
     return { view: tex.createView(), size: [w, h] };
   }
 
-  private image(name: string | null): Tex {
-    if (!name) return this.blank;
+  private image(name: string | null, fallback = this.blank): Tex {
+    if (!name) return fallback;
     const t = this.images.get(name);
     if (t && t !== "loading") return t;
     if (!t) {
@@ -142,30 +156,44 @@ export class Preview {
         .then((b) => this.images.set(name, this.upload(b)))
         .catch(() => this.images.delete(name));
     }
-    return this.blank;
+    return fallback;
   }
 
-  private bind(buffer: GPU, view: GPU) {
+  private bind(layout: GPU, buffer: GPU, views: GPU[]) {
+    const [image, ...masks] = views;
     return this.device.createBindGroup({
-      layout: this.layout,
+      layout,
       entries: [
         { binding: 0, resource: { buffer } },
-        { binding: 1, resource: view },
+        { binding: 1, resource: image },
         { binding: 2, resource: this.sampler },
+        ...masks.map((v, i) => ({ binding: 3 + i, resource: v })),
       ],
     });
   }
 
-  /** Ressources d'un calque (tampon + texture), recréées quand son image change. */
+  /** Ressources d'un calque (tampon, image, masques), recréées quand l'une change. */
   private res(l: Layer) {
     const tex = this.image(l.kind === "image" ? l.image : null);
+    const masks = maskNames(l).map((m, i) => this.overrides.get(`${l.id}:${i}`) ?? this.image(m, this.white));
     let r = this.layerRes.get(l.id);
-    if (!r || r.image !== l.image || r.tex !== tex.size) {
+    // Clé : les textures elles-mêmes (une image qui finit de charger change sa vue).
+    const views = [tex, ...masks];
+    const key = views.map((v) => this.viewId(v)).join("|");
+    if (!r || r.key !== key) {
       const uniforms = r?.uniforms ?? this.device.createBuffer({ size: LAYER_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
-      r = { uniforms, bind: this.bind(uniforms, tex.view), image: l.image, tex: tex.size };
+      r = { uniforms, bind: this.bind(this.layerLayout, uniforms, views.map((v) => v.view)), key, tex: tex.size };
       this.layerRes.set(l.id, r);
     }
     return r;
+  }
+
+  private ids = new WeakMap<Tex, number>();
+  private nextId = 1;
+  private viewId(t: Tex): number {
+    let id = this.ids.get(t);
+    if (!id) this.ids.set(t, (id = this.nextId++));
+    return id;
   }
 
   private resize() {
@@ -175,7 +203,7 @@ export class Preview {
     this.canvas.height = Math.max(1, Math.round(r.height * dpr));
     const target = this.device.createTexture({ size: [this.canvas.width, this.canvas.height], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.RENDER_ATTACHMENT });
     this.target = target.createView();
-    this.compBind = this.bind(this.compUniforms, this.target);
+    this.compBind = this.bind(this.compositeLayout, this.compUniforms, [this.target]);
   }
 
   private now() {

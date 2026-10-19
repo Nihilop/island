@@ -55,6 +55,9 @@ pub struct Layer {
     pub depth: f32,
     /// Image (nom simple dans le dossier de la scène).
     pub image: Option<String>,
+    /// Masque du calque (PNG en niveaux de gris, dans le repère du calque) : blanc = visible.
+    /// Sur un calque de particules, c'est leur zone d'apparition.
+    pub mask: Option<String>,
     pub fill: Fill,
     pub particles: Option<Particles>,
     pub transform: Transform,
@@ -73,6 +76,7 @@ impl Default for Layer {
             blend: "normal".into(),
             depth: 0.0,
             image: None,
+            mask: None,
             fill: Fill::default(),
             particles: None,
             transform: Transform::default(),
@@ -125,6 +129,7 @@ impl Default for Transform {
 #[serde(rename_all = "camelCase", default)]
 pub struct LayerEffects {
     pub water: Option<Water>,
+    pub heat: Option<Heat>,
     pub color: Option<ColorAdjust>,
 }
 
@@ -134,10 +139,30 @@ pub struct Water {
     pub strength: f32,
     pub speed: f32,
     pub scale: f32,
+    /// Zone de l'effet (masque en niveaux de gris, repère du calque) ; None = partout.
+    pub mask: Option<String>,
 }
 impl Default for Water {
     fn default() -> Self {
-        Self { strength: 0.4, speed: 0.4, scale: 0.4 }
+        Self { strength: 0.4, speed: 0.4, scale: 0.4, mask: None }
+    }
+}
+
+/// Distorsion de chaleur (air au-dessus d'une flamme) : un bruit qui file dans `direction`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Heat {
+    pub strength: f32,
+    pub speed: f32,
+    /// Finesse des remous (0..1).
+    pub scale: f32,
+    /// Degrés (270 = vers le haut).
+    pub direction: f32,
+    pub mask: Option<String>,
+}
+impl Default for Heat {
+    fn default() -> Self {
+        Self { strength: 0.5, speed: 0.5, scale: 0.5, direction: 270.0, mask: None }
     }
 }
 
@@ -280,8 +305,8 @@ impl Scene {
             if !valid_layer_id(&l.id) || l.name.chars().count() > 80 {
                 return Err("invalidLayer".into());
             }
-            if let Some(img) = &l.image {
-                if !valid_image_name(img) {
+            for f in l.files() {
+                if !valid_image_name(f) {
                     return Err("invalidImage".into());
                 }
             }
@@ -289,9 +314,23 @@ impl Scene {
         Ok(())
     }
 
-    /// Images référencées par les calques.
+    /// Fichiers référencés par les calques (images et masques).
     pub fn images(&self) -> impl Iterator<Item = &String> {
-        self.layers.iter().filter_map(|l| l.image.as_ref())
+        self.layers.iter().flat_map(|l| l.files())
+    }
+}
+
+impl Layer {
+    /// Image, masque du calque, masques des effets.
+    pub fn files(&self) -> impl Iterator<Item = &String> {
+        [
+            self.image.as_ref(),
+            self.mask.as_ref(),
+            self.effects.water.as_ref().and_then(|w| w.mask.as_ref()),
+            self.effects.heat.as_ref().and_then(|h| h.mask.as_ref()),
+        ]
+        .into_iter()
+        .flatten()
     }
 }
 
@@ -300,7 +339,7 @@ impl Scene {
 pub const RIPPLES: usize = 8;
 pub const TRAIL: usize = 32;
 /// vec4 de `struct L` (layer.wgsl).
-pub const LAYER_VEC4S: usize = 11;
+pub const LAYER_VEC4S: usize = 12;
 /// vec4 de `struct C` (composite.wgsl).
 pub const COMPOSITE_VEC4S: usize = 7 + RIPPLES + TRAIL;
 
@@ -402,6 +441,9 @@ pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [[f32; 4]
         u[9] = [c[0], c[1], c[2], c01(p.opacity, 0.0, 1.0)];
         u[10] = [c01(p.direction, -360.0, 360.0).to_radians(), c01(p.turbulence, 0.0, 1.0), c01(p.spread, 0.0, 1.0), c01(p.flicker, 0.0, 1.0)];
     }
+    if let Some(h) = &l.effects.heat {
+        u[11] = [c01(h.strength, 0.0, 1.0), c01(h.speed, 0.0, 1.0), c01(h.scale, 0.0, 1.0), c01(h.direction, -360.0, 360.0).to_radians()];
+    }
     u
 }
 
@@ -484,7 +526,7 @@ pub fn presets() -> Vec<(&'static str, Scene)> {
     snow.interactions.ripple = Some(Ripple::default());
 
     let mut sky = fill("sky", "Ciel", "#10141a", "#2b3442", 95.0);
-    sky.effects.water = Some(Water { strength: 0.25, speed: 0.3, scale: 0.6 });
+    sky.effects.water = Some(Water { strength: 0.25, speed: 0.3, scale: 0.6, mask: None });
     let mut rain = scene(
         "Pluie",
         vec![sky, parts("rain", "Pluie", 0.5, "normal", Particles { shape: "streak".into(), density: 0.55, speed: 0.92, size: 1.0, color: "#9fb3c8".into(), opacity: 0.45, direction: 100.0, spread: 0.05, turbulence: 0.0, flicker: 0.0 })],
@@ -493,7 +535,7 @@ pub fn presets() -> Vec<(&'static str, Scene)> {
     rain.interactions.ripple = Some(Ripple { radius: 200.0, strength: 0.8, duration: 1.2 });
 
     let mut sea = fill("sea", "Mer", "#ff7a59", "#3a1c5c", 120.0);
-    sea.effects.water = Some(Water { strength: 0.5, speed: 0.25, scale: 0.3 });
+    sea.effects.water = Some(Water { strength: 0.5, speed: 0.25, scale: 0.3, mask: None });
     let mut dusk = scene(
         "Crépuscule",
         vec![sea, parts("embers", "Braises", 0.7, "add", Particles { shape: "glow".into(), density: 0.25, speed: 0.4, size: 1.2, color: "#ffb36b".into(), opacity: 0.8, direction: 265.0, spread: 0.3, turbulence: 0.6, flicker: 0.9 })],
@@ -529,6 +571,18 @@ mod tests {
         for (_, s) in super::presets() {
             s.check().unwrap();
         }
+    }
+
+    /// Les masques comptent parmi les fichiers de la scène : sinon le ménage à
+    /// l'enregistrement les supprimerait.
+    #[test]
+    fn masks_are_scene_files() {
+        let mut l = super::Layer { image: Some("a.png".into()), mask: Some("mask-1.png".into()), ..Default::default() };
+        l.effects.heat = Some(super::Heat { mask: Some("mask-2.png".into()), ..Default::default() });
+        let s = super::Scene { layers: vec![l], ..Default::default() };
+        let files: Vec<&String> = s.images().collect();
+        assert_eq!(files, ["a.png", "mask-1.png", "mask-2.png"]);
+        s.check().unwrap();
     }
 
     #[test]

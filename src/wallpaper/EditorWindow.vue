@@ -15,8 +15,9 @@ import { Button } from "@/sdk/ui/button";
 import Outliner from "./Outliner.vue";
 import LayerPanel from "./LayerPanel.vue";
 import ScenePanel from "./ScenePanel.vue";
+import MaskPainter from "./MaskPainter.vue";
 import { Preview } from "./preview";
-import { layerBox, layerId, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
+import { DEFAULTS, layerBox, layerId, maskNames, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
 import { apply, getScene, imageBitmap, importImage, newId, saveScene } from "./api";
 import { t } from "../notch/i18n";
 
@@ -174,7 +175,69 @@ function cssBox(l: Layer): Box | null {
   return { x: (cx - hw) / dpr, y: (cy - hh) / dpr, w: (hw * 2) / dpr, h: (hh * 2) / dpr, rot: l.transform.rotation };
 }
 
-const gizmo = computed(() => (layer.value && movable(layer.value) ? cssBox(layer.value) : null));
+const gizmo = computed(() => (layer.value && movable(layer.value) && !painting.value ? cssBox(layer.value) : null));
+
+// --- Masques (pinceau) ----------------------------------------------------------------------
+
+/** Slot de masque : 0 calque (zone visible / d'apparition), 1 eau, 2 chaleur. */
+type Slot = 0 | 1 | 2;
+const painting = ref<{ layerId: string; slot: Slot; box: Box; source: ImageBitmap | null; full: boolean; title: string } | null>(null);
+
+async function startPaint(slot: Slot) {
+  const l = layer.value;
+  if (!l || painting.value) return;
+  if (slot === 1 && !l.effects.water) l.effects.water = DEFAULTS.water();
+  if (slot === 2 && !l.effects.heat) l.effects.heat = DEFAULTS.heat();
+  const box = cssBox(l);
+  if (!box) return;
+  const name = maskNames(l)[slot];
+  const source = name ? await imageBitmap(id.value, name).catch(() => null) : null;
+  const title = slot === 0 ? (l.kind === "particles" ? t("wall.mask.zone") : t("wall.mask.layer")) : slot === 1 ? t("wall.mask.water") : t("wall.mask.heat");
+  // Nouveau masque de calque : tout visible (on gomme) ; zone de particules ou d'effet :
+  // vide (on peint là où ça doit jouer).
+  painting.value = { layerId: l.id, slot, box, source, full: slot === 0 && l.kind !== "particles", title };
+  if (preview) preview.interactive = false;
+}
+
+function setMask(l: Layer, slot: Slot, name: string | null) {
+  if (slot === 0) l.mask = name;
+  else if (slot === 1 && l.effects.water) l.effects.water.mask = name;
+  else if (slot === 2 && l.effects.heat) l.effects.heat.mask = name;
+}
+
+function stopPaint() {
+  const p = painting.value;
+  if (p) preview?.setOverride(p.layerId, p.slot, null);
+  painting.value = null;
+  if (preview) preview.interactive = true;
+}
+
+function paintLive(bitmap: ImageBitmap) {
+  const p = painting.value;
+  if (p) preview?.setOverride(p.layerId, p.slot, bitmap);
+}
+
+async function paintDone(png: string, bitmap: ImageBitmap) {
+  const p = painting.value;
+  const l = scene.value.layers.find((x) => x.id === p?.layerId);
+  if (!p || !l) return stopPaint();
+  try {
+    const name = await invoke<string>("wallpaper_save_mask", { id: id.value, data: png });
+    preview?.putImage(name, bitmap);
+    setMask(l, p.slot, name);
+  } catch (e) {
+    error.value = String(e);
+  }
+  stopPaint();
+}
+
+function clearMask(slot: Slot) {
+  if (layer.value) setMask(layer.value, slot, null);
+}
+
+function selectLayer(lid: string) {
+  if (!painting.value) selected.value = lid;
+}
 
 type Drag = { mode: "move" | "resize"; sign: number; x0: number; y0: number; t0: { x: number; y: number; width: number } };
 let drag: Drag | null = null;
@@ -210,7 +273,7 @@ function endDrag() {
 
 /** Clic sur l'aperçu : sélectionne le calque placé le plus haut sous le curseur. */
 function pickAt(e: PointerEvent) {
-  if (!stage.value) return;
+  if (!stage.value || painting.value) return;
   const r = stage.value.getBoundingClientRect();
   const x = e.clientX - r.left;
   const y = e.clientY - r.top;
@@ -268,6 +331,7 @@ async function close() {
 
 const unlisten: UnlistenFn[] = [];
 function onKey(e: KeyboardEvent) {
+  if (painting.value) return; // le pinceau a ses raccourcis
   const inField = (e.target as HTMLElement | null)?.closest("input, textarea");
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
@@ -326,7 +390,7 @@ onBeforeUnmount(() => {
     <div class="flex min-h-0 flex-1">
       <!-- Outliner -->
       <aside class="w-[230px] shrink-0 border-r border-separator">
-        <Outliner :scene="scene" :selected="selected" @select="selected = $event" @add="addLayer" @duplicate="duplicate" @remove="remove" />
+        <Outliner :scene="scene" :selected="selected" @select="selectLayer" @add="addLayer" @duplicate="duplicate" @remove="remove" />
       </aside>
 
       <!-- Aperçu + poignées -->
@@ -335,6 +399,17 @@ onBeforeUnmount(() => {
           <div ref="stage" class="relative aspect-video max-h-full w-full max-w-full overflow-hidden rounded-[12px] bg-black" @pointerdown="pickAt">
             <canvas ref="canvas" class="absolute inset-0 h-full w-full" />
             <div v-if="noGpu" class="type-footnote absolute inset-0 flex items-center justify-center p-6 text-center text-white/70">{{ t("wall.noGpu") }}</div>
+            <MaskPainter
+              v-if="painting"
+              :key="painting.layerId + ':' + painting.slot"
+              :box="painting.box"
+              :source="painting.source"
+              :full="painting.full"
+              :title="painting.title"
+              @live="paintLive"
+              @done="paintDone"
+              @cancel="stopPaint"
+            />
             <div
               v-if="gizmo"
               class="absolute cursor-move border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"
@@ -369,7 +444,7 @@ onBeforeUnmount(() => {
         <div v-if="layer" class="mb-3 flex items-center gap-2">
           <input v-model="layer.name" class="type-body min-w-0 flex-1 rounded-[6px] bg-fill-1 px-2 py-1 font-medium outline-none" maxlength="80" />
         </div>
-        <LayerPanel v-if="layer" :layer="layer" :importing="importing" @pick-image="changeImage" />
+        <LayerPanel v-if="layer" :layer="layer" :importing="importing" :painting="painting?.slot ?? null" @pick-image="changeImage" @paint="startPaint" @clear-mask="clearMask" />
         <ScenePanel v-else :scene="scene" />
       </aside>
     </div>

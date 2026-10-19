@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Propriétés du calque sélectionné : apparence (opacité, fusion, profondeur), contenu selon
 // le type (image, couleur / dégradé, particules), placement, effets du calque.
-import { PhImage } from "@phosphor-icons/vue";
+import { PhImage, PhPaintBrush, PhX } from "@phosphor-icons/vue";
+import IconButton from "../ui/IconButton.vue";
 import Segmented from "../ui/Segmented.vue";
 import Select from "../ui/Select.vue";
 import { Switch } from "@/sdk/ui/switch";
@@ -10,8 +11,8 @@ import Param from "./Param.vue";
 import { DEFAULTS, PARTICLE_PRESETS, type Anchor, type Layer } from "./scene";
 import { t } from "../notch/i18n";
 
-const props = defineProps<{ layer: Layer; importing: boolean }>();
-const emit = defineEmits<{ pickImage: [] }>();
+const props = defineProps<{ layer: Layer; importing: boolean; painting: number | null }>();
+const emit = defineEmits<{ pickImage: []; paint: [slot: 0 | 1 | 2]; clearMask: [slot: 0 | 1 | 2] }>();
 
 const ANCHORS: Anchor[] = ["tl", "t", "tr", "l", "c", "r", "bl", "b", "br"];
 
@@ -25,6 +26,9 @@ function particlePreset(k: keyof typeof PARTICLE_PRESETS) {
 
 function toggleWater(on: boolean) {
   props.layer.effects.water = on ? DEFAULTS.water() : null;
+}
+function toggleHeat(on: boolean) {
+  props.layer.effects.heat = on ? DEFAULTS.heat() : null;
 }
 function toggleColor(on: boolean) {
   props.layer.effects.color = on ? DEFAULTS.color() : null;
@@ -139,6 +143,16 @@ function toggleColor(on: boolean) {
       </div>
     </section>
 
+    <!-- Masque du calque (zone visible ; zone d'apparition des particules) -->
+    <section class="space-y-1">
+      <h3 class="type-caption font-medium uppercase text-label-3">{{ layer.kind === "particles" ? t("wall.mask.zone") : t("wall.mask.layer") }}</h3>
+      <div class="flex items-center gap-1.5">
+        <Button class="flex-1" :disabled="painting !== null" @click="emit('paint', 0)"><PhPaintBrush />{{ layer.mask ? t("wall.mask.edit") : t("wall.mask.paint") }}</Button>
+        <IconButton v-if="layer.mask" :icon="PhX" :label="t('wall.mask.remove')" @click="emit('clearMask', 0)" />
+      </div>
+      <p class="type-caption text-label-3">{{ layer.kind === "particles" ? t("wall.mask.zoneHelp") : t("wall.mask.layerHelp") }}</p>
+    </section>
+
     <!-- Effets du calque -->
     <section class="space-y-1">
       <h3 class="type-caption font-medium uppercase text-label-3">{{ t("wall.layerEffects") }}</h3>
@@ -151,6 +165,27 @@ function toggleColor(on: boolean) {
           <Param v-model="layer.effects.water.strength" :label="t('wall.p.strength')" :min="0" :max="1" />
           <Param v-model="layer.effects.water.speed" :label="t('wall.p.speed')" :min="0" :max="1" />
           <Param v-model="layer.effects.water.scale" :label="t('wall.p.scale')" :min="0" :max="1" />
+          <div class="flex items-center gap-1.5 py-1">
+            <Button size="sm" class="flex-1" :disabled="painting !== null" @click="emit('paint', 1)"><PhPaintBrush />{{ layer.effects.water.mask ? t("wall.mask.editZone") : t("wall.mask.paintZone") }}</Button>
+            <IconButton v-if="layer.effects.water.mask" :icon="PhX" :label="t('wall.mask.removeZone')" @click="emit('clearMask', 1)" />
+          </div>
+        </div>
+      </div>
+      <div class="rounded-[10px] bg-fill-1 px-3 py-1.5">
+        <div class="flex items-center justify-between">
+          <span class="type-body">{{ t("wall.fx.heat") }}</span>
+          <Switch :model-value="!!layer.effects.heat" @update:model-value="toggleHeat" />
+        </div>
+        <div v-if="layer.effects.heat" class="pt-1">
+          <Param v-model="layer.effects.heat.strength" :label="t('wall.p.strength')" :min="0" :max="1" />
+          <Param v-model="layer.effects.heat.speed" :label="t('wall.p.speed')" :min="0" :max="1" />
+          <Param v-model="layer.effects.heat.scale" :label="t('wall.p.fineness')" :min="0" :max="1" />
+          <Param v-model="layer.effects.heat.direction" :label="t('wall.p.direction')" :min="0" :max="360" :step="1" unit="°" :digits="0" />
+          <div class="flex items-center gap-1.5 py-1">
+            <Button size="sm" class="flex-1" :disabled="painting !== null" @click="emit('paint', 2)"><PhPaintBrush />{{ layer.effects.heat.mask ? t("wall.mask.editZone") : t("wall.mask.paintZone") }}</Button>
+            <IconButton v-if="layer.effects.heat.mask" :icon="PhX" :label="t('wall.mask.removeZone')" @click="emit('clearMask', 2)" />
+          </div>
+          <p class="type-caption pb-1 text-label-3">{{ t("wall.heatHint") }}</p>
         </div>
       </div>
       <div class="rounded-[10px] bg-fill-1 px-3 py-1.5">

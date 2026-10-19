@@ -223,6 +223,7 @@ pub fn run() {
             wallpaper::wallpaper_delete,
             wallpaper::wallpaper_import_image,
             wallpaper::wallpaper_image,
+            wallpaper::wallpaper_save_mask,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,
             wallpaper::wallpaper_set_options,
