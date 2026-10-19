@@ -58,6 +58,9 @@ import { testBanner, testPending } from "../notifications/store";
           ]"
         />
       </Row>
+      <Row :label="t('settings.reserveSpace')" :help="t('settings.reserveSpace.help')">
+        <Switch v-model="settings.reserveSpace" />
+      </Row>
       <Row v-if="monitors.length > 1" :label="t('settings.monitor')">
         <Select v-model="monitorModel" :options="monitorOptions" />
       </Row>
