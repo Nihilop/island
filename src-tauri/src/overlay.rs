@@ -9,7 +9,7 @@
 // Comme une WebView click-through ne reçoit plus d'events souris, ce thread émet aussi
 // le survol (`overlay://hover`) et le clic hors zone (`overlay://dismiss`).
 
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -98,6 +98,7 @@ pub(crate) fn place(win: &WebviewWindow) -> tauri::Result<()> {
         let max = ((mw - w) / 2.0).max(0.0);
         let dx = (prefs.offset * scale).clamp(-max, max);
         win.set_size(PhysicalSize::new(w.round() as u32, h.round() as u32))?;
+        TOP.store(m.position().y, Ordering::SeqCst);
         win.set_position(PhysicalPosition::new(
             m.position().x + ((mw - w) / 2.0 + dx).round() as i32,
             m.position().y,
@@ -194,11 +195,66 @@ pub fn notch_set_hide_in_fullscreen(on: bool) {
 // les fenêtres maximisées / Snap commencent dessous. Windows ne réserve qu'une bande pleine
 // largeur ; l'île ouverte passe toujours par-dessus sans pousser personne.
 
+/// Haut du moniteur du notch (px physiques) : la fenêtre y reste collée quoi qu'il arrive.
+static TOP: AtomicI32 = AtomicI32::new(0);
+
+/// Garde-fou : quand la zone de travail rétrécit, Windows repousse sous la bande réservée
+/// les fenêtres qui la chevauchent — y compris l'île, pour qui la bande est faite. On la
+/// recolle en haut à chaque déplacement qui ne vient pas de nous.
+pub(crate) fn keep_on_top_edge(win: &WebviewWindow) {
+    let w = win.clone();
+    win.on_window_event(move |e| {
+        if let tauri::WindowEvent::Moved(p) = e {
+            let top = TOP.load(Ordering::SeqCst);
+            if p.y != top {
+                let _ = w.set_position(PhysicalPosition::new(p.x, top));
+            }
+        }
+    });
+}
+
 /// Hauteur réservée (DIP), 0 = aucune.
 static RESERVE: Mutex<f64> = Mutex::new(0.0);
 /// AppBar enregistrée auprès du shell.
 #[cfg(target_os = "windows")]
 static APPBAR: AtomicBool = AtomicBool::new(false);
+/// Fenêtre invisible dédiée qui porte l'AppBar : l'île elle-même n'est jamais déclarée
+/// AppBar (le shell la traiterait comme une barre et pourrait la déplacer).
+#[cfg(target_os = "windows")]
+static APPBAR_HWND: AtomicIsize = AtomicIsize::new(0);
+
+/// Crée (une fois) la fenêtre porteuse. Appelé depuis le thread principal (commande
+/// synchrone, setup) : la boucle de messages de Tauri la fait vivre.
+#[cfg(target_os = "windows")]
+fn appbar_hwnd() -> isize {
+    use windows::core::w;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP};
+    let h = APPBAR_HWND.load(Ordering::SeqCst);
+    if h != 0 {
+        return h;
+    }
+    let hwnd = unsafe {
+        let inst = GetModuleHandleW(None).ok();
+        CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            w!("STATIC"),
+            w!("island-appbar"),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            inst.map(|i| i.into()),
+            None,
+        )
+    };
+    let h = hwnd.map(|h| h.0 as isize).unwrap_or(0);
+    APPBAR_HWND.store(h, Ordering::SeqCst);
+    h
+}
 
 #[tauri::command]
 pub fn notch_set_reserve(app: AppHandle, height: f64) -> Result<(), String> {
@@ -214,9 +270,12 @@ fn apply_reserve(win: &WebviewWindow) {
     {
         use windows::Win32::Foundation::RECT;
         let h = *RESERVE.lock().unwrap_or_else(|p| p.into_inner());
-        let Ok(hwnd) = win.hwnd() else { return };
         if h <= 0.0 {
-            appbar_remove(hwnd.0 as isize);
+            appbar_remove();
+            return;
+        }
+        let hwnd = appbar_hwnd();
+        if hwnd == 0 {
             return;
         }
         let prefs = display(win.app_handle());
@@ -228,7 +287,7 @@ fn apply_reserve(win: &WebviewWindow) {
             right: p.x + s.width as i32,
             bottom: p.y + (h * m.scale_factor()).round() as i32,
         };
-        appbar_set(hwnd.0 as isize, rc);
+        appbar_set(hwnd, rc);
     }
     #[cfg(not(target_os = "windows"))]
     let _ = win;
@@ -269,10 +328,10 @@ fn appbar_set(hwnd: isize, rc: windows::Win32::Foundation::RECT) {
 }
 
 #[cfg(target_os = "windows")]
-fn appbar_remove(hwnd: isize) {
+fn appbar_remove() {
     use windows::Win32::UI::Shell::{SHAppBarMessage, ABM_REMOVE};
     if APPBAR.swap(false, Ordering::SeqCst) {
-        let mut d = appbar_data(hwnd);
+        let mut d = appbar_data(APPBAR_HWND.load(Ordering::SeqCst));
         unsafe { SHAppBarMessage(ABM_REMOVE, &mut d) };
     }
 }
@@ -280,14 +339,10 @@ fn appbar_remove(hwnd: isize) {
 /// Rend la bande réservée à la fermeture : sinon Windows garde un trou fantôme en haut.
 pub(crate) fn install_reserve_cleanup(app: &AppHandle) {
     let plugin = tauri::plugin::Builder::<tauri::Wry>::new("island-reserve")
-        .on_event(|app, ev| {
+        .on_event(|_, ev| {
             if matches!(ev, tauri::RunEvent::Exit) {
                 #[cfg(target_os = "windows")]
-                if let Some(Ok(h)) = app.get_webview_window("overlay").map(|w| w.hwnd()) {
-                    appbar_remove(h.0 as isize);
-                }
-                #[cfg(not(target_os = "windows"))]
-                let _ = app;
+                appbar_remove();
             }
         })
         .build();
