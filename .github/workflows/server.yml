@@ -1,0 +1,53 @@
+name: Server
+
+# Tests du magasin (server/) et des formats partagés (crates/island-formats), contre un vrai
+# Postgres. Indépendant de la release de l'app (tags v*).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "crates/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "crates/**"
+      - ".github/workflows/server.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: island
+          POSTGRES_PASSWORD: island
+          POSTGRES_DB: island_store
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U island"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://island:island@localhost:5432/island_store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/island-formats
+            server
+      - name: Formats partagés
+        working-directory: crates/island-formats
+        run: cargo test
+      - name: Serveur
+        working-directory: server
+        run: cargo test

@@ -1,8 +1,26 @@
 # Magasin d'Island — spécification (v1, en cours)
 
 Serveur du magasin d'Island : catalogue de **scènes de fonds animés** et d'**extensions**,
-publication par les auteurs, téléchargement et mises à jour depuis l'app. Statut :
-**spécification**, rien n'est encore codé ici.
+publication par les auteurs, téléchargement et mises à jour depuis l'app. Statut : étape 2
+(**scènes** : catalogue, recherche, fiche, téléchargement, publication par jeton,
+signalements) ; la connexion GitHub, l'administration et les extensions suivent.
+
+## Développement
+
+```bash
+cd server
+docker compose up -d                       # Postgres de développement (port 5433)
+export DATABASE_URL=postgres://island:island@localhost:5433/island_store
+cargo run -- token moi --role admin        # compte + jeton d'API (affiché une seule fois)
+cargo run                                  # API sur http://127.0.0.1:8080
+cargo test                                 # tests (une base neuve par test)
+```
+
+Publier une scène exportée depuis Island :
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" -F file=@ma-scene.islandscene      -F summary="Une nuit de neige" -F 'tags=["neige","nuit"]' http://127.0.0.1:8080/v1/items
+```
 
 ## Principes
 
@@ -243,7 +261,7 @@ dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
 ## Étapes
 
 1. ✅ `crates/island-formats` (formats partagés, tests).
-2. Serveur : squelette Axum, Postgres + migrations, stockage local, **scènes** (catalogue,
+2. ✅ Serveur : squelette Axum, Postgres + migrations, stockage local, **scènes** (catalogue,
    recherche, fiche, téléchargement, publication via jeton, signalement), tests d'API.
 3. Auth GitHub (device flow, jetons ; OAuth web), rôles, admin par `ADMIN_GITHUB_ID`.
 4. Panneau d'administration : comptes, modérateurs, signalements, journal.

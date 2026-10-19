@@ -1,0 +1,17 @@
+# Postgres de développement et de test du magasin (en production : Neon).
+#   docker compose up -d
+#   DATABASE_URL=postgres://island:island@localhost:5433/island_store
+name: island-store
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: island
+      POSTGRES_PASSWORD: island
+      POSTGRES_DB: island_store
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:
