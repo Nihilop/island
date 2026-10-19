@@ -12,6 +12,7 @@
 | `cookies` | session par cookie sur ses domaines `network:` (cookies tenus par Island, jamais visibles) |
 | `windows` | `island.windows.open` : ses propres fenêtres (`contributes.windows`) |
 | `capture` | **à haut risque** (en rouge à l'installation) : `island.capture`, voir et enregistrer l'écran et le son |
+| `wallpaper` | `island.wallpaper` : poser un fond d'écran **statique** (l'image est fournie en données, jamais un chemin) |
 | `images:<domaine>` | afficher des images HTTPS de ce domaine (`<img>`, CSS) sans passer par `island.http` |
 
 Demandez le minimum : l'utilisateur voit la liste en clair avant d'installer, et une mise à

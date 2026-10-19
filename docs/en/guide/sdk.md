@@ -101,6 +101,23 @@ Video: Windows hardware encoder (H.264 or H.265), PC sound and mic mixed. One re
 a time; while recording, the region outline is visible (not in the video) and the island's
 red indicator is on.
 
+## Wallpaper
+
+Permission `wallpaper`. Sets a **static** Windows wallpaper, on one screen or all of them.
+The extension passes the image itself (a `Blob`, an `ArrayBuffer` or a `Uint8Array`):
+Island checks it is a real image (30 MB max), stores it in its own folder and sets it. No
+file path is ever accepted.
+
+```ts
+const screens = await island.wallpaper.displays(); // [{ id, x, y, width, height, work, scale, primary }]
+const { body } = await island.http.bytes({ url: "https://exemple.com/photo-of-the-day.jpg" }); // network:exemple.com
+await island.wallpaper.setImage(body, { display: screens[0].id, fit: "fill" });
+```
+
+No `display`: all screens. `fit` (`fill`, `fit`, `stretch`, `center`, `tile`, `span`) is a
+global Windows setting: it applies to every screen. **Live** wallpapers aren't exposed to
+extensions: they're Island's own “Live wallpapers” tool.
+
 ## In the island
 
 | | Permission |

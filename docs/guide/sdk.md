@@ -101,6 +101,23 @@ Vidéo : encodeur matériel de Windows (H.264 ou H.265), son du PC et micro mél
 enregistrement à la fois ; pendant l'enregistrement, le contour de la zone est visible (pas
 dans la vidéo) et le voyant rouge de l'île est allumé.
 
+## Fond d'écran
+
+Permission `wallpaper`. Pose un fond d'écran **statique** Windows, sur un écran ou tous.
+L'extension fournit l'image elle-même (un `Blob`, un `ArrayBuffer` ou un `Uint8Array`) :
+Island vérifie que c'est une vraie image (30 Mo max), la range dans son propre dossier et
+la pose. Aucun chemin de fichier n'est accepté.
+
+```ts
+const screens = await island.wallpaper.displays(); // [{ id, x, y, width, height, work, scale, primary }]
+const { body } = await island.http.bytes({ url: "https://exemple.com/photo-du-jour.jpg" }); // network:exemple.com
+await island.wallpaper.setImage(body, { display: screens[0].id, fit: "fill" });
+```
+
+`display` absent : tous les écrans. `fit` (`fill`, `fit`, `stretch`, `center`, `tile`,
+`span`) est un réglage global de Windows : il s'applique à tous les écrans. Les fonds
+**animés** ne sont pas exposés aux extensions : c'est l'outil « Fonds animés » d'Island.
+
 ## Dans l'île
 
 | | Permission |
