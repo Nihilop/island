@@ -44,8 +44,18 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri` (et les extensions d'exemple, qui se
-      //    construisent à part : leurs `dist/` changent à chaque build)
-      ignored: ["**/src-tauri/**", "**/examples/**"],
+      //    construisent à part : leurs `dist/` changent à chaque build) — SAUF les shaders
+      //    des fonds animés (`src-tauri/src/wallpaper/*.wgsl`), importés par l'aperçu de
+      //    l'éditeur : sans ça, Vite sert la première version lue, à jamais. Les seuls
+      //    dossiers parcourus sont le chemin jusqu'à eux (jamais `target/`).
+      ignored: (file: string) => {
+        const p = file.replace(/\\/g, "/");
+        if (p.includes("/examples/")) return true;
+        const i = p.indexOf("/src-tauri");
+        if (i < 0) return false;
+        const rest = p.slice(i);
+        return !(rest === "/src-tauri" || rest === "/src-tauri/src" || rest === "/src-tauri/src/wallpaper" || /^\/src-tauri\/src\/wallpaper\/[^/]+\.wgsl$/.test(rest));
+      },
     },
     fs: {
       allow: [workspaceRoot],

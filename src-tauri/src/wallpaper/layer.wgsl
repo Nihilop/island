@@ -158,14 +158,25 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     ) * a;
   }
 
-  // Chaleur : remous de bruit qui filent dans la direction choisie (air au-dessus d'une
-  // flamme). Mesurés en px de l'écran, pour une même finesse quelle que soit la taille du
-  // calque.
+  // Chaleur (air au-dessus d'une flamme) : des ondes douces qui filent dans la direction
+  // choisie, légèrement tordues en travers, sous une enveloppe lente qui fait aller et venir
+  // le tremblement par plaques. Mesurée en hauteur d'écran (même finesse quelle que soit la
+  // taille du calque). L'amplitude reste à 8 % de la longueur d'onde : la déformation ne
+  // « replie » jamais l'image, donc jamais d'arête nette.
   if (u.heat.x > 0.0) {
     let dir = vec2f(cos(u.heat.w), sin(u.heat.w));
-    let q = px / (r.y * 0.04) * (0.4 + u.heat.z * 1.6) - dir * t * (0.4 + u.heat.y * 3.0);
-    let n = vec2f(vnoise(q) + 0.5 * vnoise(q * 2.03 + 7.1), vnoise(q + 13.7) + 0.5 * vnoise(q * 1.97 + 3.3)) - 0.75;
-    uv += px_to_uv(n * u.heat.x * 16.0 * k * mask(mask_heat, base));
+    let perp = vec2f(-dir.y, dir.x);
+    let p = px / r.y;
+    let lambda = mix(0.14, 0.025, u.heat.z);
+    let f = 6.2831853 / lambda;
+    let s = t * (0.6 + u.heat.y * 4.0);
+    let along = dot(p, dir);
+    let across = dot(p, perp);
+    let w = sin(along * f - s) * 0.6 + sin(along * f * 1.73 + across * f * 0.41 - s * 1.31) * 0.4;
+    let drift = dir * s * 0.02;
+    let env = smoothstep(0.2, 0.8, vnoise(p * 3.0 - drift) * 0.6 + vnoise(p * 6.1 + 3.7 - drift * 1.6) * 0.4);
+    let amp = u.heat.x * lambda * r.y * 0.08 * env * mask(mask_heat, base);
+    uv += px_to_uv((perp + dir * 0.25) * w * amp);
   }
 
   var c = vec4f(0.0);
@@ -176,8 +187,9 @@ fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   } else if (kind < 1.5) {
     c = vec4f(u.fill_a.rgb, 1.0);
   } else if (kind < 2.5) {
+    // Dans le repère du calque (plein écran) : le dégradé suit eau, chaleur et parallaxe.
     let d = vec2f(cos(u.box2.y), sin(u.box2.y));
-    let g = clamp(dot(px / r - 0.5, d) + 0.5, 0.0, 1.0);
+    let g = clamp(dot(uv - 0.5, d) + 0.5, 0.0, 1.0);
     c = vec4f(mix(u.fill_a.rgb, u.fill_b.rgb, smoothstep(0.0, 1.0, g)), 1.0);
   } else {
     // Les particules suivent le décalage de parallaxe du calque.
