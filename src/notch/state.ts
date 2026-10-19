@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { HOVER_DELAY_MS, settings } from "./settings";
 import { tools } from "../tools/registry";
+import { SHAPES } from "./geometry";
 
 export type NotchState = "closed" | "peek" | "open";
 
@@ -237,6 +238,13 @@ export function initNotchState() {
   watch(
     () => settings.visibility === "hideFullscreen" && settings.gaming !== "fullscreen",
     (on) => invoke("notch_set_hide_in_fullscreen", { on }).catch(() => {}),
+    { immediate: true },
+  );
+
+  // Marge réservée : bande de la hauteur du notch fermé (0 = rendue au shell).
+  watch(
+    () => (settings.reserveSpace ? (settings.idleStyle === "line" ? SHAPES.line.h : SHAPES.closed.h) : 0),
+    (height) => invoke("notch_set_reserve", { height }).catch(() => {}),
     { immediate: true },
   );
 

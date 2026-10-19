@@ -64,6 +64,8 @@
   "settings.position": "Position",
   "settings.position.centered": "Centré",
   "settings.position.help": "Glisse l'île pour la déplacer",
+  "settings.reserveSpace": "Réserver l'espace en haut",
+  "settings.reserveSpace.help": "Les fenêtres maximisées s'arrêtent sous l'île au lieu de passer dessous",
   "settings.idleStyle": "Style fermé",
   "settings.idleStyle.help": "L'île, ou une simple ligne discrète",
   "settings.style.notch": "Île",

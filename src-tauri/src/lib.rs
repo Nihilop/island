@@ -73,6 +73,8 @@ pub fn run() {
                 #[cfg(target_os = "windows")]
                 overlay::install_drop_bridge(&overlay);
             }
+            // Marge réservée (AppBar) : rendue au shell à la fermeture.
+            overlay::install_reserve_cleanup(app.handle());
 
             // Contrôleur média natif (SMTC) — une des API exposées aux extensions.
             services::media::start(app.handle().clone());
@@ -114,6 +116,7 @@ pub fn run() {
             overlay::notch_set_pinned,
             overlay::notch_set_passthrough,
             overlay::notch_set_hide_in_fullscreen,
+            overlay::notch_set_reserve,
             overlay::notch_monitors,
             overlay::notch_get_display,
             overlay::notch_set_display,

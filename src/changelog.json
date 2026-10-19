@@ -1,5 +1,18 @@
 [
   {
+    "version": "2.4.0",
+    "date": "2026-10-19",
+    "highlight": false,
+    "items": {
+      "fr": [
+        "Réglages › Affichage : « Réserver l'espace en haut » — les fenêtres maximisées s'arrêtent sous l'île au lieu de passer dessous (désactivé par défaut)."
+      ],
+      "en": [
+        "Settings › Display: “Reserve space at the top” — maximized windows stop below the island instead of going under it (off by default)."
+      ]
+    }
+  },
+  {
     "version": "2.3.0",
     "date": "2026-10-16",
     "highlight": true,

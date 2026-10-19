@@ -64,6 +64,8 @@
   "settings.position": "Position",
   "settings.position.centered": "Centered",
   "settings.position.help": "Drag the island to move it",
+  "settings.reserveSpace": "Reserve space at the top",
+  "settings.reserveSpace.help": "Maximized windows stop below the island instead of going under it",
   "settings.idleStyle": "Closed style",
   "settings.idleStyle.help": "Island, or a subtle thin line",
   "settings.style.notch": "Island",

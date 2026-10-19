@@ -25,6 +25,8 @@ export interface NotchSettings {
   focusStyle: FocusStyle;
   focusMode: boolean;
   visibility: Visibility;
+  /** Réserver en haut de l'écran une bande de la hauteur du notch fermé (AppBar Windows). */
+  reserveSpace: boolean;
   /** Raccourci global d'ouverture (accelerator Tauri), "" = aucun. */
   shortcut: string;
   /** Horloge 24 h (sinon 12 h). Défaut : selon la région Windows. */
@@ -115,6 +117,7 @@ const DEFAULTS: NotchSettings = {
   focusStyle: "dim",
   focusMode: false,
   visibility: "always",
+  reserveSpace: false,
   // En dev, Ctrl+Alt+Espace est souvent pris (Claude desktop) : défaut de test.
   shortcut: import.meta.env.DEV ? "Control+Alt+O" : "Control+Alt+Space",
   clock24: !/h1[12]/.test(

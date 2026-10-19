@@ -104,6 +104,7 @@ pub(crate) fn place(win: &WebviewWindow) -> tauri::Result<()> {
         ))?;
     }
     REFRESH.store(true, Ordering::SeqCst);
+    apply_reserve(win);
     Ok(())
 }
 
@@ -185,6 +186,114 @@ pub fn notch_set_passthrough(on: bool) {
 #[tauri::command]
 pub fn notch_set_hide_in_fullscreen(on: bool) {
     HIDE_IN_FULLSCREEN.store(on, Ordering::SeqCst);
+}
+
+// --- Marge réservée (AppBar) ---------------------------------------------------------
+// Option « réserver l'espace » : la fenêtre s'enregistre comme AppBar (comme la barre des
+// tâches) ancrée en haut → la zone de travail perd une bande de la hauteur du notch fermé,
+// les fenêtres maximisées / Snap commencent dessous. Windows ne réserve qu'une bande pleine
+// largeur ; l'île ouverte passe toujours par-dessus sans pousser personne.
+
+/// Hauteur réservée (DIP), 0 = aucune.
+static RESERVE: Mutex<f64> = Mutex::new(0.0);
+/// AppBar enregistrée auprès du shell.
+#[cfg(target_os = "windows")]
+static APPBAR: AtomicBool = AtomicBool::new(false);
+
+#[tauri::command]
+pub fn notch_set_reserve(app: AppHandle, height: f64) -> Result<(), String> {
+    *RESERVE.lock().unwrap_or_else(|p| p.into_inner()) = height.max(0.0);
+    let win = app.get_webview_window("overlay").ok_or("overlay introuvable")?;
+    apply_reserve(&win);
+    Ok(())
+}
+
+/// (Ré)applique la réservation sur le moniteur du notch (appelé aussi par `place`).
+fn apply_reserve(win: &WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::RECT;
+        let h = *RESERVE.lock().unwrap_or_else(|p| p.into_inner());
+        let Ok(hwnd) = win.hwnd() else { return };
+        if h <= 0.0 {
+            appbar_remove(hwnd.0 as isize);
+            return;
+        }
+        let prefs = display(win.app_handle());
+        let Ok(Some(m)) = find_monitor(win, &prefs.monitor) else { return };
+        let (p, s) = (m.position(), m.size());
+        let rc = RECT {
+            left: p.x,
+            top: p.y,
+            right: p.x + s.width as i32,
+            bottom: p.y + (h * m.scale_factor()).round() as i32,
+        };
+        appbar_set(hwnd.0 as isize, rc);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = win;
+}
+
+#[cfg(target_os = "windows")]
+fn appbar_data(hwnd: isize) -> windows::Win32::UI::Shell::APPBARDATA {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Shell::APPBARDATA;
+    APPBARDATA {
+        cbSize: std::mem::size_of::<APPBARDATA>() as u32,
+        hWnd: HWND(hwnd as *mut _),
+        // Message de rappel du shell (ABN_*) : ignoré, on réapplique nous-mêmes au placement.
+        uCallbackMessage: windows::Win32::UI::WindowsAndMessaging::WM_APP + 0x1B,
+        ..Default::default()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn appbar_set(hwnd: isize, rc: windows::Win32::Foundation::RECT) {
+    use windows::Win32::UI::Shell::{SHAppBarMessage, ABE_TOP, ABM_NEW, ABM_QUERYPOS, ABM_SETPOS};
+    let mut d = appbar_data(hwnd);
+    unsafe {
+        if !APPBAR.load(Ordering::SeqCst) {
+            if SHAppBarMessage(ABM_NEW, &mut d) == 0 {
+                return;
+            }
+            APPBAR.store(true, Ordering::SeqCst);
+        }
+        let h = rc.bottom - rc.top;
+        d.uEdge = ABE_TOP;
+        d.rc = rc;
+        // Le shell peut décaler le rect (barre des tâches en haut) → on garde la hauteur.
+        SHAppBarMessage(ABM_QUERYPOS, &mut d);
+        d.rc.bottom = d.rc.top + h;
+        SHAppBarMessage(ABM_SETPOS, &mut d);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn appbar_remove(hwnd: isize) {
+    use windows::Win32::UI::Shell::{SHAppBarMessage, ABM_REMOVE};
+    if APPBAR.swap(false, Ordering::SeqCst) {
+        let mut d = appbar_data(hwnd);
+        unsafe { SHAppBarMessage(ABM_REMOVE, &mut d) };
+    }
+}
+
+/// Rend la bande réservée à la fermeture : sinon Windows garde un trou fantôme en haut.
+pub(crate) fn install_reserve_cleanup(app: &AppHandle) {
+    let plugin = tauri::plugin::Builder::<tauri::Wry>::new("island-reserve")
+        .on_event(|app, ev| {
+            if matches!(ev, tauri::RunEvent::Exit) {
+                #[cfg(target_os = "windows")]
+                if let Some(Ok(h)) = app.get_webview_window("overlay").map(|w| w.hwnd()) {
+                    appbar_remove(h.0 as isize);
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = app;
+            }
+        })
+        .build();
+    if let Err(e) = app.plugin(plugin) {
+        eprintln!("[overlay] hook de fermeture (marge) : {e}");
+    }
 }
 
 /// Réapplique l'état click-through au prochain tick (après un `show`).
