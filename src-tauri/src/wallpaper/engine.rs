@@ -25,7 +25,6 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
-use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClassNameW, GetForegroundWindow, GetWindowRect, IsWindow,
     IsZoomed, PeekMessageW, RegisterClassExW, TranslateMessage, MSG, PM_REMOVE, WM_ERASEBKGND, WNDCLASSEXW, WS_CHILD,
@@ -512,17 +511,11 @@ fn class_of(h: HWND) -> String {
     String::from_utf16_lossy(&buf[..n])
 }
 
-/// Plein écran, présentation, jeu D3D exclusif : rien n'est visible du bureau.
+/// Une app plein écran au premier plan (détection de l'île : le signal brut de Windows
+/// reste « occupé » tant qu'un jeu plein écran tourne, même après un Alt+Tab), ou un jeu
+/// en cours si l'option est active : on met tout en pause.
 fn everything_hidden(pause_in_game: bool) -> bool {
-    if crate::host::fullscreen_active() {
-        return true;
-    }
-    if let Ok(s) = unsafe { SHQueryUserNotificationState() } {
-        if s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE {
-            return true;
-        }
-    }
-    pause_in_game && crate::services::activity::activity_state().game.is_some()
+    crate::host::fullscreen_active() || (pause_in_game && crate::services::activity::activity_state().game.is_some())
 }
 
 /// La fenêtre au premier plan couvre-t-elle cet écran (maximisée ou presque) ?
