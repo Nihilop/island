@@ -4,6 +4,8 @@
 // modèles prêts à l'emploi, journal des dernières exécutions.
 import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { wallpaper, watchWallpaper } from "../../wallpaper/api";
 import { PhLightning, PhPencilSimple, PhPlay, PhPlus, PhTrash, PhX } from "@phosphor-icons/vue";
 import Group from "../../ui/Group.vue";
 import Row from "../../ui/Row.vue";
@@ -40,6 +42,7 @@ async function loadPickers() {
   outputs.value = outs;
 }
 onMounted(loadPickers);
+onMounted(watchWallpaper);
 
 // --- Libellés --------------------------------------------------------------------------------
 
@@ -74,6 +77,10 @@ function actionLabel(a: Action): string {
       return t("auto.action.toolOne", { name: tools.value.find((x) => x.id === a.id)?.title() ?? a.id });
     case "notify":
       return `« ${a.text} »`;
+    case "wallpaper":
+      return t("auto.action.wallpaperOne", { name: a.name || "…" });
+    case "scene":
+      return a.id ? t("auto.action.sceneOne", { name: a.name }) : t("auto.action.sceneNone");
     default:
       return t(`auto.action.${a.type}.${a.on ? "on" : "off"}`);
   }
@@ -179,7 +186,7 @@ function toggleDay(d: number) {
 const validTime = (s: string) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(s);
 
 // Actions
-const ACTION_TYPES: Action["type"][] = ["notifications", "volume", "mute", "output", "gaming", "focus", "presentation", "launch", "close", "timer", "tool", "notify"];
+const ACTION_TYPES: Action["type"][] = ["notifications", "volume", "mute", "output", "gaming", "focus", "presentation", "launch", "close", "timer", "tool", "notify", "wallpaper", "scene"];
 const addOptions = computed(() => ACTION_TYPES.map((v) => ({ value: v, label: t(`auto.action.${v}`) })));
 const addChoice = ref<Action["type"] | null>(null);
 
@@ -194,6 +201,8 @@ function addAction(type: Action["type"] | null) {
             : type === "timer" ? { type, minutes: 25 }
               : type === "tool" ? { type, id: "overview" }
                 : type === "notify" ? { type, text: "" }
+                  : type === "wallpaper" ? { type, path: "", name: "" }
+                  : type === "scene" ? { type, id: wallpaper.scenes[0]?.id ?? null, name: wallpaper.scenes[0]?.scene.name ?? "" }
                   : { type, on: type === "gaming" || type === "focus" || type === "presentation" || type === "mute" ? true : false };
   rule.value.actions.push(a);
 }
@@ -219,6 +228,20 @@ function pickClose(a: Action, exe: string) {
   a.exe = exe;
   a.name = apps.value.find((x) => x.exe === exe)?.name ?? exe;
 }
+const sceneOptions = computed(() => [{ value: null as string | null, label: t("wall.none") }, ...wallpaper.scenes.map((e) => ({ value: e.id as string | null, label: e.scene.name }))]);
+function pickScene(a: Action, id: string | null) {
+  if (a.type !== "scene") return;
+  a.id = id;
+  a.name = wallpaper.scenes.find((e) => e.id === id)?.scene.name ?? "";
+}
+async function pickWallpaper(a: Action) {
+  if (a.type !== "wallpaper") return;
+  const path = await openDialog({ multiple: false, filters: [{ name: t("wall.images"), extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }] });
+  if (typeof path !== "string") return;
+  a.path = path;
+  a.name = path.split(/[\/]/).pop() ?? path;
+}
+
 function pickOutput(a: Action, id: string) {
   if (a.type !== "output") return;
   a.id = id;
@@ -315,6 +338,8 @@ const logTime = (at: number) => new Intl.DateTimeFormat(locale.value, { day: "nu
               </div>
               <Select v-else-if="a.type === 'tool'" v-model="a.id" :options="toolOptions" />
               <TextField v-else-if="a.type === 'notify'" v-model="a.text" :placeholder="t('auto.notifyText')" />
+              <Button v-else-if="a.type === 'wallpaper'" class="max-w-full" @click="pickWallpaper(a)"><span class="truncate">{{ a.name || t("wall.pickImage") }}</span></Button>
+              <Select v-else-if="a.type === 'scene'" :model-value="a.id" :options="sceneOptions" @update:model-value="pickScene(a, $event)" />
               <Segmented
                 v-else
                 v-model="a.on"

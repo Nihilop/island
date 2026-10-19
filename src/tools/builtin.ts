@@ -14,6 +14,7 @@ import {
   PhGameController,
   PhGauge,
   PhGear,
+  PhImageSquare,
   PhLockKey,
   PhMagnifyingGlass,
   PhMusicNotes,
@@ -39,6 +40,7 @@ import ConvertView from "./convert/ConvertView.vue";
 import WeatherView from "./weather/WeatherView.vue";
 import WeatherSky from "./weather/WeatherSky.vue";
 import ActivityView from "./activity/ActivityView.vue";
+import WallpaperView from "./wallpaper/WallpaperView.vue";
 import MarketsView from "./markets/MarketsView.vue";
 import ClipboardView from "./clipboard/ClipboardView.vue";
 import ShelfView from "./shelf/ShelfView.vue";
@@ -61,6 +63,7 @@ const VIEWS: Record<string, Component> = {
   convert: ConvertView,
   weather: WeatherView,
   activity: ActivityView,
+  wallpaper: WallpaperView,
   trading: MarketsView,
   clipboard: ClipboardView,
   shelf: ShelfView,
@@ -92,6 +95,7 @@ const SPECS: Record<string, { icon: Component; size: [number, number] }> = {
   usage: { icon: PhGauge, size: [600, 320] },
   weather: { icon: PhCloudSun, size: [540, 300] },
   activity: { icon: PhGameController, size: [560, 340] },
+  wallpaper: { icon: PhImageSquare, size: [560, 210] },
   system: { icon: PhCpu, size: [600, 248] },
   discord: { icon: PhDiscordLogo, size: [520, 210] },
   vault: { icon: PhLockKey, size: [560, 324] },

@@ -104,6 +104,7 @@ export const DEFAULT_TOOLS: ToolPref[] = [
   { id: "usage", enabled: true },
   { id: "weather", enabled: true },
   { id: "activity", enabled: true },
+  { id: "wallpaper", enabled: false },
   { id: "system", enabled: false },
   { id: "discord", enabled: false },
   { id: "vault", enabled: false },

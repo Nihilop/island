@@ -319,6 +319,14 @@ unsafe fn foreground_is_fullscreen(overlay_hwnd: isize) -> bool {
     rect.left <= m.left && rect.top <= m.top && rect.right >= m.right && rect.bottom >= m.bottom
 }
 
+/// Une app est en plein écran (dernier relevé du moniteur ci-dessous) : lu par les autres
+/// services (fonds animés en pause…).
+static FULLSCREEN_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn fullscreen_active() -> bool {
+    FULLSCREEN_ACTIVE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Poll du premier plan ; émet `fullscreen://changed { active }` au changement.
 /// No-op hors Windows.
 pub(crate) fn start_fullscreen_monitor(app: AppHandle) {
@@ -339,6 +347,7 @@ pub(crate) fn start_fullscreen_monitor(app: AppHandle) {
             let mut last_fg: isize = 0;
             loop {
                 let fs = unsafe { foreground_is_fullscreen(overlay_hwnd) };
+                FULLSCREEN_ACTIVE.store(fs, Ordering::SeqCst);
                 if fs != last {
                     last = fs;
                     let _ = app.emit("fullscreen://changed", serde_json::json!({ "active": fs }));

@@ -12,6 +12,28 @@ import { Switch } from "@/sdk/ui/switch";
 import { Button } from "@/sdk/ui/button";
 import { autoActive, presentation, setPresentation } from "../../notch/presentation";
 import { fps, unlockFps } from "../system/gaming";
+import { apply as applyWallpaper, openEditor, setOptions as setWallpaperOptions, wallpaper, watchWallpaper } from "../../wallpaper/api";
+
+// Fond animé : pilotable ici même quand l'outil est masqué du dock.
+onMounted(watchWallpaper);
+const sceneOptions = computed(() => [{ value: null as string | null, label: t("wall.none") }, ...wallpaper.scenes.map((e) => ({ value: e.id as string | null, label: e.scene.name }))]);
+const wallBusy = ref(false);
+const activeScene = computed({
+  get: () => wallpaper.state.active,
+  set: async (id: string | null) => {
+    wallBusy.value = true;
+    await applyWallpaper(id).catch(() => {});
+    wallBusy.value = false;
+  },
+});
+const wallFps = computed({
+  get: () => wallpaper.state.fps,
+  set: (v: number) => void setWallpaperOptions(v, wallpaper.state.pauseInGame).then(() => (wallpaper.state.fps = v)),
+});
+const wallPauseGame = computed({
+  get: () => wallpaper.state.pauseInGame,
+  set: (v: boolean) => void setWallpaperOptions(wallpaper.state.fps, v).then(() => (wallpaper.state.pauseInGame = v)),
+});
 
 const unlocking = ref(false);
 const unlockResult = ref<string | null>(null);
@@ -98,6 +120,28 @@ import { testBanner, testPending } from "../notifications/store";
             { value: 'system', label: t('settings.theme.system') },
           ]"
         />
+      </Row>
+    </Group>
+
+    <Group :title="t('wall.settings')" section="wallpaper" :note="t('wall.settingsNote')">
+      <Row :label="t('wall.settings.scene')" :help="wallpaper.state.paused ? t('wall.paused') : undefined">
+        <Select v-model="activeScene" :options="sceneOptions" :disabled="wallBusy" />
+      </Row>
+      <Row :label="t('wall.settings.fps')" :help="t('wall.settings.fpsHelp')">
+        <Segmented
+          v-model="wallFps"
+          size="sm"
+          :options="[
+            { value: 30, label: '30' },
+            { value: 60, label: '60' },
+          ]"
+        />
+      </Row>
+      <Row :label="t('wall.settings.pauseGame')">
+        <Switch v-model="wallPauseGame" />
+      </Row>
+      <Row :label="t('wall.editor')">
+        <Button @click="openEditor(t('wall.editor'))">{{ t("wall.new") }}</Button>
       </Row>
     </Group>
 

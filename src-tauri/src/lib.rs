@@ -4,6 +4,7 @@
 //   overlay   : fenêtre fixe du notch (placement, click-through, capture-exclude, focus)
 //   launcher  : launcher natif (index apps / réglages / fichiers, recherche, ouverture)
 //   vault     : coffre (pont Bitwarden)
+//   wallpaper : fonds animés (scènes, moteur natif wgpu sur le calque du bureau)
 //   host      : fenêtres, shell, tray, détection plein écran
 //   ext       : système d'extensions (permissions, storage, install, scaffold)
 //   services  : services exposés aux extensions (capture, apps, media, net, system)
@@ -22,6 +23,7 @@ mod overlay;
 mod services;
 mod store;
 mod vault;
+mod wallpaper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -89,6 +91,8 @@ pub fn run() {
             launcher::start(app.handle().clone());
             // Activité (jeux & apps) : hook de premier plan + relevé des process toutes les 2 s.
             services::activity::start(app.handle().clone());
+            // Fonds animés : restaure la scène active (indépendant de l'outil du dock).
+            wallpaper::start(app.handle());
 
             // v2 : loader d'extensions gelé (cf. docs/internal/v2-migration.md) → pas de
             // watcher `dist/` tant qu'aucune extension ne se charge.
@@ -208,6 +212,20 @@ pub fn run() {
             services::markets::markets_crypto,
             services::markets::markets_crypto_search,
             services::desktop::master_volume,
+            services::desktop::desktop_wallpaper_get,
+            services::desktop::desktop_wallpaper_set,
+            services::desktop::ext2_wallpaper_displays,
+            services::desktop::ext2_wallpaper_set,
+            services::hardware::hw_displays,
+            wallpaper::wallpaper_list,
+            wallpaper::wallpaper_get,
+            wallpaper::wallpaper_save,
+            wallpaper::wallpaper_delete,
+            wallpaper::wallpaper_import_image,
+            wallpaper::wallpaper_image,
+            wallpaper::wallpaper_state,
+            wallpaper::wallpaper_apply,
+            wallpaper::wallpaper_set_options,
             services::capture::capture_displays,
             services::capture::capture_select,
             services::capture::capture_select_init,

@@ -44,6 +44,9 @@ arboard = "3" # presse-papiers cross-platform (texte + image) exposé aux extens
 base64 = "0.22" # base64 (icônes d'apps, image du presse-papiers, flux PTY)
 png = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] } # vignettes (presse-papiers, étagère) # encodage/décodage PNG (icônes d'apps, image du presse-papiers)
+wgpu = { version = "30", default-features = false, features = ["dx12", "wgsl", "std"] } # fonds animés : rendu natif (shaders WGSL partagés avec l'aperçu de l'éditeur)
+pollster = "0.4" # fonds animés : init wgpu (futures bloquants sur le thread de rendu)
+raw-window-handle = "0.6"
 
 # Capture d'écran (Windows Graphics Capture, anti-cheat safe).
 [target.'cfg(windows)'.dependencies.windows-capture]

@@ -41,7 +41,11 @@ export type Action =
   | { type: "close"; exe: string; name: string }
   | { type: "timer"; minutes: number }
   | { type: "tool"; id: string }
-  | { type: "notify"; text: string };
+  | { type: "notify"; text: string }
+  /** Fond d'écran statique (service desktop), tous les écrans. */
+  | { type: "wallpaper"; path: string; name: string }
+  /** Fond animé (scène) ; id null = fond Windows. */
+  | { type: "scene"; id: string | null; name: string };
 
 export interface Rule {
   id: string;
@@ -72,7 +76,12 @@ export const { state: automations, ready: automationsReady } = persisted("automa
   log: [] as LogEntry[],
 });
 
-export const REVERSIBLE = new Set<Action["type"]>(["volume", "mute", "output", "notifications", "focus", "presentation", "gaming"]);
+export const REVERSIBLE = new Set<Action["type"]>(["volume", "mute", "output", "notifications", "focus", "presentation", "gaming", "wallpaper", "scene"]);
+
+interface DesktopWallpaper {
+  display: string;
+  path: string;
+}
 
 // --- Actions -----------------------------------------------------------------------------
 
@@ -99,6 +108,11 @@ async function read(a: Action): Promise<unknown> {
       return presentation.value;
     case "gaming":
       return settings.gaming;
+    case "wallpaper":
+      // Par écran : la restauration remet l'image de chacun.
+      return invoke<DesktopWallpaper[]>("desktop_wallpaper_get");
+    case "scene":
+      return (await invoke<{ active: string | null }>("wallpaper_state")).active;
     default:
       return null;
   }
@@ -123,6 +137,14 @@ async function write(a: Action, value: unknown) {
     case "gaming":
       settings.gaming = value as typeof settings.gaming;
       return;
+    case "wallpaper":
+      if (Array.isArray(value)) {
+        for (const w of value as DesktopWallpaper[]) if (w.path) await invoke("desktop_wallpaper_set", { path: w.path, display: w.display });
+        return;
+      }
+      return invoke("desktop_wallpaper_set", { path: String(value), display: null });
+    case "scene":
+      return invoke("wallpaper_apply", { id: value ?? null });
   }
 }
 
@@ -140,6 +162,10 @@ function target(a: Action): unknown {
       return a.id;
     case "gaming":
       return a.on ? "always" : "off";
+    case "wallpaper":
+      return a.path;
+    case "scene":
+      return a.id;
     default:
       return null;
   }
@@ -163,7 +189,12 @@ async function runOnce(a: Action) {
   }
 }
 
-const same = (a: unknown, b: unknown) => (typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 0.02 : a === b);
+function same(a: unknown, b: unknown): boolean {
+  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 0.02;
+  // Fond d'écran : relu par écran, posé sur tous.
+  if (Array.isArray(a) && typeof b === "string") return a.length > 0 && (a as DesktopWallpaper[]).every((w) => w.path.toLowerCase() === b.toLowerCase());
+  return a === b;
+}
 
 function log(rule: Rule, event: LogEntry["event"], error?: string) {
   automations.log.unshift({ at: Date.now(), rule: rule.name, event, error });
@@ -196,7 +227,8 @@ async function exit(rule: Rule) {
   const errors: string[] = [];
   for (const ap of [...st.applied].reverse()) {
     const a = rule.actions[ap.index];
-    if (!a || !REVERSIBLE.has(a.type) || ap.prev === null) continue;
+    // `scene` : null = « aucun fond animé », une valeur à restaurer comme une autre.
+    if (!a || !REVERSIBLE.has(a.type) || (ap.prev === null && a.type !== "scene")) continue;
     try {
       // Restaurer seulement si personne n'a changé la valeur entre-temps.
       if (same(await read(a), ap.set)) await write(a, ap.prev);
