@@ -20,7 +20,7 @@ use axum::body::Body;
 use axum::extract::{ConnectInfo, FromRequestParts, Multipart, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use island_formats::islandscene;
@@ -168,10 +168,12 @@ pub async fn detail(State(st): State<AppState>, Path(id): Path<String>) -> ApiRe
     let card = visible_card(&st, &id).await?;
     let (description, homepage, repository, license): (String, Option<String>, Option<String>, Option<String>) =
         sqlx::query_as("SELECT description, homepage, repository, license FROM items WHERE id = $1").bind(&id).fetch_one(&st.db).await?;
-    let assets: Vec<(String, i32)> = sqlx::query_as("SELECT kind, position FROM assets WHERE item_id = $1 ORDER BY kind, position").bind(&id).fetch_all(&st.db).await?;
+    let assets: Vec<(String, i32, String)> =
+        sqlx::query_as("SELECT kind, position, file_key FROM assets WHERE item_id = $1 ORDER BY kind, position").bind(&id).fetch_all(&st.db).await?;
     let mut media = MediaUrls::default();
-    for (kind, pos) in assets {
-        let url = format!("/v1/items/{id}/media/{kind}/{pos}");
+    for (kind, pos, key) in assets {
+        // R2 : directement le CDN ; stockage local : la route du serveur.
+        let url = st.storage.public_url(&key).unwrap_or_else(|| format!("/v1/items/{id}/media/{kind}/{pos}"));
         match kind.as_str() {
             "thumbnail" => media.thumbnail = Some(url),
             "banner" => media.banner = Some(url),
@@ -213,17 +215,23 @@ pub async fn download(State(st): State<AppState>, Path(id): Path<String>, Query(
         .fetch_optional(&st.db)
         .await?;
     let key = key.ok_or_else(ApiError::not_found)?;
-    let (file, len) = st.storage.open(&key).await.map_err(ApiError::internal)?.ok_or_else(|| ApiError::internal(format!("fichier absent : {key}")))?;
-    sqlx::query("UPDATE items SET downloads = downloads + 1 WHERE id = $1").bind(&id).execute(&st.db).await?;
     let ext = if card.kind == "scene" { islandscene::EXT } else { "island" };
     let name = file_name(&card.name);
     let ascii: String = name.chars().map(|c| if c.is_ascii() { c } else { '_' }).collect();
     let utf8: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    let disposition = format!("attachment; filename=\"{ascii}.{ext}\"; filename*=UTF-8''{utf8}.{ext}");
+    // R2 : lien signé de 5 minutes (le fichier ne transite pas par le serveur).
+    if let Some(link) = st.storage.signed_download(&key, &disposition) {
+        sqlx::query("UPDATE items SET downloads = downloads + 1 WHERE id = $1").bind(&id).execute(&st.db).await?;
+        return Ok(([(header::CACHE_CONTROL, "no-store")], Redirect::to(&link)).into_response());
+    }
+    let (file, len) = st.storage.open(&key).await.map_err(ApiError::internal)?.ok_or_else(|| ApiError::internal(format!("fichier absent : {key}")))?;
+    sqlx::query("UPDATE items SET downloads = downloads + 1 WHERE id = $1").bind(&id).execute(&st.db).await?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/octet-stream".to_string()),
             (header::CONTENT_LENGTH, len.to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{ascii}.{ext}\"; filename*=UTF-8''{utf8}.{ext}")),
+            (header::CONTENT_DISPOSITION, disposition),
         ],
         Body::from_stream(tokio_util::io::ReaderStream::new(file)),
     )
@@ -239,6 +247,9 @@ async fn serve_asset(st: &AppState, id: &str, kind: &str, position: i32) -> ApiR
         .fetch_optional(&st.db)
         .await?;
     let key = key.ok_or_else(ApiError::not_found)?;
+    if let Some(url) = st.storage.public_url(&key) {
+        return Ok(Redirect::permanent(&url).into_response());
+    }
     let bytes = st.storage.get(&key).await.map_err(ApiError::internal)?.ok_or_else(ApiError::not_found)?;
     let mime = if key.ends_with(".png") { "image/png" } else { "image/jpeg" };
     Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "public, max-age=300")], bytes).into_response())
@@ -438,18 +449,18 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
             (id, "1".to_string())
         }
     };
-    let file_key = format!("items/{id}/{version}.{}", islandscene::EXT);
-    st.storage.put(&file_key, &packed).await.map_err(ApiError::internal)?;
+    let file_key = st.storage.package_key(&format!("{id}/{version}.{}", islandscene::EXT));
+    st.storage.put(&file_key, &packed, "application/octet-stream").await.map_err(ApiError::internal)?;
     // Médias À PART (le catalogue les sert sans rouvrir le paquet). Une version remplace la fiche.
-    let mut assets: Vec<(&str, i32, String, &[u8])> = vec![("thumbnail", 0, format!("items/{id}/thumbnail-{version}.jpg"), &processed.thumbnail)];
+    let mut assets: Vec<(&str, i32, String, &[u8])> = vec![("thumbnail", 0, st.storage.media_key(&format!("{id}/thumbnail-{version}.jpg")), &processed.thumbnail)];
     if let Some(b) = &processed.banner {
-        assets.push(("banner", 0, format!("items/{id}/banner-{version}.jpg"), b));
+        assets.push(("banner", 0, st.storage.media_key(&format!("{id}/banner-{version}.jpg")), b));
     }
     for (n, b) in &processed.screenshots {
-        assets.push(("screenshot", *n as i32, format!("items/{id}/screenshot-{version}-{n}.jpg"), b));
+        assets.push(("screenshot", *n as i32, st.storage.media_key(&format!("{id}/screenshot-{version}-{n}.jpg")), b));
     }
     for (_, _, key, bytes) in &assets {
-        st.storage.put(key, bytes).await.map_err(ApiError::internal)?;
+        st.storage.put(key, bytes, "image/jpeg").await.map_err(ApiError::internal)?;
     }
     sqlx::query("INSERT INTO versions (item_id, version, status, file_key, size, sha256, scan, changelog) VALUES ($1, $2, 'approved', $3, $4, $5, $6, $7)")
         .bind(&id)

@@ -20,6 +20,8 @@ base64 = "0.22"
 getrandom = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "ico"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] } # API GitHub
+rusty-s3 = "0.10"
+url = "2" # R2 (API S3) : URL signées, sans dépendance réseau propre
 hmac = "0.12" # cookie de session signé (panneau d'administration)
 dotenvy = "0.15" # .env local (développement), jamais commité
 tracing = "0.1"

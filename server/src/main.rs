@@ -38,7 +38,28 @@ async fn main() {
         return token(&db, &args[1..]).await;
     }
 
-    let storage = Storage::from_config(&env("STORAGE").unwrap_or_else(|| "local:./data/files".into())).unwrap_or_else(|e| fail(e));
+    // STORE_ENV=dev : dossiers `media-dev/`, `packages-dev/` (même compartiment que la production).
+    let dev = env("STORE_ENV").as_deref() == Some("dev");
+    let storage = match env("STORAGE").unwrap_or_else(|| "local:./data/files".into()).as_str() {
+        "r2" => {
+            let need = |k: &str| env(k).unwrap_or_else(|| fail(format!("{k} manquant (STORAGE=r2)")));
+            let s = Storage::r2(
+                &need("R2_ACCOUNT_ID"),
+                &need("R2_ACCESS_KEY_ID"),
+                &need("R2_SECRET_ACCESS_KEY"),
+                &need("R2_BUCKET"),
+                &need("R2_MEDIA_URL"),
+                dev,
+            )
+            .unwrap_or_else(|e| fail(e));
+            tracing::info!("stockage : R2{}", if dev { " (dossiers -dev)" } else { "" });
+            s
+        }
+        other => match other.strip_prefix("local:") {
+            Some(dir) => Storage::local(dir.into(), dev),
+            None => fail("STORAGE : « r2 » ou « local:<dossier> »"),
+        },
+    };
     let bind = env("BIND").unwrap_or_else(|| "127.0.0.1:8080".into());
     let public_url = env("PUBLIC_URL").unwrap_or_else(|| format!("http://{bind}"));
     let session_key = match env("SESSION_KEY") {

@@ -25,7 +25,7 @@ fn router(db: PgPool) -> Router {
     let dir = std::env::temp_dir().join(format!("island-store-test-{}", uuid_like()));
     app(AppState {
         db,
-        storage: Arc::new(Storage::Local(dir)),
+        storage: Arc::new(Storage::local(dir, false)),
         clamav: None,
         trust_proxy: true,
         github: None,

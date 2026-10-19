@@ -62,7 +62,7 @@ pub async fn router(db: PgPool, admin: Option<i64>) -> Router {
     let gh = fake_github().await;
     app(AppState {
         db,
-        storage: Arc::new(Storage::Local(std::env::temp_dir().join("island-store-login-test"))),
+        storage: Arc::new(Storage::local(std::env::temp_dir().join("island-store-login-test"), false)),
         clamav: None,
         trust_proxy: false,
         github: Some(GitHub::new("client-id".into(), Some("secret".into()), gh.clone(), gh)),

@@ -18,7 +18,8 @@ cargo test                                 # tests (une base neuve par test)
 cd admin && pnpm install && pnpm build     # panneau, servi ensuite sur http://127.0.0.1:8080/admin
 ```
 
-Configuration locale : `server/.env` (lu au démarrage, jamais commité). Panneau en
+Configuration locale : `server/.env` (lu au démarrage, jamais commité) — partir de
+`server/.env.example`. Panneau en
 développement avec rechargement à chaud : `cd admin && pnpm dev` (http://127.0.0.1:5180/admin/,
 API relayée vers le serveur) — la connexion GitHub, elle, passe par le serveur (8080).
 
@@ -258,6 +259,32 @@ dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
 - `server/` : ce serveur. Workflow CI séparé (`server/**`, `crates/**` → `cargo test`), sans
   lien avec la release de l'app (tags `v*`).
 
+## Stockage R2
+
+Un seul compartiment (`island-store`), relié au domaine public `R2_MEDIA_URL`, rangé en
+dossiers ; le développement (`STORE_ENV=dev`) écrit dans les dossiers suffixés `-dev` :
+
+```
+island-store/
+  media/<id>/thumbnail-<v>.jpg, banner-<v>.jpg, screenshot-<v>-<n>.jpg   ← publics (CDN)
+  packages/<id>/<v>.islandscene                                           ← liens signés
+  media-dev/   packages-dev/                                              ← développement
+```
+
+- **Versions** : chaque publication crée un fichier `packages/<id>/<v>…` neuf, jamais
+  écrasé ; l'historique reste téléchargeable (`/download?version=`). La fiche montre les
+  médias de la dernière version.
+- **Médias** : la fiche renvoie directement les URL du CDN (cache d'un an, immuable : une
+  version = de nouveaux noms) ; les routes `/v1/items/{id}/media/…` y redirigent.
+- **Paquets** : `/download` compte le téléchargement puis redirige (303) vers une URL
+  **signée de 5 minutes** sur l'API S3 ; masquer un élément coupe donc tout nouveau lien.
+- **Règle WAF obligatoire** (Cloudflare › domaine › *Security › WAF › Custom rules*), sinon
+  un paquet masqué reste accessible par son adresse publique :
+  `(http.host eq "cdn.streemkit.com" and starts_with(http.request.uri.path, "/packages"))`
+  → **Block**.
+- Jeton R2 : *Object Read & Write*, limité au compartiment. Le jeton de développement a donc
+  aussi accès aux dossiers de production : en production, un jeton à part.
+
 ## Configuration (variables d'environnement)
 
 | Variable | |
@@ -265,6 +292,8 @@ dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
 | `DATABASE_URL` | Postgres (Neon) ; en local, un Postgres de développement ou une branche Neon |
 | `STORAGE` | `local:./data/files` (dev) ou `r2` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | stockage |
+| `R2_MEDIA_URL` | domaine public du compartiment (`https://cdn.streemkit.com`) |
+| `STORE_ENV` | `dev` : dossiers `media-dev/`, `packages-dev/` |
 | `GITHUB_CLIENT_ID` | OAuth (le *device flow* n'a pas besoin du secret) |
 | `GITHUB_CLIENT_SECRET` | OAuth web du panneau d'administration |
 | `ADMIN_GITHUB_ID` | identifiant numérique GitHub du super admin |
@@ -279,7 +308,8 @@ dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
 2. ✅ Serveur : squelette Axum, Postgres + migrations, stockage local, **scènes** (catalogue,
    recherche, fiche, téléchargement, publication via jeton, signalement), tests d'API.
 3. ✅ Auth GitHub (device flow, jetons ; OAuth web), rôles, admin par `ADMIN_GITHUB_ID`.
-4. ✅ Panneau d'administration : comptes, modérateurs, signalements, journal.
+4. ✅ Panneau d'administration : comptes, modérateurs, signalements, journal ; médias de la
+   fiche (convention `store/`) ; stockage R2 (CDN + liens signés).
 5. Écran Magasin dans Island + `island publish` dans le SDK.
 6. Extensions : types autorisés, file de modération (fichiers, différences), signature du
    magasin, état `Store` dans l'app, mises à jour.
