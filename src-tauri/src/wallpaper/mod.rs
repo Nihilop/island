@@ -1,11 +1,11 @@
 // Fonds animés (outil core) : scènes enregistrées, affectation par écran, moteur natif.
 //
-//   scene.rs   : format de scène v1 (données bornées) + uniformes + préréglages
-//   scene.wgsl : shader unique, partagé avec l'aperçu de l'éditeur
-//   engine.rs  : thread de rendu (fenêtres du calque du bureau, wgpu, pause, souris)
+//   scene.rs       : format de scène (calques, données bornées) + placement + uniformes + préréglages
+//   layer.wgsl     : passe d'un calque ; composite.wgsl : passe finale (partagés avec l'aperçu)
+//   engine.rs      : thread de rendu (fenêtres du calque du bureau, wgpu, pause, souris)
 //
-// Rangement : `<app_data>/wallpapers/scenes/<id>/scene.json` (+ l'image de fond copiée à
-// côté). Les préréglages (`preset-*`) sont en lecture seule. Affectation et options dans
+// Rangement : `<app_data>/wallpapers/scenes/<id>/scene.json` (+ les images des calques
+// copiées à côté). Les préréglages (`preset-*`) sont en lecture seule. Affectation et options dans
 // le store `__app__` (clé `wallpaper`) : une scène pour « Tous les écrans », que chaque
 // écran peut remplacer par la sienne. Restaurées au démarrage par le Rust lui-même —
 // masquer l'outil du dock n'arrête pas un fond appliqué.
@@ -76,7 +76,7 @@ fn scene_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
     Ok(scenes_dir(app)?.join(id))
 }
 
-/// Scène + chemin absolu de son image (si elle en a une).
+/// Scène + dossier de ses images (None pour un préréglage).
 fn load(app: &AppHandle, id: &str) -> Result<(Scene, Option<PathBuf>), String> {
     if is_preset(id) {
         let (_, s) = scene::presets().into_iter().find(|(p, _)| *p == id).ok_or("invalidScene")?;
@@ -86,8 +86,7 @@ fn load(app: &AppHandle, id: &str) -> Result<(Scene, Option<PathBuf>), String> {
     let raw = std::fs::read(dir.join("scene.json")).map_err(|_| "invalidScene")?;
     let s: Scene = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
     s.check()?;
-    let img = s.background.image.as_ref().map(|f| dir.join(f)).filter(|p| p.is_file());
-    Ok((s, img))
+    Ok((s, Some(dir)))
 }
 
 // --- Commandes : scènes ----------------------------------------------------------------
@@ -147,10 +146,11 @@ pub fn wallpaper_save(app: AppHandle, id: String, scene: Scene) -> Result<(), St
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let mut s = scene;
     s.version = scene::VERSION;
-    // Images qui ne servent plus (remplacées dans l'éditeur).
+    // Images qui ne servent plus (calque supprimé, image remplacée).
+    let keep: std::collections::HashSet<&String> = s.images().collect();
     for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let n = e.file_name().to_string_lossy().to_string();
-        if n != "scene.json" && Some(&n) != s.background.image.as_ref() {
+        if n != "scene.json" && !keep.contains(&n) {
             let _ = std::fs::remove_file(e.path());
         }
     }
@@ -181,7 +181,7 @@ pub fn wallpaper_delete(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 /// Copie une image choisie par l'utilisateur dans le dossier de la scène ; renvoie son nom
-/// (à mettre dans `background.image`). Horodaté : l'aperçu ne garde pas l'ancienne en cache.
+/// (à mettre dans `image` d'un calque). Horodaté : l'aperçu ne garde pas l'ancienne en cache.
 #[tauri::command]
 pub fn wallpaper_import_image(app: AppHandle, id: String, path: String) -> Result<String, String> {
     let dir = scene_dir(&app, &id)?;
@@ -189,7 +189,7 @@ pub fn wallpaper_import_image(app: AppHandle, id: String, path: String) -> Resul
     let ext = src.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
     let ext = if ext == "jpeg" { "jpg".to_string() } else { ext };
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-    let name = format!("background-{stamp}.{ext}");
+    let name = format!("layer-{stamp}.{ext}");
     if !scene::valid_image_name(&name) || !src.is_file() {
         return Err("invalidImage".into());
     }
@@ -240,7 +240,7 @@ fn push(app: &AppHandle) {
             cache
                 .entry(id.to_string())
                 .or_insert_with(|| match load(app, id) {
-                    Ok((scene, image)) => Some(engine::Loaded { id: id.to_string(), scene: Box::new(scene), image }),
+                    Ok((scene, dir)) => Some(engine::Loaded { id: id.to_string(), scene: Box::new(scene), dir }),
                     Err(e) => {
                         eprintln!("[wallpaper] scène {id} : {e}");
                         None

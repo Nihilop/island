@@ -9,7 +9,7 @@ import IconButton from "../../ui/IconButton.vue";
 import TextField from "../../ui/TextField.vue";
 import { Spinner } from "@/sdk/ui/spinner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/sdk/ui/collapsible";
-import { apply, deleteScene, displays as listDisplays, gradientCss, imageUrl, openEditor, sceneOn, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
+import { apply, deleteScene, displays as listDisplays, fillCss, imageUrl, openEditor, sceneOn, thumbLayer, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
 import type { SceneEntry } from "../../wallpaper/scene";
 import { t } from "../../notch/i18n";
 
@@ -87,20 +87,20 @@ const visible = computed(() => filtered.value.slice(page.value * PAGE, page.valu
 watch([query, pages], () => (page.value = Math.min(page.value, pages.value - 1)));
 watch(query, () => (page.value = 0));
 
-async function thumb(e: SceneEntry) {
-  const img = e.scene.background.image;
-  if (e.scene.background.kind === "image" && img && !thumbs[e.id + img]) thumbs[e.id + img] = await imageUrl(e.id, img).catch(() => "");
+async function thumb(id: string, img: string) {
+  if (!thumbs[id + img]) thumbs[id + img] = await imageUrl(id, img).catch(() => "");
 }
 
+/** Vignette : le calque de fond de la scène (image ou couleur / dégradé). */
 function style(e: SceneEntry | undefined) {
-  if (!e) return { background: "var(--color-fill-2)" };
-  const img = e.scene.background.image;
-  if (e.scene.background.kind === "image" && img) {
-    void thumb(e);
-    const url = thumbs[e.id + img];
+  const l = e && thumbLayer(e.scene);
+  if (!e || !l) return { background: "var(--color-fill-2)" };
+  if (l.kind === "image" && l.image) {
+    void thumb(e.id, l.image);
+    const url = thumbs[e.id + l.image];
     return url ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "var(--color-fill-2)" };
   }
-  return { background: gradientCss(e.scene) };
+  return { background: fillCss(l) };
 }
 
 // --- Actions --------------------------------------------------------------------------------

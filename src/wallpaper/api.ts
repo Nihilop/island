@@ -4,7 +4,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { reactive } from "vue";
-import { normalize, type Scene, type SceneEntry } from "./scene";
+import { normalize, type Layer, type Scene, type SceneEntry } from "./scene";
 import { t } from "../notch/i18n";
 
 export interface WallpaperState {
@@ -97,10 +97,15 @@ export async function imageBitmap(id: string, name: string): Promise<ImageBitmap
   return createImageBitmap(new Blob([buf]));
 }
 
-/** Fond CSS d'une vignette de dégradé (même angle que le shader : 0° = vers la droite). */
-export function gradientCss(s: Scene): string {
-  const [a, b] = s.background.colors;
-  return `linear-gradient(${s.background.angle + 90}deg, ${a}, ${b})`;
+/** Calque qui sert de vignette : le plus bas des calques visibles (le fond de la scène). */
+export function thumbLayer(s: Scene): Layer | null {
+  return s.layers.find((l) => l.visible && (l.kind === "fill" || (l.kind === "image" && l.image))) ?? null;
+}
+
+/** Fond CSS d'un calque couleur / dégradé (même angle que le shader : 0° = vers la droite). */
+export function fillCss(l: Layer): string {
+  const [a, b] = l.fill.colors;
+  return l.fill.mode === "solid" ? a : `linear-gradient(${l.fill.angle + 90}deg, ${a}, ${b})`;
 }
 
 /** Ouvre l'éditeur (fenêtre unique) sur une scène, ou sur une nouvelle. */

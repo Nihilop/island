@@ -2,6 +2,12 @@
 // calque `WorkerW`, cf. `services::desktop`), pompe leurs messages et les dessine avec
 // wgpu (DX12 seul). Piloté par messages (`Cmd`) ; sans scène, le thread dort.
 //
+// Rendu d'un écran, à chaque image :
+//   1. les calques visibles, du bas vers le haut, dans une image intermédiaire (couleur
+//      prémultipliée ; un pipeline par mode de fusion) — `layer.wgsl` ;
+//   2. la passe finale vers la fenêtre (ondulations, traînée, couleur, vignette, grain) —
+//      `composite.wgsl`.
+//
 // Économie : pause d'un écran couvert par une fenêtre maximisée / plein écran, pause de
 // tous pendant une app plein écran (détection de l'hôte) ou un jeu (service Activité) ;
 // aucune image n'est alors calculée. La souris est LUE à chaque image (pas de hook) et
@@ -30,12 +36,13 @@ use super::scene::{self, Frame, Scene};
 use crate::services::desktop::windows as desktop;
 use crate::services::hardware::{displays, DisplayInfo};
 
-/// Une scène chargée, prête pour le moteur (image de fond résolue en chemin absolu).
+/// Une scène chargée, prête pour le moteur (`dir` = dossier de ses images ; None pour un
+/// préréglage, qui n'en a pas).
 #[derive(Clone)]
 pub struct Loaded {
     pub id: String,
     pub scene: Box<Scene>,
-    pub image: Option<PathBuf>,
+    pub dir: Option<PathBuf>,
 }
 
 pub enum Cmd {
@@ -86,18 +93,39 @@ fn set_status(app: &AppHandle, s: Status) {
 
 // --- GPU ---------------------------------------------------------------------------------
 
+/// Formats sans sRGB : mêmes calculs de couleur que l'aperçu WebGPU de l'éditeur.
+const TEX_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+
+type Tex = (wgpu::TextureView, (f32, f32));
+
 struct Gpu {
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    pipeline: wgpu::RenderPipeline,
+    /// Un pipeline de calque par mode de fusion (`scene::blend_index`).
+    layer_pipelines: [wgpu::RenderPipeline; 4],
+    composite_pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// Texture 1×1 des calques sans image.
+    blank: Tex,
 }
 
-/// Format sans sRGB : mêmes calculs de couleur que l'aperçu WebGPU de l'éditeur.
-const TEX_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Couleur prémultipliée : normal, ajout, superposition (screen), produit (multiply).
+fn blend_state(i: usize) -> wgpu::BlendState {
+    use wgpu::{BlendComponent as C, BlendFactor as F, BlendOperation as O};
+    let comp = |src, dst| C { src_factor: src, dst_factor: dst, operation: O::Add };
+    let alpha = comp(F::One, F::OneMinusSrcAlpha);
+    let color = match i {
+        1 => comp(F::One, F::One),
+        2 => comp(F::One, F::OneMinusSrc),
+        3 => comp(F::Dst, F::OneMinusSrcAlpha),
+        _ => comp(F::One, F::OneMinusSrcAlpha),
+    };
+    wgpu::BlendState { color, alpha }
+}
 
 impl Gpu {
     fn new() -> Result<Self, String> {
@@ -116,54 +144,45 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| e.to_string())?;
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()),
-        });
+        let entry = |binding, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::FRAGMENT, ty, count: None };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
+                entry(0, wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }),
+                entry(
+                    1,
+                    wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
+                ),
+                entry(2, wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)),
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene"),
-            layout: Some(&pl),
-            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Bgra8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipeline = |module: &wgpu::ShaderModule, format, blend: Option<wgpu::BlendState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: Some(&pl),
+                vertex: wgpu::VertexState { module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let layer = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("layer"), source: wgpu::ShaderSource::Wgsl(include_str!("layer.wgsl").into()) });
+        let composite = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("composite"), source: wgpu::ShaderSource::Wgsl(include_str!("composite.wgsl").into()) });
+        let layer_pipelines = [0, 1, 2, 3].map(|i| pipeline(&layer, TEX_FORMAT, Some(blend_state(i))));
+        let composite_pipeline = pipeline(&composite, SURFACE_FORMAT, None);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -171,35 +190,97 @@ impl Gpu {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        Ok(Self { instance, adapter, device, queue, pipeline, layout, sampler })
+        let blank = upload(&device, &queue, &image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0])));
+        Ok(Self { instance, adapter, device, queue, layer_pipelines, composite_pipeline, layout, sampler, blank })
     }
 
-    /// Image de fond (1×1 noir pour un dégradé). Bornée à 8192 px (limite des textures).
-    fn texture(&self, path: Option<&PathBuf>) -> (wgpu::TextureView, (f32, f32)) {
-        let img = path.and_then(|p| image::open(p).ok()).map(|i| {
-            let max = 8192;
-            if i.width() > max || i.height() > max { i.resize(max, max, image::imageops::FilterType::Triangle) } else { i }
-        });
-        let rgba = img.map(|i| i.to_rgba8()).unwrap_or_else(|| image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])));
-        let (w, h) = rgba.dimensions();
-        let size = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("background"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TEX_FORMAT,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &rgba,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
-            size,
-        );
-        (tex.create_view(&Default::default()), (w as f32, h as f32))
+    fn upload(&self, rgba: &image::RgbaImage) -> Tex {
+        upload(&self.device, &self.queue, rgba)
+    }
+
+    /// Image d'un calque, bornée à 8192 px (limite des textures) ; None si illisible.
+    fn image(&self, path: &PathBuf) -> Option<Tex> {
+        let img = image::open(path).ok()?;
+        let img = if img.width() > 8192 || img.height() > 8192 { img.resize(8192, 8192, image::imageops::FilterType::Triangle) } else { img };
+        Some(self.upload(&img.to_rgba8()))
+    }
+
+    fn bind(&self, buf: &wgpu::Buffer, view: &wgpu::TextureView) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+            ],
+        })
+    }
+
+    fn buffer(&self, vec4s: usize) -> wgpu::Buffer {
+        self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (vec4s * 16) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Image intermédiaire (calques composés) d'un écran.
+    fn target(&self, w: u32, h: u32) -> wgpu::TextureView {
+        self.device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("composite"),
+                size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TEX_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default())
+    }
+}
+
+fn upload(device: &wgpu::Device, queue: &wgpu::Queue, rgba: &image::RgbaImage) -> Tex {
+    let (w, h) = rgba.dimensions();
+    let size = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: TEX_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        rgba,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
+        size,
+    );
+    (tex.create_view(&Default::default()), (w as f32, h as f32))
+}
+
+/// Textures des images de calques, par `<scène>/<fichier>` (partagées entre écrans).
+type Textures = HashMap<String, Tex>;
+
+fn layer_tex<'a>(gpu: &'a Gpu, textures: &'a Textures, sc: &Loaded, l: &scene::Layer) -> &'a Tex {
+    l.image.as_ref().and_then(|f| textures.get(&format!("{}/{f}", sc.id))).unwrap_or(&gpu.blank)
+}
+
+fn load_textures(gpu: &Gpu, sc: &Loaded, textures: &mut Textures) {
+    let Some(dir) = &sc.dir else { return };
+    for f in sc.scene.images() {
+        let key = format!("{}/{f}", sc.id);
+        if !textures.contains_key(&key) {
+            if let Some(t) = gpu.image(&dir.join(f)) {
+                textures.insert(key, t);
+            }
+        }
     }
 }
 
@@ -237,23 +318,49 @@ impl Drop for Win {
     }
 }
 
-/// Un écran : sa scène, sa fenêtre enfant du calque, sa surface et ses uniformes. Les
-/// champs sont libérés dans l'ordre : la surface AVANT sa fenêtre (`_win` en dernier).
+/// Ressources GPU d'un calque sur un écran.
+struct LayerGpu {
+    uniforms: wgpu::Buffer,
+    bind: wgpu::BindGroup,
+    tex: (f32, f32),
+}
+
+/// Un écran : sa scène, sa fenêtre enfant du calque, sa surface, son image intermédiaire et
+/// les ressources de ses calques. Les champs sont libérés dans l'ordre : la surface AVANT
+/// sa fenêtre (`_win` en dernier).
 struct Output {
     display: DisplayInfo,
     scene: Box<Scene>,
-    image: (f32, f32),
+    layers: Vec<LayerGpu>,
+    target: wgpu::TextureView,
+    comp_uniforms: wgpu::Buffer,
+    comp_bind: wgpu::BindGroup,
     hwnd: HWND,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    uniforms: wgpu::Buffer,
-    bind: wgpu::BindGroup,
     paused: bool,
     _win: Win,
 }
 
-fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, scene: &Loaded, tex: &(wgpu::TextureView, (f32, f32))) -> Result<Output, String> {
-    let view = &tex.0;
+impl Output {
+    /// (Re)branche une scène sur cet écran : un tampon d'uniformes et une texture par calque.
+    fn set_scene(&mut self, gpu: &Gpu, textures: &Textures, sc: &Loaded) {
+        self.layers = sc
+            .scene
+            .layers
+            .iter()
+            .map(|l| {
+                let t = layer_tex(gpu, textures, sc, l);
+                let uniforms = gpu.buffer(scene::LAYER_VEC4S);
+                let bind = gpu.bind(&uniforms, &t.0);
+                LayerGpu { uniforms, bind, tex: t.1 }
+            })
+            .collect();
+        self.scene = sc.scene.clone();
+    }
+}
+
+fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, sc: &Loaded, textures: &Textures) -> Result<Output, String> {
     register_class();
     // Coordonnées du calque (il couvre tout le bureau virtuel, origine variable).
     let mut p = POINT { x: d.x, y: d.y };
@@ -277,6 +384,7 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, scene: &Loaded, tex: &
         )
     }
     .map_err(|e| e.to_string())?;
+    let win = Win(hwnd);
     let handle = raw_window_handle::Win32WindowHandle::new(std::num::NonZeroIsize::new(hwnd.0 as isize).ok_or("hwnd")?);
     let surface = unsafe {
         gpu.instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -284,37 +392,34 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, scene: &Loaded, tex: &
             raw_window_handle: raw_window_handle::RawWindowHandle::Win32(handle),
         })
     }
-    .map_err(|e| {
-        unsafe {
-            let _ = DestroyWindow(hwnd);
-        }
-        e.to_string()
-    })?;
+    .map_err(|e| e.to_string())?;
     let mut config = surface.get_default_config(&gpu.adapter, d.width.max(1), d.height.max(1)).ok_or("surfaceConfig")?;
-    config.format = wgpu::TextureFormat::Bgra8Unorm;
+    config.format = SURFACE_FORMAT;
     config.present_mode = wgpu::PresentMode::Fifo;
     config.desired_maximum_frame_latency = 1;
     surface.configure(&gpu.device, &config);
-    let uniforms = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("uniforms"),
-        size: (scene::VEC4S * 16) as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let bind = bind_group(gpu, &uniforms, view);
-    Ok(Output { display: d.clone(), scene: scene.scene.clone(), image: tex.1, hwnd, surface, config, uniforms, bind, paused: false, _win: Win(hwnd) })
+    let target = gpu.target(config.width, config.height);
+    let comp_uniforms = gpu.buffer(scene::COMPOSITE_VEC4S);
+    let comp_bind = gpu.bind(&comp_uniforms, &target);
+    let mut o = Output {
+        display: d.clone(),
+        scene: sc.scene.clone(),
+        layers: Vec::new(),
+        target,
+        comp_uniforms,
+        comp_bind,
+        hwnd,
+        surface,
+        config,
+        paused: false,
+        _win: win,
+    };
+    o.set_scene(gpu, textures, sc);
+    Ok(o)
 }
 
-fn bind_group(gpu: &Gpu, uniforms: &wgpu::Buffer, view: &wgpu::TextureView) -> wgpu::BindGroup {
-    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &gpu.layout,
-        entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(view) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&gpu.sampler) },
-        ],
-    })
+fn bytes<const N: usize>(u: &[[f32; 4]; N]) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(u.as_ptr() as *const u8, std::mem::size_of_val(u)) }
 }
 
 fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
@@ -326,27 +431,43 @@ fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
         }
         _ => return,
     };
-    let u = scene::pack(&o.scene, f);
-    let bytes = unsafe { std::slice::from_raw_parts(u.as_ptr() as *const u8, std::mem::size_of_val(&u)) };
-    gpu.queue.write_buffer(&o.uniforms, 0, bytes);
+    for (l, g) in o.scene.layers.iter().zip(&o.layers) {
+        if l.visible {
+            gpu.queue.write_buffer(&g.uniforms, 0, bytes(&scene::pack_layer(&o.scene, l, f, g.tex)));
+        }
+    }
+    gpu.queue.write_buffer(&o.comp_uniforms, 0, bytes(&scene::pack_composite(&o.scene, f)));
     let view = frame.texture.create_view(&Default::default());
     let mut enc = gpu.device.create_command_encoder(&Default::default());
+    let attach = |view, load| wgpu::RenderPassColorAttachment { view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load, store: wgpu::StoreOp::Store } };
     {
         let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-            })],
+            label: Some("layers"),
+            color_attachments: &[Some(attach(&o.target, wgpu::LoadOp::Clear(wgpu::Color::BLACK)))],
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&gpu.pipeline);
-        pass.set_bind_group(0, &o.bind, &[]);
+        for (l, g) in o.scene.layers.iter().zip(&o.layers) {
+            if l.visible {
+                pass.set_pipeline(&gpu.layer_pipelines[scene::blend_index(&l.blend)]);
+                pass.set_bind_group(0, &g.bind, &[]);
+                pass.draw(0..3, 0..1);
+            }
+        }
+    }
+    {
+        let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("composite"),
+            color_attachments: &[Some(attach(&view, wgpu::LoadOp::Clear(wgpu::Color::BLACK)))],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&gpu.composite_pipeline);
+        pass.set_bind_group(0, &o.comp_bind, &[]);
         pass.draw(0..3, 0..1);
     }
     gpu.queue.submit([enc.finish()]);
@@ -396,8 +517,7 @@ fn covered(d: &DisplayInfo) -> bool {
 struct Live {
     all: Option<Loaded>,
     screens: BTreeMap<String, Option<Loaded>>,
-    /// Une texture par scène affichée (partagée par les écrans qui la montrent).
-    textures: HashMap<String, (wgpu::TextureView, (f32, f32))>,
+    textures: Textures,
     outputs: Vec<Output>,
 }
 
@@ -418,7 +538,7 @@ impl Live {
                 trail = true;
                 fade = fade.max(t.fade);
             }
-            follow |= o.scene.effects.parallax.as_ref().is_some_and(|p| p.mouse > 0.0);
+            follow |= o.scene.parallax.as_ref().is_some_and(|p| p.mouse > 0.0);
         }
         (ripple, trail, follow, fade)
     }
@@ -443,20 +563,26 @@ fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
     let mut kept = 0;
     let mut layer: Option<HWND> = None;
     let mut textures = std::mem::take(&mut l.textures);
-    let mut used: HashMap<String, (wgpu::TextureView, (f32, f32))> = HashMap::new();
     let mut out = Vec::new();
-    for d in displays() {
-        let Some(sc) = l.resolve(&d).cloned() else { continue };
-        if !used.contains_key(&sc.id) {
-            let tex = textures.remove(&sc.id).unwrap_or_else(|| gpu.texture(sc.image.as_ref()));
-            used.insert(sc.id.clone(), tex);
+    let screens = displays();
+    // Textures des scènes affichées seulement (les autres sont libérées).
+    let mut used = Textures::new();
+    for d in &screens {
+        if let Some(sc) = l.resolve(d) {
+            for f in sc.scene.images() {
+                let key = format!("{}/{f}", sc.id);
+                if let Some(t) = textures.remove(&key) {
+                    used.insert(key, t);
+                }
+            }
+            load_textures(gpu, sc, &mut used);
         }
-        let tex = &used[&sc.id];
+    }
+    for d in screens {
+        let Some(sc) = l.resolve(&d).cloned() else { continue };
         if let Some(i) = old.iter().position(|o| o.display == d) {
             let mut o = old.swap_remove(i);
-            o.scene = sc.scene.clone();
-            o.image = tex.1;
-            o.bind = bind_group(gpu, &o.uniforms, &tex.0);
+            o.set_scene(gpu, &used, &sc);
             kept += 1;
             out.push(o);
             continue;
@@ -469,7 +595,7 @@ fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
                 h
             }
         };
-        out.push(create_output(gpu, parent, &d, &sc, tex)?);
+        out.push(create_output(gpu, parent, &d, &sc, &used)?);
     }
     l.textures = used;
     l.outputs = out;
@@ -518,8 +644,8 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
                     }
                 }
                 let g = gpu.as_ref().unwrap();
-                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: HashMap::new(), outputs: Vec::new() });
-                // Nouvelle affectation : textures rechargées (l'image a pu changer).
+                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), outputs: Vec::new() });
+                // Nouvelle affectation : images rechargées (elles ont pu changer).
                 l.textures.clear();
                 l.all = all;
                 l.screens = screens;
@@ -615,7 +741,7 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
             // Parallaxe : le curseur partout (on ne voit le fond que là où il est visible) ;
             // interactions : seulement quand il survole le bureau.
             let mouse = cursor.map(|p| ((p.x - dx) as f32, (p.y - dy) as f32));
-            let f = Frame { width: o.config.width as f32, height: o.config.height as f32, image: o.image, time: t, mouse, ripples: &rl, trail: &tl };
+            let f = Frame { width: o.config.width as f32, height: o.config.height as f32, time: t, mouse, ripples: &rl, trail: &tl };
             render(g, o, &f);
         }
 

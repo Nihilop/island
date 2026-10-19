@@ -1,29 +1,34 @@
 <script setup lang="ts">
-// Éditeur de fonds animés (fenêtre détachée `wallpaper-editor`) : une image ou un dégradé,
-// des effets, des interactions souris, aperçu en direct (WebGPU, même shader que le fond
-// natif). Arguments d'ouverture : `{ id }` (scène à éditer ; un préréglage s'édite en copie)
+// Éditeur de fonds animés (fenêtre détachée `wallpaper-editor`), à calques : outliner à
+// gauche (Scène + calques), aperçu au centre (WebGPU, mêmes shaders que le fond natif) avec
+// poignées pour déplacer / redimensionner un calque placé, propriétés de la sélection à
+// droite. Arguments d'ouverture : `{ id }` (scène à éditer ; un préréglage s'édite en copie)
 // ou rien (nouvelle scène).
 import { computed, onBeforeUnmount, onMounted, ref, toRaw, watch } from "vue";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { PhCheck, PhImage, PhMinus, PhMonitor, PhWarning, PhX } from "@phosphor-icons/vue";
+import { PhCheck, PhMinus, PhMonitor, PhWarning, PhX } from "@phosphor-icons/vue";
 import IconButton from "../ui/IconButton.vue";
-import Segmented from "../ui/Segmented.vue";
-import { Switch } from "@/sdk/ui/switch";
 import { Button } from "@/sdk/ui/button";
-import Param from "./Param.vue";
+import Outliner from "./Outliner.vue";
+import LayerPanel from "./LayerPanel.vue";
+import ScenePanel from "./ScenePanel.vue";
 import { Preview } from "./preview";
-import { DEFAULTS, newScene, PARTICLE_PRESETS, type Scene } from "./scene";
+import { layerBox, layerId, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
 import { apply, getScene, imageBitmap, importImage, newId, saveScene } from "./api";
 import { t } from "../notch/i18n";
 
 const win = getCurrentWindow();
 const id = ref(newId());
-const scene = ref<Scene>(newScene(t("wall.untitled")));
-const saved = ref(JSON.stringify(scene.value));
-const dirty = computed(() => JSON.stringify(scene.value) !== saved.value);
+const scene = ref<Scene>(newScene(t("wall.untitled"), t("wall.kind.fill")));
+/** État de référence (à l'ouverture ou au dernier enregistrement). */
+const baseline = ref("");
+/** Jamais enregistrée (nouvelle scène, copie d'un préréglage). */
+const isNew = ref(true);
+const dirty = computed(() => JSON.stringify(scene.value) !== baseline.value);
+const selected = ref<string>("scene");
 const error = ref<string | null>(null);
 const saving = ref(false);
 const applying = ref(false);
@@ -31,7 +36,10 @@ const importing = ref(false);
 const noGpu = ref(false);
 
 const canvas = ref<HTMLCanvasElement | null>(null);
+const stage = ref<HTMLElement | null>(null);
 let preview: Preview | null = null;
+
+const layer = computed(() => scene.value.layers.find((l) => l.id === selected.value) ?? null);
 
 // --- Thème (comme les notes) ---------------------------------------------------------------
 
@@ -44,15 +52,9 @@ function applyTheme(v: "dark" | "light") {
 
 // --- Chargement -----------------------------------------------------------------------------
 
-async function loadImage() {
-  const img = scene.value.background.image;
-  if (!preview) return;
-  if (scene.value.background.kind !== "image" || !img) return void (await preview.setImage(null));
-  const bmp = await imageBitmap(id.value, img).catch(() => null);
-  await preview.setImage(bmp);
-}
+const loadImage = (name: string) => imageBitmap(id.value, name);
 
-async function open(args: { id?: string } | null) {
+async function open(args: { id?: string | null } | null) {
   error.value = null;
   try {
     if (args?.id) {
@@ -62,19 +64,21 @@ async function open(args: { id?: string } | null) {
         id.value = newId();
         s.name = t("wall.copyOf", { name: s.name });
         scene.value = s;
-        saved.value = "";
+        isNew.value = true;
       } else {
         id.value = args.id;
         scene.value = s;
-        saved.value = JSON.stringify(s);
+        isNew.value = false;
       }
     } else {
       id.value = newId();
-      scene.value = newScene(t("wall.untitled"));
-      saved.value = "";
+      scene.value = newScene(t("wall.untitled"), t("wall.kind.fill"));
+      isNew.value = true;
     }
+    baseline.value = JSON.stringify(scene.value);
+    selected.value = "scene";
+    preview?.resetImages();
     preview?.setScene(scene.value);
-    await loadImage();
   } catch (e) {
     error.value = String(e);
   }
@@ -82,60 +86,142 @@ async function open(args: { id?: string } | null) {
 
 watch(scene, (s) => preview?.setScene(s), { deep: true });
 
-// --- Fond -----------------------------------------------------------------------------------
+// --- Calques --------------------------------------------------------------------------------
 
-async function pickImage() {
+async function pickFile(): Promise<{ name: string; file: string; size: [number, number] } | null> {
   const path = await openDialog({ multiple: false, filters: [{ name: t("wall.images"), extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }] });
-  if (typeof path !== "string") return;
+  if (typeof path !== "string") return null;
   importing.value = true;
   try {
-    scene.value.background.image = await importImage(id.value, path);
-    scene.value.background.kind = "image";
-    await loadImage();
+    const name = await importImage(id.value, path);
+    const bmp = await imageBitmap(id.value, name);
+    const file = (path.split(/[\\/]/).pop() ?? "").replace(/\.[^.]+$/, "");
+    return { name, file, size: [bmp.width, bmp.height] };
   } catch (e) {
     error.value = String(e);
+    return null;
   } finally {
     importing.value = false;
   }
 }
 
-const kind = computed({
-  get: () => scene.value.background.kind,
-  set: (v) => {
-    scene.value.background.kind = v;
-    void loadImage();
-  },
-});
-
-// --- Effets : interrupteurs ----------------------------------------------------------------
-
-type Toggle = "water" | "parallax" | "particles" | "color" | "ripple" | "trail" | "grain" | "vignette";
-function isOn(k: Toggle): boolean {
-  const s = scene.value;
-  if (k === "ripple" || k === "trail") return !!s.interactions[k];
-  return s.effects[k] !== null;
-}
-function setOn(k: Toggle, on: boolean) {
-  const s = scene.value;
-  if (k === "ripple" || k === "trail") s.interactions[k] = on ? (DEFAULTS[k]() as never) : null;
-  else if (k === "grain") s.effects.grain = on ? 0.2 : null;
-  else if (k === "vignette") s.effects.vignette = on ? 0.4 : null;
-  else s.effects[k] = on ? (DEFAULTS[k]() as never) : null;
+async function addLayer(kind: LayerKind) {
+  if (scene.value.layers.length >= MAX_LAYERS) return;
+  const l = newLayer(kind, t(`wall.kind.${kind}`));
+  if (kind === "image") {
+    const f = await pickFile();
+    if (!f) return;
+    l.image = f.name;
+    l.name = f.file.slice(0, 80) || l.name;
+    // Grande image aux proportions de l'écran (ou premier calque) : en fond ; sinon placée.
+    const [pw, ph] = preview?.pixelSize() ?? [16, 9];
+    const close = Math.abs(f.size[0] / f.size[1] - pw / ph) < 0.35;
+    if (!scene.value.layers.length || (f.size[0] >= 1280 && close)) l.transform.fit = "cover";
+    else l.transform = { fit: "free", anchor: "c", x: 0, y: 0, width: 0.3, rotation: 0 };
+  }
+  if (kind === "particles") l.blend = "normal";
+  scene.value.layers.push(l);
+  selected.value = l.id;
 }
 
-const effectRows: { k: Toggle; label: string }[] = [
-  { k: "water", label: "wall.fx.water" },
-  { k: "parallax", label: "wall.fx.parallax" },
-  { k: "particles", label: "wall.fx.particles" },
-  { k: "color", label: "wall.fx.color" },
-  { k: "grain", label: "wall.fx.grain" },
-  { k: "vignette", label: "wall.fx.vignette" },
-];
+async function changeImage() {
+  const l = layer.value;
+  if (!l) return;
+  const f = await pickFile();
+  if (f) l.image = f.name;
+}
 
-/** Préréglage de particules : remplit les réglages (densité et opacité gardées). */
-function particlePreset(k: keyof typeof PARTICLE_PRESETS) {
-  const p = scene.value.effects.particles;
-  if (p) Object.assign(p, PARTICLE_PRESETS[k]);
+function duplicate(lid: string) {
+  const list = scene.value.layers;
+  const i = list.findIndex((l) => l.id === lid);
+  if (i < 0 || list.length >= MAX_LAYERS) return;
+  const copy: Layer = JSON.parse(JSON.stringify(toRaw(list[i])));
+  copy.id = layerId();
+  copy.name = t("wall.copyOf", { name: list[i].name });
+  list.splice(i + 1, 0, copy);
+  selected.value = copy.id;
+}
+
+function remove(lid: string) {
+  scene.value.layers = scene.value.layers.filter((l) => l.id !== lid);
+  if (selected.value === lid) selected.value = "scene";
+}
+
+// --- Poignées sur l'aperçu ------------------------------------------------------------------
+
+/** Rafraîchit les poignées (images qui finissent de charger, canvas redimensionné). */
+const tick = ref(0);
+let tickTimer: number | undefined;
+
+/** Un calque placé à la main : image en mode « libre ». */
+const movable = (l: Layer) => l.kind === "image" && l.transform.fit === "free" && l.visible && !l.locked && !!l.image;
+
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rot: number;
+}
+
+/** Rectangle d'un calque en px CSS du canvas (sans la parallaxe, qui bouge). */
+function cssBox(l: Layer): Box | null {
+  void tick.value;
+  if (!preview || !canvas.value) return null;
+  const [pw, ph] = preview.pixelSize();
+  const dpr = pw / Math.max(canvas.value.clientWidth, 1);
+  const [cx, cy, hw, hh] = layerBox({ ...scene.value, parallax: null }, l, { width: pw, height: ph, time: 0, mouse: null, ripples: [], trail: [] }, preview.texSize(l));
+  return { x: (cx - hw) / dpr, y: (cy - hh) / dpr, w: (hw * 2) / dpr, h: (hh * 2) / dpr, rot: l.transform.rotation };
+}
+
+const gizmo = computed(() => (layer.value && movable(layer.value) ? cssBox(layer.value) : null));
+
+type Drag = { mode: "move" | "resize"; sign: number; x0: number; y0: number; t0: { x: number; y: number; width: number } };
+let drag: Drag | null = null;
+
+function startDrag(e: PointerEvent, mode: Drag["mode"], sign = 1) {
+  const l = layer.value;
+  if (!l) return;
+  e.stopPropagation();
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  drag = { mode, sign, x0: e.clientX, y0: e.clientY, t0: { x: l.transform.x, y: l.transform.y, width: l.transform.width } };
+  if (preview) preview.interactive = false;
+}
+
+function onDrag(e: PointerEvent) {
+  const l = layer.value;
+  if (!drag || !l || !canvas.value) return;
+  const cw = canvas.value.clientWidth;
+  const ch = canvas.value.clientHeight;
+  const dx = e.clientX - drag.x0;
+  const dy = e.clientY - drag.y0;
+  if (drag.mode === "move") {
+    l.transform.x = +(drag.t0.x + dx / cw).toFixed(4);
+    l.transform.y = +(drag.t0.y + dy / ch).toFixed(4);
+  } else {
+    l.transform.width = +Math.min(1.5, Math.max(0.02, drag.t0.width + (drag.sign * dx) / cw)).toFixed(4);
+  }
+}
+
+function endDrag() {
+  drag = null;
+  if (preview) preview.interactive = true;
+}
+
+/** Clic sur l'aperçu : sélectionne le calque placé le plus haut sous le curseur. */
+function pickAt(e: PointerEvent) {
+  if (!stage.value) return;
+  const r = stage.value.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const y = e.clientY - r.top;
+  for (const l of [...scene.value.layers].reverse()) {
+    if (!movable(l)) continue;
+    const b = cssBox(l);
+    if (b && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+      selected.value = l.id;
+      return;
+    }
+  }
 }
 
 // --- Enregistrer / appliquer ---------------------------------------------------------------
@@ -149,7 +235,8 @@ async function save(): Promise<boolean> {
     s.name = s.name.trim() || t("wall.untitled");
     await saveScene(id.value, s);
     scene.value.name = s.name;
-    saved.value = JSON.stringify(scene.value);
+    baseline.value = JSON.stringify(scene.value);
+    isNew.value = false;
     return true;
   } catch (e) {
     error.value = String(e);
@@ -163,7 +250,7 @@ async function saveAndApply() {
   if (applying.value) return;
   applying.value = true;
   try {
-    if ((dirty.value || !saved.value) && !(await save())) return;
+    if ((dirty.value || isNew.value) && !(await save())) return;
     await apply(id.value);
   } catch (e) {
     error.value = String(e);
@@ -181,9 +268,12 @@ async function close() {
 
 const unlisten: UnlistenFn[] = [];
 function onKey(e: KeyboardEvent) {
+  const inField = (e.target as HTMLElement | null)?.closest("input, textarea");
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     void save();
+  } else if (e.key === "Delete" && !inField && layer.value) {
+    remove(layer.value.id);
   }
 }
 
@@ -197,13 +287,15 @@ onMounted(async () => {
       void open(e.payload);
     }),
   );
-  if (canvas.value) preview = await Preview.create(canvas.value, scene.value);
+  if (canvas.value) preview = await Preview.create(canvas.value, scene.value, loadImage);
   noGpu.value = !preview;
+  tickTimer = window.setInterval(() => tick.value++, 250);
   await open(await invoke<{ id?: string } | null>("window_args").catch(() => null));
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
+  window.clearInterval(tickTimer);
   unlisten.forEach((u) => u());
   preview?.destroy();
 });
@@ -221,19 +313,50 @@ onBeforeUnmount(() => {
       />
       <span class="type-caption flex shrink-0 items-center gap-1 text-label-4" data-tauri-drag-region>
         <template v-if="saving">…</template>
-        <template v-else-if="!dirty && saved"><PhCheck :size="10" weight="bold" />{{ t("notes.saved") }}</template>
+        <template v-else-if="!dirty && !isNew"><PhCheck :size="10" weight="bold" />{{ t("notes.saved") }}</template>
       </span>
       <div class="flex-1 self-stretch" data-tauri-drag-region />
+      <Button size="sm" :loading="saving" :disabled="!dirty && !isNew" @click="save">{{ t("common.save") }}</Button>
+      <Button size="sm" variant="default" :loading="applying" @click="saveAndApply"><PhMonitor />{{ t("wall.apply") }}</Button>
+      <div class="mx-1 h-4 w-px bg-separator" />
       <IconButton :icon="PhMinus" :label="t('notes.minimize')" @click="win.minimize()" />
       <IconButton :icon="PhX" :label="t('common.close')" class="hover:bg-sys-red! hover:text-white!" @click="close" />
     </header>
 
     <div class="flex min-h-0 flex-1">
-      <!-- Aperçu -->
+      <!-- Outliner -->
+      <aside class="w-[230px] shrink-0 border-r border-separator">
+        <Outliner :scene="scene" :selected="selected" @select="selected = $event" @add="addLayer" @duplicate="duplicate" @remove="remove" />
+      </aside>
+
+      <!-- Aperçu + poignées -->
       <main class="flex min-w-0 flex-1 flex-col gap-2 p-3">
-        <div class="relative min-h-0 flex-1 overflow-hidden rounded-[12px] bg-black">
-          <canvas ref="canvas" class="absolute inset-0 h-full w-full" />
-          <div v-if="noGpu" class="type-footnote absolute inset-0 flex items-center justify-center p-6 text-center text-white/70">{{ t("wall.noGpu") }}</div>
+        <div class="flex min-h-0 flex-1 items-center justify-center">
+          <div ref="stage" class="relative aspect-video max-h-full w-full max-w-full overflow-hidden rounded-[12px] bg-black" @pointerdown="pickAt">
+            <canvas ref="canvas" class="absolute inset-0 h-full w-full" />
+            <div v-if="noGpu" class="type-footnote absolute inset-0 flex items-center justify-center p-6 text-center text-white/70">{{ t("wall.noGpu") }}</div>
+            <div
+              v-if="gizmo"
+              class="absolute cursor-move border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"
+              :style="{ left: `${gizmo.x}px`, top: `${gizmo.y}px`, width: `${gizmo.w}px`, height: `${gizmo.h}px`, transform: `rotate(${gizmo.rot}deg)` }"
+              @pointerdown="startDrag($event, 'move')"
+              @pointermove="onDrag"
+              @pointerup="endDrag"
+              @pointercancel="endDrag"
+            >
+              <span
+                v-for="h in [{ c: '-top-1.5 -left-1.5', s: -1, cur: 'nwse' }, { c: '-top-1.5 -right-1.5', s: 1, cur: 'nesw' }, { c: '-bottom-1.5 -left-1.5', s: -1, cur: 'nesw' }, { c: '-bottom-1.5 -right-1.5', s: 1, cur: 'nwse' }]"
+                :key="h.c"
+                class="absolute size-3 rounded-[3px] border border-black/40 bg-white"
+                :class="h.c"
+                :style="{ cursor: `${h.cur}-resize` }"
+                @pointerdown="startDrag($event, 'resize', h.s)"
+                @pointermove="onDrag"
+                @pointerup="endDrag"
+                @pointercancel="endDrag"
+              />
+            </div>
+          </div>
         </div>
         <p class="type-caption text-label-3">{{ t("wall.previewHint") }}</p>
         <div v-if="error" class="type-footnote flex items-center gap-2 rounded-[10px] bg-sys-red/10 px-3 py-2 text-sys-red">
@@ -241,136 +364,13 @@ onBeforeUnmount(() => {
         </div>
       </main>
 
-      <!-- Réglages -->
-      <aside class="flex w-[330px] shrink-0 flex-col border-l border-separator">
-        <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
-          <!-- Fond -->
-          <section class="space-y-2">
-            <h3 class="type-caption font-medium uppercase text-label-3">{{ t("wall.background") }}</h3>
-            <Segmented
-              v-model="kind"
-              size="sm"
-              :options="[
-                { value: 'image', label: t('wall.bg.image') },
-                { value: 'gradient', label: t('wall.bg.gradient') },
-              ]"
-            />
-            <template v-if="kind === 'image'">
-              <Button class="w-full" :loading="importing" @click="pickImage"><PhImage />{{ scene.background.image ? t("wall.changeImage") : t("wall.pickImage") }}</Button>
-              <Segmented
-                v-model="scene.background.fit"
-                size="sm"
-                :options="[
-                  { value: 'cover', label: t('wall.fit.cover') },
-                  { value: 'contain', label: t('wall.fit.contain') },
-                  { value: 'stretch', label: t('wall.fit.stretch') },
-                ]"
-              />
-            </template>
-            <div class="flex items-center gap-3 py-1">
-              <span class="type-footnote w-[92px] shrink-0 text-label-2">{{ kind === "gradient" ? t("wall.colors") : t("wall.bands") }}</span>
-              <input v-model="scene.background.colors[0]" type="color" class="h-6 w-10 cursor-pointer rounded-[6px] bg-transparent" />
-              <input v-if="kind === 'gradient'" v-model="scene.background.colors[1]" type="color" class="h-6 w-10 cursor-pointer rounded-[6px] bg-transparent" />
-            </div>
-            <Param v-if="kind === 'gradient'" v-model="scene.background.angle" :label="t('wall.angle')" :min="0" :max="360" :step="1" unit="°" :digits="0" />
-          </section>
-
-          <!-- Effets -->
-          <section class="space-y-1">
-            <h3 class="type-caption font-medium uppercase text-label-3">{{ t("wall.effects") }}</h3>
-            <div v-for="row in effectRows" :key="row.k" class="rounded-[10px] bg-fill-1 px-3 py-1.5">
-              <div class="flex items-center justify-between">
-                <span class="type-body">{{ t(row.label) }}</span>
-                <Switch :model-value="isOn(row.k)" @update:model-value="setOn(row.k, $event)" />
-              </div>
-              <div v-if="row.k === 'water' && scene.effects.water" class="pt-1">
-                <Param v-model="scene.effects.water.strength" :label="t('wall.p.strength')" :min="0" :max="1" />
-                <Param v-model="scene.effects.water.speed" :label="t('wall.p.speed')" :min="0" :max="1" />
-                <Param v-model="scene.effects.water.scale" :label="t('wall.p.scale')" :min="0" :max="1" />
-              </div>
-              <div v-else-if="row.k === 'parallax' && scene.effects.parallax" class="pt-1">
-                <Param v-model="scene.effects.parallax.mouse" :label="t('wall.p.mouse')" :min="0" :max="1" />
-                <Param v-model="scene.effects.parallax.drift" :label="t('wall.p.drift')" :min="0" :max="1" />
-                <Param v-model="scene.effects.parallax.zoom" :label="t('wall.p.zoom')" :min="1" :max="1.3" />
-              </div>
-              <div v-else-if="row.k === 'particles' && scene.effects.particles" class="space-y-1 pt-1">
-                <div class="flex flex-wrap gap-1">
-                  <Button v-for="k in (['snow', 'rain', 'fireflies', 'embers'] as const)" :key="k" size="sm" variant="outline" @click="particlePreset(k)">{{ t(`wall.pk.${k}`) }}</Button>
-                </div>
-                <Segmented
-                  v-model="scene.effects.particles.shape"
-                  size="sm"
-                  :options="[
-                    { value: 'dot', label: t('wall.shape.dot') },
-                    { value: 'streak', label: t('wall.shape.streak') },
-                    { value: 'glow', label: t('wall.shape.glow') },
-                  ]"
-                />
-                <Param v-model="scene.effects.particles.density" :label="t('wall.p.density')" :min="0" :max="1" />
-                <Param v-model="scene.effects.particles.speed" :label="t('wall.p.speed')" :min="0" :max="1" />
-                <Param v-model="scene.effects.particles.direction" :label="t('wall.p.direction')" :min="0" :max="360" :step="1" unit="°" :digits="0" />
-                <Param v-model="scene.effects.particles.spread" :label="t('wall.p.spread')" :min="0" :max="1" />
-                <Param v-model="scene.effects.particles.turbulence" :label="t('wall.p.turbulence')" :min="0" :max="1" />
-                <Param v-model="scene.effects.particles.flicker" :label="t('wall.p.flicker')" :min="0" :max="1" />
-                <Param v-model="scene.effects.particles.size" :label="t('wall.p.size')" :min="0.2" :max="4" />
-                <Param v-model="scene.effects.particles.opacity" :label="t('wall.p.opacity')" :min="0" :max="1" />
-                <div class="flex items-center gap-3 py-1">
-                  <span class="type-footnote w-[92px] shrink-0 text-label-2">{{ t("wall.p.color") }}</span>
-                  <input v-model="scene.effects.particles.color" type="color" class="h-6 w-10 cursor-pointer rounded-[6px] bg-transparent" />
-                </div>
-              </div>
-              <div v-else-if="row.k === 'color' && scene.effects.color" class="pt-1">
-                <Param v-model="scene.effects.color.hue" :label="t('wall.p.hue')" :min="-180" :max="180" :step="1" unit="°" :digits="0" />
-                <Param v-model="scene.effects.color.saturation" :label="t('wall.p.saturation')" :min="0" :max="2" />
-                <Param v-model="scene.effects.color.brightness" :label="t('wall.p.brightness')" :min="0" :max="2" />
-                <Param v-model="scene.effects.color.contrast" :label="t('wall.p.contrast')" :min="0" :max="2" />
-              </div>
-              <div v-else-if="row.k === 'grain' && scene.effects.grain !== null" class="pt-1">
-                <Param v-model="scene.effects.grain" :label="t('wall.p.amount')" :min="0" :max="1" />
-              </div>
-              <div v-else-if="row.k === 'vignette' && scene.effects.vignette !== null" class="pt-1">
-                <Param v-model="scene.effects.vignette" :label="t('wall.p.amount')" :min="0" :max="1" />
-              </div>
-            </div>
-          </section>
-
-          <!-- Interactions -->
-          <section class="space-y-1">
-            <h3 class="type-caption font-medium uppercase text-label-3">{{ t("wall.interactions") }}</h3>
-            <p class="type-caption px-1 text-label-3">{{ t("wall.interactionsHelp") }}</p>
-            <div class="rounded-[10px] bg-fill-1 px-3 py-1.5">
-              <div class="flex items-center justify-between">
-                <span class="type-body">{{ t("wall.fx.ripple") }}</span>
-                <Switch :model-value="isOn('ripple')" @update:model-value="setOn('ripple', $event)" />
-              </div>
-              <div v-if="scene.interactions.ripple" class="pt-1">
-                <Param v-model="scene.interactions.ripple.radius" :label="t('wall.p.radius')" :min="20" :max="1200" :step="10" unit=" px" :digits="0" />
-                <Param v-model="scene.interactions.ripple.strength" :label="t('wall.p.strength')" :min="0" :max="2" />
-                <Param v-model="scene.interactions.ripple.duration" :label="t('wall.p.duration')" :min="0.2" :max="5" unit=" s" :digits="1" />
-              </div>
-            </div>
-            <div class="rounded-[10px] bg-fill-1 px-3 py-1.5">
-              <div class="flex items-center justify-between">
-                <span class="type-body">{{ t("wall.fx.trail") }}</span>
-                <Switch :model-value="isOn('trail')" @update:model-value="setOn('trail', $event)" />
-              </div>
-              <div v-if="scene.interactions.trail" class="pt-1">
-                <Param v-model="scene.interactions.trail.width" :label="t('wall.p.width')" :min="1" :max="80" :step="1" unit=" px" :digits="0" />
-                <Param v-model="scene.interactions.trail.fade" :label="t('wall.p.duration')" :min="0.05" :max="3" unit=" s" :digits="2" />
-                <Param v-model="scene.interactions.trail.intensity" :label="t('wall.p.intensity')" :min="0" :max="2" />
-                <div class="flex items-center gap-3 py-1">
-                  <span class="type-footnote w-[92px] shrink-0 text-label-2">{{ t("wall.p.color") }}</span>
-                  <input v-model="scene.interactions.trail.color" type="color" class="h-6 w-10 cursor-pointer rounded-[6px] bg-transparent" />
-                </div>
-              </div>
-            </div>
-          </section>
+      <!-- Propriétés de la sélection -->
+      <aside class="w-[320px] shrink-0 overflow-y-auto border-l border-separator p-3">
+        <div v-if="layer" class="mb-3 flex items-center gap-2">
+          <input v-model="layer.name" class="type-body min-w-0 flex-1 rounded-[6px] bg-fill-1 px-2 py-1 font-medium outline-none" maxlength="80" />
         </div>
-
-        <footer class="flex shrink-0 gap-2 border-t border-separator p-3">
-          <Button class="flex-1" :loading="saving" :disabled="!dirty && !!saved" @click="save">{{ t("common.save") }}</Button>
-          <Button class="flex-1" variant="default" :loading="applying" @click="saveAndApply"><PhMonitor />{{ t("wall.apply") }}</Button>
-        </footer>
+        <LayerPanel v-if="layer" :layer="layer" :importing="importing" @pick-image="changeImage" />
+        <ScenePanel v-else :scene="scene" />
       </aside>
     </div>
   </div>
