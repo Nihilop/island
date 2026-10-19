@@ -1,5 +1,18 @@
 [
   {
+    "version": "2.4.1",
+    "date": "2026-10-19",
+    "highlight": false,
+    "items": {
+      "fr": [
+        "« Réserver l'espace en haut » : l'île reste collée en haut de l'écran au lieu d'être repoussée sous la bande réservée."
+      ],
+      "en": [
+        "“Reserve space at the top”: the island stays at the top of the screen instead of being pushed below the reserved band."
+      ]
+    }
+  },
+  {
     "version": "2.4.0",
     "date": "2026-10-19",
     "highlight": false,

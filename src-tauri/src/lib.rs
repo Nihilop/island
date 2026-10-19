@@ -67,6 +67,7 @@ pub fn run() {
             // Ordre : placer → afficher → click-through (doit suivre le `show`).
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay::place(&overlay);
+                overlay::keep_on_top_edge(&overlay);
                 let _ = overlay.show();
                 #[cfg(target_os = "windows")]
                 overlay::start_click_through(overlay.clone());
