@@ -11,7 +11,10 @@ import { blendIndex, COMPOSITE_VEC4S, LAYER_VEC4S, packComposite, packLayer, RIP
 /* eslint-disable @typescript-eslint/no-explicit-any -- types WebGPU absents du lib DOM. */
 type GPU = any;
 
-const USAGE = { UNIFORM: 0x40, COPY_DST: 0x8, TEXTURE_BINDING: 0x4, RENDER_ATTACHMENT: 0x10 };
+// Drapeaux WebGPU : ceux des tampons et ceux des textures n'ont PAS les mêmes valeurs
+// (COPY_DST vaut 0x8 pour un tampon, 0x2 pour une texture).
+const BUFFER = { COPY_DST: 0x8, UNIFORM: 0x40 };
+const TEXTURE = { COPY_DST: 0x2, TEXTURE_BINDING: 0x4, RENDER_ATTACHMENT: 0x10 };
 const FORMAT = "rgba8unorm";
 const CANVAS_FORMAT = "bgra8unorm";
 
@@ -81,7 +84,7 @@ export class Preview {
     this.compositePipeline = pipeline(compModule, CANVAS_FORMAT);
     this.sampler = device.createSampler({ magFilter: "linear", minFilter: "linear" });
     this.blank = this.upload(null);
-    this.compUniforms = device.createBuffer({ size: COMPOSITE_VEC4S * 16, usage: USAGE.UNIFORM | USAGE.COPY_DST });
+    this.compUniforms = device.createBuffer({ size: COMPOSITE_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(canvas);
     this.resize();
@@ -123,7 +126,7 @@ export class Preview {
 
   private upload(bitmap: ImageBitmap | null): Tex {
     const [w, h] = bitmap ? [bitmap.width, bitmap.height] : [1, 1];
-    const tex = this.device.createTexture({ size: [w, h], format: FORMAT, usage: USAGE.TEXTURE_BINDING | USAGE.COPY_DST | USAGE.RENDER_ATTACHMENT });
+    const tex = this.device.createTexture({ size: [w, h], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT });
     if (bitmap) this.device.queue.copyExternalImageToTexture({ source: bitmap }, { texture: tex }, [w, h]);
     else this.device.queue.writeTexture({ texture: tex }, new Uint8Array([0, 0, 0, 0]), { bytesPerRow: 4 }, [1, 1]);
     return { view: tex.createView(), size: [w, h] };
@@ -158,7 +161,7 @@ export class Preview {
     const tex = this.image(l.kind === "image" ? l.image : null);
     let r = this.layerRes.get(l.id);
     if (!r || r.image !== l.image || r.tex !== tex.size) {
-      const uniforms = r?.uniforms ?? this.device.createBuffer({ size: LAYER_VEC4S * 16, usage: USAGE.UNIFORM | USAGE.COPY_DST });
+      const uniforms = r?.uniforms ?? this.device.createBuffer({ size: LAYER_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
       r = { uniforms, bind: this.bind(uniforms, tex.view), image: l.image, tex: tex.size };
       this.layerRes.set(l.id, r);
     }
@@ -170,7 +173,7 @@ export class Preview {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.canvas.width = Math.max(1, Math.round(r.width * dpr));
     this.canvas.height = Math.max(1, Math.round(r.height * dpr));
-    const target = this.device.createTexture({ size: [this.canvas.width, this.canvas.height], format: FORMAT, usage: USAGE.TEXTURE_BINDING | USAGE.RENDER_ATTACHMENT });
+    const target = this.device.createTexture({ size: [this.canvas.width, this.canvas.height], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.RENDER_ATTACHMENT });
     this.target = target.createView();
     this.compBind = this.bind(this.compUniforms, this.target);
   }
