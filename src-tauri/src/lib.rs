@@ -4,6 +4,7 @@
 //   overlay   : fenêtre fixe du notch (placement, click-through, capture-exclude, focus)
 //   launcher  : launcher natif (index apps / réglages / fichiers, recherche, ouverture)
 //   vault     : coffre (pont Bitwarden)
+//   wallpaper : fonds animés (scènes, moteur natif wgpu sur le calque du bureau)
 //   host      : fenêtres, shell, tray, détection plein écran
 //   ext       : système d'extensions (permissions, storage, install, scaffold)
 //   services  : services exposés aux extensions (capture, apps, media, net, system)
@@ -22,6 +23,7 @@ mod overlay;
 mod services;
 mod store;
 mod vault;
+mod wallpaper;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,6 +42,7 @@ pub fn run() {
         // .island transmet l'argv à l'instance vivante au lieu d'en lancer une 2ᵉ.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             extensions::install::handle_argv(app, &argv);
+            wallpaper::share::handle_argv(app, &argv);
         }))
         .register_uri_scheme_protocol(extensions::protocol::SCHEME, extensions::protocol::handle)
         .plugin(tauri_plugin_opener::init())
@@ -89,6 +92,8 @@ pub fn run() {
             launcher::start(app.handle().clone());
             // Activité (jeux & apps) : hook de premier plan + relevé des process toutes les 2 s.
             services::activity::start(app.handle().clone());
+            // Fonds animés : restaure la scène active (indépendant de l'outil du dock).
+            wallpaper::start(app.handle());
 
             // v2 : loader d'extensions gelé (cf. docs/internal/v2-migration.md) → pas de
             // watcher `dist/` tant qu'aucune extension ne se charge.
@@ -108,6 +113,8 @@ pub fn run() {
             // Double-clic au démarrage : un .island dans l'argv → modal d'install.
             let argv: Vec<String> = std::env::args().collect();
             extensions::install::handle_argv(app.handle(), &argv);
+            // Double-clic au démarrage : un .islandscene dans l'argv → importé.
+            wallpaper::share::handle_argv(app.handle(), &argv);
 
             Ok(())
         })
@@ -208,6 +215,24 @@ pub fn run() {
             services::markets::markets_crypto,
             services::markets::markets_crypto_search,
             services::desktop::master_volume,
+            services::desktop::desktop_wallpaper_get,
+            services::desktop::desktop_wallpaper_set,
+            services::desktop::ext2_wallpaper_displays,
+            services::desktop::ext2_wallpaper_set,
+            services::hardware::hw_displays,
+            wallpaper::wallpaper_list,
+            wallpaper::wallpaper_get,
+            wallpaper::wallpaper_save,
+            wallpaper::wallpaper_delete,
+            wallpaper::wallpaper_import_image,
+            wallpaper::wallpaper_image,
+            wallpaper::wallpaper_save_mask,
+            wallpaper::share::wallpaper_export,
+            wallpaper::share::wallpaper_import,
+            wallpaper::share::wallpaper_take_imported,
+            wallpaper::wallpaper_state,
+            wallpaper::wallpaper_apply,
+            wallpaper::wallpaper_set_options,
             services::capture::capture_displays,
             services::capture::capture_select,
             services::capture::capture_select_init,

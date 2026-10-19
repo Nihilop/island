@@ -182,6 +182,14 @@ const methods: Record<string, Handler> = {
     if (!/[\\/]Island[\\/][^\\/]+\.(png|mp4)$/i.test(p) || p.includes("..")) throw new Error("forbidden");
     return invoke("reveal_path", { path: p });
   },
+  // Fond d'écran statique (permission `wallpaper`) : image en base64, validée et rangée par
+  // Island (jamais de chemin). Revérifiée côté Rust.
+  "wallpaper.displays": (ext) => (need(ext, "wallpaper"), invoke("ext2_wallpaper_displays", { id: ext.id })),
+  "wallpaper.setImage": (ext, data: unknown, opts: any) => {
+    need(ext, "wallpaper");
+    const fit = ["fill", "fit", "stretch", "center", "tile", "span"].includes(opts?.fit) ? opts.fit : null;
+    return invoke("ext2_wallpaper_set", { id: ext.id, data: String(data ?? ""), display: typeof opts?.display === "string" ? opts.display : null, fit });
+  },
   // Activité (permission `activity`, sensible : jeux et apps utilisés). Revérifiée côté Rust.
   "activity.state": (ext) => (need(ext, "activity"), invoke("activity_ext_state", { id: ext.id })),
   "activity.stats": (ext, from: unknown, to: unknown) =>

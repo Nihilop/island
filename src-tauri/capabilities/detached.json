@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "detached",
-  "description": "Fenêtres détachées (notes, extensions) : leur propre barre de titre, plein écran, rien de plus.",
+  "description": "Fenêtres détachées (notes, extensions, éditeur de fonds) : leur propre barre de titre, plein écran, rien de plus.",
   "windows": [
     "note-*",
-    "ext-*"
+    "ext-*",
+    "wallpaper-*"
   ],
   "permissions": [
     "core:default",

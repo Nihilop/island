@@ -1,5 +1,30 @@
 [
   {
+    "version": "2.5.0",
+    "date": "2026-10-19",
+    "highlight": true,
+    "items": {
+      "fr": [
+        "Fonds animés (nouvel outil, à activer dans Réglages › Outils) : des fonds qui bougent derrière les icônes du bureau, rendus nativement par la carte graphique et mis en pause en plein écran, en jeu ou derrière une fenêtre maximisée.",
+        "Un fond par écran, ou le même sur tous les écrans.",
+        "Éditeur à calques : images, couleurs et dégradés, particules (neige, pluie, lucioles, braises…), à placer avec des ancrages qui s'adaptent à tous les écrans ; effets eau, chaleur et couleur, parallaxe, ondulation au clic et traînée du curseur.",
+        "Masques au pinceau : limite un effet à une zone (la chaleur autour d'un personnage, l'eau sur un lac) ou les particules à une partie de l'écran.",
+        "Partage : un fichier .islandscene contient toute la scène, images comprises. Double-clique dessus ou glisse-le sur l'île pour l'importer.",
+        "Automatisations : nouvelles actions « Fond d'écran » et « Fond animé ».",
+        "Extensions : nouvelle permission « wallpaper » (fond d'écran statique)."
+      ],
+      "en": [
+        "Live wallpapers (new tool, turn it on in Settings › Tools): backgrounds that move behind your desktop icons, rendered natively by the graphics card and paused in fullscreen, in games or behind a maximized window.",
+        "One wallpaper per screen, or the same on all screens.",
+        "Layer editor: images, colors and gradients, particles (snow, rain, fireflies, embers…), placed with anchors that adapt to every screen; water, heat and color effects, parallax, ripple on click and cursor trail.",
+        "Brush masks: limit an effect to an area (heat around a character, water on a lake) or particles to part of the screen.",
+        "Sharing: an .islandscene file holds the whole scene, images included. Double-click it or drop it on the island to import it.",
+        "Automations: new “Wallpaper” and “Live wallpaper” actions.",
+        "Extensions: new “wallpaper” permission (static wallpaper)."
+      ]
+    }
+  },
+  {
     "version": "2.4.1",
     "date": "2026-10-19",
     "highlight": false,

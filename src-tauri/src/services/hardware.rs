@@ -7,6 +7,8 @@
 //   - ping ICMP vers 1.1.1.1 (timeout 1 s) sur son propre thread toutes les 2 s, en pause
 //     après 5 s sans demande.
 // Le front pilote la cadence : `full = false` (en fond) ne lit que CPU + RAM.
+//   - écrans : liste des moniteurs (position, zone de travail, échelle) partagée par les
+//     services qui en ont besoin (fond d'écran, fonds animés…).
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
@@ -126,6 +128,42 @@ pub fn hw_ping_state() -> i64 {
     PING.load(Ordering::SeqCst)
 }
 
+// --- Écrans -------------------------------------------------------------------------------
+
+/// Un moniteur, en pixels physiques dans le bureau virtuel.
+#[derive(serde::Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayInfo {
+    /// Nom de périphérique (`\\.\DISPLAYn`), stable tant que le branchement ne change pas.
+    pub id: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    /// Zone de travail (hors barre des tâches et AppBars).
+    pub work: [i32; 4],
+    /// Facteur d'échelle (DPI effectif / 96).
+    pub scale: f64,
+    pub primary: bool,
+}
+
+/// Moniteurs branchés, principal en premier.
+pub fn displays() -> Vec<DisplayInfo> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut list = imp::displays();
+        list.sort_by_key(|d| !d.primary);
+        list
+    }
+    #[cfg(not(target_os = "windows"))]
+    Vec::new()
+}
+
+#[tauri::command]
+pub fn hw_displays() -> Vec<DisplayInfo> {
+    displays()
+}
+
 #[cfg(target_os = "windows")]
 mod imp {
     use windows::core::{w, PCWSTR};
@@ -206,6 +244,43 @@ mod imp {
             }
             best
         }
+    }
+
+    pub fn displays() -> Vec<super::DisplayInfo> {
+        use windows::core::BOOL;
+        use windows::Win32::Foundation::{LPARAM, RECT};
+        use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW};
+        use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+        use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
+
+        unsafe extern "system" fn each(h: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+            let out = &mut *(data.0 as *mut Vec<super::DisplayInfo>);
+            let mut mi = MONITORINFOEXW::default();
+            mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            if GetMonitorInfoW(h, &mut mi as *mut _ as *mut MONITORINFO).as_bool() {
+                let (r, w) = (mi.monitorInfo.rcMonitor, mi.monitorInfo.rcWork);
+                let n = mi.szDevice.iter().position(|c| *c == 0).unwrap_or(mi.szDevice.len());
+                let (mut dx, mut dy) = (96u32, 96u32);
+                let _ = GetDpiForMonitor(h, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+                out.push(super::DisplayInfo {
+                    id: String::from_utf16_lossy(&mi.szDevice[..n]),
+                    x: r.left,
+                    y: r.top,
+                    width: (r.right - r.left).max(0) as u32,
+                    height: (r.bottom - r.top).max(0) as u32,
+                    work: [w.left, w.top, w.right - w.left, w.bottom - w.top],
+                    scale: dx as f64 / 96.0,
+                    primary: mi.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                });
+            }
+            true.into()
+        }
+
+        let mut out: Vec<super::DisplayInfo> = Vec::new();
+        unsafe {
+            let _ = EnumDisplayMonitors(None, None, Some(each), LPARAM(&mut out as *mut _ as isize));
+        }
+        out
     }
 
     /// Ping ICMP vers 1.1.1.1 (timeout 1 s), en ms.

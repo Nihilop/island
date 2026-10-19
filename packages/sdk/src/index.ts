@@ -50,6 +50,19 @@ export interface CaptureDisplay {
   scale: number;
   primary: boolean;
 }
+/** Écran (px physiques dans le bureau virtuel). */
+export interface WallpaperDisplay {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Zone de travail [x, y, largeur, hauteur]. */
+  work: [number, number, number, number];
+  scale: number;
+  primary: boolean;
+}
+export type WallpaperFit = "fill" | "fit" | "stretch" | "center" | "tile" | "span";
 export interface RecordOptions {
   fps?: 30 | 60;
   codec?: "h264" | "hevc";
@@ -173,6 +186,13 @@ export interface Island {
     onRecording(cb: (state: RecordingState) => void): void;
     /** Affiche une capture d'Island dans l'Explorateur. */
     reveal(path: string): Promise<void>;
+  };
+  /** Permission `wallpaper` : fond d'écran STATIQUE. L'image est fournie en données (Island
+   *  la valide, la range et la pose) ; aucun chemin de fichier n'est accepté. */
+  wallpaper: {
+    displays(): Promise<WallpaperDisplay[]>;
+    /** `display` absent = tous les écrans ; `fit` s'applique à tous (réglage Windows global). */
+    setImage(image: Blob | ArrayBuffer | Uint8Array, opts?: { display?: string; fit?: WallpaperFit }): Promise<void>;
   };
   /** Permission `activity` (sensible) : jeu en cours, app au premier plan, temps passé. */
   activity: {
@@ -322,6 +342,10 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
       setTitle: (title) => call("windows.setTitle", title),
       close: () => call("windows.close"),
     },
+    wallpaper: {
+      displays: () => call("wallpaper.displays"),
+      setImage: async (image, opts) => call("wallpaper.setImage", await toBase64(image), opts ?? {}),
+    },
     activity: {
       state: () => call("activity.state"),
       stats: (from, to) => call<{ days: ActivityDay[] }>("activity.stats", from, to).then((r) => r.days),
@@ -355,4 +379,15 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
     onTheme: (cb) => on("theme", cb),
   };
   return island;
+}
+
+/** Image → base64 (sans préfixe data:), pour la passer au canal hôte. */
+function toBase64(image: Blob | ArrayBuffer | Uint8Array): Promise<string> {
+  const blob = image instanceof Blob ? image : new Blob([image instanceof Uint8Array ? image : new Uint8Array(image)]);
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
 }

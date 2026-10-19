@@ -3,6 +3,9 @@
 // croix). Une fenêtre par élément : rouvrir le même élément la ramène au premier plan.
 // Taille et position mémorisées par élément (store `__app__`, clé `windows`).
 //
+// Types : `note` (une note), `ext` (fenêtre d'extension), `wallpaper` (éditeur de fonds
+// animés, clé `editor`).
+//
 // Libellé = `<type>-<clé>` ; la page chargée est `index.html#/<type>/<clé>` et `main.ts`
 // choisit le composant racine d'après le libellé. Types autorisés : `KINDS` (liste
 // blanche). Type `ext` : fenêtre d'une extension (`ext-<id>__<fenêtre>`, points de l'id
@@ -18,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 /// Types de fenêtres détachées connus de `main.ts`.
-const KINDS: &[&str] = &["note", "ext"];
+const KINDS: &[&str] = &["note", "ext", "wallpaper"];
 
 /// Fenêtres détachées actuellement en plein écran (handle Win32) : l'île les traite comme
 /// une app plein écran (masquage « en plein écran », cf. host.rs), alors qu'elle ignore

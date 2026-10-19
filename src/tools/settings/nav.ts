@@ -18,6 +18,7 @@ const SECTION_PAGE: Record<string, SettingsPage> = {
   display: "display",
   presentation: "display",
   gaming: "display",
+  wallpaper: "display",
   tools: "tools",
   launcher: "launcher",
   extensions: "extensions",
