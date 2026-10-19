@@ -13,24 +13,18 @@
 // (`extensions-v2-state/<id>.json`) : c'est elles qui font foi, pas le manifeste.
 
 use std::collections::BTreeSet;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::{root, valid_id, valid_rel, Manifest};
+use super::{root, valid_id, Manifest};
 
 /// Clés publiques ed25519 (base64) des paquets officiels. La clé privée correspondante
 /// n'est PAS dans le dépôt (créée par `island keygen`, gardée par l'auteur d'Island).
 const OFFICIAL_KEYS: &[&str] = &["IrXutmIS7EwKdJ61YF0Tw2ECeoFjXKLJE9pnCcDTxj4="];
 
-pub const SIGNATURE_FILE: &str = "ISLAND-SIGNATURE.json";
-const MAX_ENTRIES: usize = 2000;
-const MAX_TOTAL: u64 = 64 << 20;
 
 // --- État par extension (permissions consenties, secrets créés) -------------------------
 
@@ -108,105 +102,16 @@ pub fn ext2_dev_inspect(folder: String) -> Result<Manifest, String> {
 
 // --- Lecture et vérification d'un paquet ------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Signature {
-    /// Signé par une clé officielle.
-    Official,
-    /// Signature valide, mais clé inconnue.
-    Untrusted,
-    Unsigned,
-    /// Signature présente mais fausse (paquet modifié) : jamais installable.
-    Invalid,
-}
-
-struct Package {
-    manifest: Manifest,
-    files: Vec<(String, Vec<u8>)>,
-    signature: Signature,
-    key: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct SigFile {
-    key: String,
-    sig: String,
-}
-
-/// Empreinte signée : `<sha256 hex>  <chemin>\n`, triée par chemin.
-pub fn digest(files: &[(String, Vec<u8>)]) -> String {
-    let mut lines: Vec<String> = files
-        .iter()
-        .filter(|(p, _)| p != SIGNATURE_FILE)
-        .map(|(p, b)| format!("{}  {p}\n", hex(&Sha256::digest(b))))
-        .collect();
-    lines.sort_by(|a, b| a[66..].cmp(&b[66..]));
-    lines.concat()
-}
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
-fn verify(files: &[(String, Vec<u8>)]) -> (Signature, Option<String>) {
-    use ed25519_dalek::{Signature as Sig, Verifier, VerifyingKey};
-    let Some((_, raw)) = files.iter().find(|(p, _)| p == SIGNATURE_FILE) else { return (Signature::Unsigned, None) };
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let check = || -> Option<bool> {
-        let s: SigFile = serde_json::from_slice(raw).ok()?;
-        let key: [u8; 32] = b64.decode(&s.key).ok()?.try_into().ok()?;
-        let sig: [u8; 64] = b64.decode(&s.sig).ok()?.try_into().ok()?;
-        let vk = VerifyingKey::from_bytes(&key).ok()?;
-        Some(vk.verify(digest(files).as_bytes(), &Sig::from_bytes(&sig)).is_ok())
-    };
-    let key = serde_json::from_slice::<SigFile>(raw).ok().map(|s| s.key);
-    match check() {
-        Some(true) if key.as_deref().is_some_and(|k| OFFICIAL_KEYS.contains(&k)) => (Signature::Official, key),
-        Some(true) => (Signature::Untrusted, key),
-        _ => (Signature::Invalid, key),
-    }
-}
+// Lecture et vérification : `island_formats::package` (partagé avec le magasin) ; la clé
+// officielle reste ici.
+use island_formats::package::{Package, Signature};
 
 fn read_package(path: &str) -> Result<Package, String> {
     if !path.to_lowercase().ends_with(".island") {
         return Err("notIsland".into());
     }
     let file = std::fs::File::open(path).map_err(|_| "notFound")?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|_| "corrupt")?;
-    if zip.len() > MAX_ENTRIES {
-        return Err("tooLarge".into());
-    }
-    let mut files = Vec::new();
-    let mut total = 0u64;
-    for i in 0..zip.len() {
-        let mut entry = zip.by_index(i).map_err(|_| "corrupt")?;
-        if entry.is_dir() {
-            continue;
-        }
-        let name = entry.name().replace('\\', "/");
-        if !valid_rel(&name) || entry.enclosed_name().is_none() {
-            return Err(format!("badPath:{name}"));
-        }
-        total += entry.size();
-        if total > MAX_TOTAL {
-            return Err("tooLarge".into());
-        }
-        let mut buf = Vec::with_capacity(entry.size() as usize);
-        entry.by_ref().take(MAX_TOTAL).read_to_end(&mut buf).map_err(|_| "corrupt")?;
-        files.push((name, buf));
-    }
-    let (_, raw) = files.iter().find(|(p, _)| p == "manifest.json").ok_or("noManifest")?;
-    let manifest: Manifest = serde_json::from_slice(raw).map_err(|e| format!("manifest:{e}"))?;
-    manifest.validate()?;
-    // Tout ce que le manifeste référence doit être dans le paquet.
-    let has = |p: &str| files.iter().any(|(n, _)| n == p);
-    let mut needed = vec![manifest.main.clone()];
-    needed.extend(manifest.contributes.tools.iter().map(|t| t.view.clone()));
-    if let Some(missing) = needed.iter().find(|p| !has(p)) {
-        return Err(format!("missingFile:{missing}"));
-    }
-    let (signature, key) = verify(&files);
-    Ok(Package { manifest, files, signature, key })
+    island_formats::package::read(file, OFFICIAL_KEYS)
 }
 
 #[derive(Serialize)]
@@ -242,7 +147,7 @@ pub async fn ext2_inspect(app: AppHandle, path: String) -> Result<Inspect, Strin
             }
         });
         Ok(Inspect {
-            publisher: pkg.key.as_ref().map(|k| hex(&Sha256::digest(k.as_bytes()))[..8].to_string()),
+            publisher: pkg.key.as_deref().map(island_formats::package::fingerprint),
             manifest: pkg.manifest,
             signature: pkg.signature,
             size,
@@ -346,27 +251,6 @@ pub(crate) fn register_island_assoc(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
-
-    fn files() -> Vec<(String, Vec<u8>)> {
-        vec![("manifest.json".into(), b"{}".to_vec()), ("dist/main.js".into(), b"x".to_vec())]
-    }
-
-    fn signed(key: &SigningKey, files: &[(String, Vec<u8>)]) -> Vec<(String, Vec<u8>)> {
-        let b64 = base64::engine::general_purpose::STANDARD;
-        let sig = key.sign(digest(files).as_bytes());
-        let json = format!(r#"{{"key":"{}","sig":"{}"}}"#, b64.encode(key.verifying_key().to_bytes()), b64.encode(sig.to_bytes()));
-        let mut out = files.to_vec();
-        out.push((SIGNATURE_FILE.into(), json.into_bytes()));
-        out
-    }
-
-    #[test]
-    fn digest_is_sorted_and_skips_signature() {
-        let d = digest(&files());
-        assert!(d.find("dist/main.js").unwrap() < d.find("manifest.json").unwrap());
-        assert_eq!(digest(&signed(&SigningKey::from_bytes(&[7; 32]), &files())), d);
-    }
 
     /// Paquet réel : `ISLAND_PKG=<chemin> cargo test real_package -- --ignored --nocapture`.
     #[test]
@@ -376,16 +260,5 @@ mod tests {
         let pkg = read_package(&path).expect("paquet illisible");
         println!("{} {} : {} fichiers, signature {:?}", pkg.manifest.id, pkg.manifest.version, pkg.files.len(), pkg.signature as u8);
         assert!(pkg.signature == Signature::Official);
-    }
-
-    #[test]
-    fn signature_states() {
-        assert!(verify(&files()).0 == Signature::Unsigned);
-        let key = SigningKey::from_bytes(&[7; 32]);
-        let ok = signed(&key, &files());
-        assert!(verify(&ok).0 == Signature::Untrusted); // clé valide mais non officielle
-        let mut tampered = ok.clone();
-        tampered[1].1 = b"y".to_vec();
-        assert!(verify(&tampered).0 == Signature::Invalid);
     }
 }

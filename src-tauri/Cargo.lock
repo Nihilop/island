@@ -2335,6 +2335,7 @@ dependencies = [
  "getrandom 0.2.17",
  "hmac",
  "image",
+ "island-formats",
  "keyring",
  "naga",
  "png 0.17.16",
@@ -2363,6 +2364,19 @@ dependencies = [
  "windows-capture",
  "winreg 0.52.0",
  "x25519-dalek",
+ "zip 2.4.2",
+]
+
+[[package]]
+name = "island-formats"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "image",
+ "serde",
+ "serde_json",
+ "sha2",
  "zip 2.4.2",
 ]
 
