@@ -6,9 +6,11 @@ publication par les auteurs, téléchargement et mises à jour depuis l'app. Sta
 
 ## Principes
 
-- **Une API, pas de site (v1).** La vitrine est un écran *Magasin* dans Island ; les
-  auteurs publient en ligne de commande (`island publish`, SDK). Un site public (pages
-  partageables, tableau de bord auteur) viendra plus tard, sur la même API.
+- **Une API ; côté web, seulement l'administration (v1).** La vitrine est un écran
+  *Magasin* dans Island ; les auteurs publient en ligne de commande (`island publish`,
+  SDK). Un **panneau d'administration web** (`/admin`) sert à modérer et à gérer les
+  comptes. Un site public (pages partageables, tableau de bord auteur) viendra plus tard,
+  sur la même API et le même socle que le panneau.
 - **Mêmes règles que l'app.** Toute validation passe par `crates/island-formats` (scènes,
   `.islandscene`, paquets `.island`) : un fichier accepté par le serveur l'est par l'app, et
   inversement.
@@ -24,32 +26,48 @@ publication par les auteurs, téléchargement et mises à jour depuis l'app. Sta
 
 | Rôle | Choix |
 |---|---|
-| API | Rust, **Axum** (+ `tower` : limites de taille, délais, limitation de débit) |
-| Base | **SQLite** (`sqlx`, migrations dans `migrations/`), sauvegarde continue **Litestream** |
+| API | Rust, **Axum** (+ `tower` : limites de taille, délais, limitation de débit), **sans état** |
+| Base | **Postgres hébergé : Neon** (`sqlx`, migrations dans `migrations/`) |
 | Fichiers | **Cloudflare R2** (S3) en production ; dossier local en développement (trait `Storage`) |
 | Validation | `island-formats` (dépendance par chemin : `../crates/island-formats`) |
-| Hébergement | un binaire, un petit VPS ou Fly.io ; HTTPS par le proxy (Caddy / Fly) |
-| Auth | **GitHub**, *device flow* (CLI et app sans navigateur intégré) → jeton d'API |
+| Analyse | **ClamAV** (`clamd`, à côté du serveur), optionnel — cf. *Sécurité des fichiers* |
+| Administration | **Vue + Vite** dans `server/admin/`, construit et servi par Axum sur `/admin` |
+| Hébergement | Fly.io ou Railway, sans disque ; HTTPS par la plateforme |
+| Auth | **GitHub** : *device flow* (CLI, app) → jeton d'API ; OAuth web (panneau admin) → cookie |
 
-Un seul processus. Pas de workspace Cargo avec l'app (cf. *Dépôt*).
+Le serveur ne garde aucun état : tout est dans Postgres et R2, on le redéploie ou on en
+lance plusieurs sans rien gérer. Pas de workspace Cargo avec l'app (cf. *Dépôt*).
+
+**Pourquoi Neon (et pas Supabase)** : sur la formule gratuite, Supabase met le projet en
+**pause après une semaine sans activité** (relance manuelle) — pour un magasin qui démarre,
+c'est la panne assurée. Neon **s'endort et se réveille seul** à la première requête (quelques
+centaines de ms) et offre des **branches** de base (copie pour le développement ou les tests,
+sans toucher à la production). Le serveur ne connaît qu'une `DATABASE_URL` : changer
+d'hébergeur Postgres plus tard ne coûte rien. Supabase Storage et Supabase Auth ne
+conviendraient de toute façon pas (sortie de bande passante payante pour des fichiers jusqu'à
+256 Mo ; pas de *device flow*).
 
 ## Modèle de données
 
 ```sql
-users     (id, github_id UNIQUE, login, avatar_url, role TEXT /* user|moderator|admin */,
-           banned INTEGER, created_at)
+users     (id, github_id BIGINT UNIQUE, login, avatar_url,
+           role TEXT /* user|moderator|admin */, banned BOOLEAN, created_at, last_seen_at)
 tokens    (id, user_id, name, hash /* sha-256 du jeton, jamais le jeton */, created_at,
            last_used_at)
 items     (id TEXT PRIMARY KEY /* scène : généré ; extension : id du manifeste */,
            kind TEXT /* scene|extension */, owner_id, name, summary, description,
-           tags TEXT /* JSON */, status TEXT /* published|hidden|removed */,
+           tags JSONB, search TSVECTOR /* nom + résumé + description, 'french' + unaccent */,
+           status TEXT /* published|hidden|removed */,
            downloads INTEGER, created_at, updated_at)
 versions  (id, item_id, version TEXT, status TEXT /* pending|approved|rejected|yanked */,
-           file_key /* clé R2 du fichier publié */, size, sha256, permissions TEXT /* JSON,
-           extensions */, changelog, reject_reason, reviewed_by, created_at, reviewed_at)
+           file_key /* clé R2 du fichier publié */, size, sha256, permissions JSONB /*
+           extensions */, scan TEXT /* clean|skipped|… */, changelog, reject_reason,
+           reviewed_by, created_at, reviewed_at)
 assets    (item_id, kind TEXT /* thumbnail|screenshot */, file_key, position)
 reports   (id, item_id, version_id, user_id NULL, reason TEXT, details, created_at,
            resolved_by, resolved_at)
+audit     (id, actor_id, action TEXT, target TEXT, details JSONB, created_at)
+           /* toute action d'administration : rôle changé, bannissement, approbation… */
 ```
 
 - **Identifiant d'une extension** = l'`id` de son manifeste (`com.exemple.ext`). Le premier
@@ -82,6 +100,15 @@ reports   (id, item_id, version_id, user_id NULL, reason TEXT, details, created_
 | `POST /items/{id}/versions/{v}/yank` | retire une version (bug grave) |
 | `GET /me/items` | mes éléments et l'état de leurs versions |
 
+### Rôles
+
+- **admin** : le compte GitHub qui héberge le projet, identifié par son **identifiant
+  numérique** (`ADMIN_GITHUB_ID`) — pas par son nom, qui peut changer et être repris par
+  quelqu'un d'autre. Le rôle ne peut ni être retiré ni être donné par l'API.
+- **moderator** : ajouté (ou retiré) par l'admin, à partir d'un nom GitHub — converti tout
+  de suite en identifiant via l'API GitHub. Modère, ne gère pas les rôles.
+- **user** : tout compte connecté ; publie et gère ses propres éléments.
+
 ### Modération (`moderator`, `admin`)
 
 | | |
@@ -91,6 +118,31 @@ reports   (id, item_id, version_id, user_id NULL, reason TEXT, details, created_
 | `POST /mod/versions/{id}/reject` `{ reason }` | refus motivé (visible par l'auteur) |
 | `POST /mod/items/{id}/hide` / `restore` | masquer / rétablir un élément |
 | `POST /mod/reports/{id}/resolve` | clore un signalement |
+| `GET /mod/versions/{id}/files` / `diff?against=` | fichiers d'un paquet, différence avec la version précédente |
+
+### Administration (`admin`)
+
+| | |
+|---|---|
+| `GET /admin/users?q=&role=&page=` | comptes (login, avatar, rôle, éléments publiés, dernière activité) |
+| `POST /admin/moderators` `{ login }` / `DELETE /admin/moderators/{id}` | ajouter / retirer un modérateur |
+| `POST /admin/users/{id}/ban` / `unban` | bannir (jetons révoqués, éléments masqués) / rétablir |
+| `GET /admin/audit` | journal des actions d'administration |
+
+## Panneau d'administration (`/admin`)
+
+Petite application Vue (`server/admin/`), construite et servie par Axum. Connexion GitHub
+(OAuth web), réservée aux rôles `moderator` et `admin` ; cookie de session `HttpOnly`,
+`Secure`, `SameSite=Strict`, propre au panneau (les jetons du CLI et de l'app ne servent pas
+ici).
+
+- **File de modération** : versions d'extensions en attente — fiche, permissions (les
+  nouvelles en orange), explorateur de fichiers avec coloration, **différence avec la
+  version précédente**, résultat de l'analyse ; *Approuver* / *Refuser* (motif obligatoire).
+- **Signalements** : élément concerné, motif, historique ; *Masquer* / *Clore*.
+- **Éléments** : recherche, masquer / rétablir, versions retirées.
+- **Comptes** (admin) : liste, rôles, ajout de modérateurs par nom GitHub, bannissement.
+- **Journal** (admin) : qui a fait quoi, quand.
 
 Erreurs : `{ "error": "<code>" }` (codes stables : ceux de `island-formats` —
 `corrupt`, `tooLarge`, `sceneTooNew`, `missingFile:…`, `invalidImage:…`, `badPath:…`,
@@ -131,6 +183,27 @@ Erreurs : `{ "error": "<code>" }` (codes stables : ceux de `island-formats` —
   qu'aujourd'hui (permission ajoutée = orange).
 - **Plus tard** : lien `island://store/<id>` (pages web partageables qui ouvrent l'app).
 
+## Sécurité des fichiers
+
+Rien n'est jamais envoyé directement dans R2 (pas d'URL d'envoi présignée) : tout fichier
+passe par le serveur, qui le **vérifie avant de le stocker**, dans cet ordre.
+
+1. **Validation de structure** (`island-formats`) — la vraie protection : tailles bornées,
+   noms simples, chemins sûrs, scène / manifeste valides, chaque image décodée.
+2. **Types de fichiers autorisés** dans un paquet d'extension : uniquement des ressources
+   web (`html`, `js`, `mjs`, `css`, `json`, `wasm`, images, polices, `txt`, `md`) — tout
+   exécutable ou script système (`exe`, `dll`, `ps1`, `bat`, `msi`…) est refusé.
+3. **Métadonnées retirées des photos** des scènes (EXIF, dont la position GPS de l'auteur ;
+   blocs texte des PNG), sans recompression.
+4. **Analyse antivirus ClamAV** (`clamd`, protocole `INSTREAM`), si `CLAMAV_URL` est
+   configuré : un fichier détecté est refusé et journalisé. Sans ClamAV (développement), la
+   version est marquée `scan: skipped`.
+5. **Relecture humaine** des extensions (aucun antivirus ne détecte un code qui abuse de ses
+   permissions) — puis signature du magasin.
+
+Côté app, rien ne change : une scène ne contient que des données, et une extension tourne
+dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
+
 ## Sécurité et limites
 
 - Tailles : celles d'`island-formats` (`.islandscene` 256 Mo, `.island` 64 Mo décompressé),
@@ -156,21 +229,26 @@ Erreurs : `{ "error": "<code>" }` (codes stables : ceux de `island-formats` —
 
 | Variable | |
 |---|---|
-| `DATABASE_URL` | `sqlite://data/store.db` |
+| `DATABASE_URL` | Postgres (Neon) ; en local, un Postgres de développement ou une branche Neon |
 | `STORAGE` | `local:./data/files` (dev) ou `r2` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | stockage |
-| `GITHUB_CLIENT_ID` | OAuth (device flow : pas de secret client nécessaire) |
+| `GITHUB_CLIENT_ID` | OAuth (le *device flow* n'a pas besoin du secret) |
+| `GITHUB_CLIENT_SECRET` | OAuth web du panneau d'administration |
+| `ADMIN_GITHUB_ID` | identifiant numérique GitHub du super admin |
+| `SESSION_KEY` | clé de signature des cookies du panneau |
+| `CLAMAV_URL` | `tcp://clamav:3310` (optionnel) |
 | `STORE_SIGNING_KEY` | clé privée ed25519 du magasin (PEM) |
 | `PUBLIC_URL` | `https://store.island…` |
 
 ## Étapes
 
 1. ✅ `crates/island-formats` (formats partagés, tests).
-2. Serveur : squelette Axum, SQLite + migrations, stockage local, **scènes** (catalogue,
-   fiche, téléchargement, publication via jeton, signalement), tests d'API.
-3. Auth GitHub (device flow), jetons.
-4. Écran Magasin dans Island + `island publish` dans le SDK.
-5. Extensions : file de modération, signature du magasin, état `Store` dans l'app, mises à
-   jour.
-6. Production : R2, Litestream, déploiement, CI.
-7. Plus tard : site public, tableau de bord auteur, liens `island://`.
+2. Serveur : squelette Axum, Postgres + migrations, stockage local, **scènes** (catalogue,
+   recherche, fiche, téléchargement, publication via jeton, signalement), tests d'API.
+3. Auth GitHub (device flow, jetons ; OAuth web), rôles, admin par `ADMIN_GITHUB_ID`.
+4. Panneau d'administration : comptes, modérateurs, signalements, journal.
+5. Écran Magasin dans Island + `island publish` dans le SDK.
+6. Extensions : types autorisés, file de modération (fichiers, différences), signature du
+   magasin, état `Store` dans l'app, mises à jour.
+7. Production : Neon, R2, ClamAV, déploiement, CI.
+8. Plus tard : site public, tableau de bord auteur, liens `island://`.
