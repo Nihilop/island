@@ -2,11 +2,15 @@
 //! et modifier la scène ailleurs.
 //!
 //! ```text
-//! manifest.json   { "format": "islandscene", "version": 1, "name", "app" }
+//! manifest.json   { "format": "islandscene", "version": 1, "name", "app",
+//!                   "summary"?, "tags"?, "homepage"?, "repository"?, "license"? }
 //! scene.json      la scène (format de `scene`)
-//! thumbnail.png   vignette 480 × 270 (le calque de fond)
+//! store/…         médias de la fiche (convention de `media` : vignette = rendu de la scène)
 //! <fichiers>      images et masques référencés, à plat (noms simples)
 //! ```
+//!
+//! Compatibilité : un fichier de la 2.5.0 a sa vignette en `thumbnail.png` à la racine ;
+//! elle est lue comme `store/thumbnail.png`.
 //!
 //! Aucun code : pas de signature, mais un fichier reçu peut être piégé, donc [`read`] vérifie
 //! tout : taille du fichier et taille décompressée bornées, noms simples uniquement (rien ne
@@ -19,6 +23,7 @@ use std::io::{Read, Seek, Write};
 
 use serde::{Deserialize, Serialize};
 
+use crate::media::{self, Media, StoreMeta};
 use crate::scene::{self, Scene};
 
 pub const EXT: &str = "islandscene";
@@ -42,6 +47,9 @@ pub struct Manifest {
     /// Application qui a écrit le fichier (« Island 2.5.1 »), pour information.
     #[serde(default)]
     pub app: String,
+    /// Résumé, étiquettes, liens, licence (fiche du magasin).
+    #[serde(flatten)]
+    pub store: StoreMeta,
 }
 
 /// Contenu vérifié d'un `.islandscene`.
@@ -50,8 +58,8 @@ pub struct Contents {
     pub scene: Scene,
     /// Images et masques référencés par la scène (les autres fichiers sont ignorés).
     pub files: Vec<(String, Vec<u8>)>,
-    /// Vignette fournie (non vérifiée : à régénérer si on veut s'y fier).
-    pub thumbnail: Option<Vec<u8>>,
+    /// Médias de la fiche (images décodées et vérifiées).
+    pub media: Media,
 }
 
 /// Lit et vérifie un `.islandscene`. `len` = taille du fichier (pour refuser tôt).
@@ -64,7 +72,8 @@ pub fn read<R: Read + Seek>(reader: R, len: u64) -> Result<Contents, String> {
         return Err("corrupt".into());
     }
     let mut total = 0u64;
-    let (mut manifest, mut scene_json, mut thumbnail) = (None, None, None);
+    let (mut manifest, mut scene_json, mut legacy_thumbnail) = (None, None, None);
+    let mut media = Media::default();
     let mut files = Vec::new();
     for i in 0..zip.len() {
         let mut e = zip.by_index(i).map_err(|_| "corrupt")?;
@@ -73,8 +82,13 @@ pub fn read<R: Read + Seek>(reader: R, len: u64) -> Result<Contents, String> {
         }
         let name = e.name().to_string();
         let known = matches!(name.as_str(), "manifest.json" | "scene.json" | "thumbnail.png");
-        // Noms simples seulement : rien ne peut s'écrire ailleurs que dans le dossier de la scène.
-        if !known && !scene::valid_image_name(&name) {
+        // Noms simples seulement (ou un média de `store/`, reconnu par la convention) : rien
+        // ne peut s'écrire ailleurs que dans le dossier de la scène.
+        let is_media = name.starts_with(media::PREFIX);
+        if is_media && media::slot(&name).is_none() {
+            return Err(format!("badMedia:{name}"));
+        }
+        if !known && !is_media && !scene::valid_image_name(&name) {
             return Err("corrupt".into());
         }
         if e.size() > MAX_ENTRY {
@@ -90,10 +104,15 @@ pub fn read<R: Read + Seek>(reader: R, len: u64) -> Result<Contents, String> {
         match name.as_str() {
             "manifest.json" => manifest = Some(bytes),
             "scene.json" => scene_json = Some(bytes),
-            "thumbnail.png" => thumbnail = Some(bytes),
+            "thumbnail.png" => legacy_thumbnail = Some(bytes),
+            _ if is_media => media.add(&name, bytes)?,
             _ => files.push((name, bytes)),
         }
     }
+    if media.thumbnail.is_none() {
+        media.thumbnail = legacy_thumbnail.map(|b| (format!("{}thumbnail.png", media::PREFIX), b));
+    }
+    media.check()?;
     let manifest: Manifest = serde_json::from_slice(&manifest.ok_or("corrupt")?).map_err(|_| "corrupt")?;
     if manifest.format != FORMAT {
         return Err("corrupt".into());
@@ -113,13 +132,13 @@ pub fn read<R: Read + Seek>(reader: R, len: u64) -> Result<Contents, String> {
         }
     }
     files.retain(|(n, _)| needed.contains(n));
-    Ok(Contents { manifest, scene, files, thumbnail })
+    Ok(Contents { manifest, scene, files, media })
 }
 
 /// Écrit un `.islandscene`. `files` : les images et masques de la scène (nom, octets) ;
-/// `thumbnail` : PNG (cf. [`thumbnail`]) ; `app` : « Island 2.5.1 ».
-pub fn write<W: Write + Seek>(writer: W, scene: &Scene, files: &[(String, Vec<u8>)], thumbnail: &[u8], app: &str) -> Result<(), String> {
-    let manifest = Manifest { format: FORMAT.into(), version: FORMAT_VERSION, name: scene.name.clone(), app: app.into() };
+/// `media` : médias de la fiche (`store/…`) ; `app` : « Island 2.5.1 ».
+pub fn write<W: Write + Seek>(writer: W, scene: &Scene, files: &[(String, Vec<u8>)], media: &Media, store: &StoreMeta, app: &str) -> Result<(), String> {
+    let manifest = Manifest { format: FORMAT.into(), version: FORMAT_VERSION, name: scene.name.clone(), app: app.into(), store: store.clone() };
     let mut zip = zip::ZipWriter::new(writer);
     let deflate = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     // Images et masques sont déjà compressés : stockés tels quels.
@@ -130,7 +149,9 @@ pub fn write<W: Write + Seek>(writer: W, scene: &Scene, files: &[(String, Vec<u8
     };
     put("manifest.json", &serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?, deflate)?;
     put("scene.json", &serde_json::to_vec_pretty(scene).map_err(|e| e.to_string())?, deflate)?;
-    put("thumbnail.png", thumbnail, stored)?;
+    for (path, bytes) in media.entries() {
+        put(&path, &bytes, if path.ends_with(".md") { deflate } else { stored })?;
+    }
     let mut seen = HashSet::new();
     for f in scene.images() {
         if seen.insert(f.clone()) {
@@ -190,6 +211,10 @@ mod tests {
         out.into_inner()
     }
 
+    fn media_with(thumb: Vec<u8>) -> Media {
+        Media { thumbnail: Some(("store/thumbnail.png".into(), thumb)), ..Default::default() }
+    }
+
     fn read_bytes(b: &[u8]) -> Result<Contents, String> {
         read(Cursor::new(b), b.len() as u64)
     }
@@ -237,11 +262,27 @@ mod tests {
         let s = image_scene();
         let files = vec![("a.png".to_string(), tiny_png())];
         let mut out = Cursor::new(Vec::new());
-        write(&mut out, &s, &files, &tiny_png(), "Island test").unwrap();
+        let meta = StoreMeta { summary: Some("Une scène".into()), tags: vec!["nuit".into()], ..Default::default() };
+        let mut media = media_with(tiny_png());
+        media.readme = Some("# Description".into());
+        write(&mut out, &s, &files, &media, &meta, "Island test").unwrap();
         let bytes = out.into_inner();
         let r = read_bytes(&bytes).unwrap();
         assert_eq!(r.manifest.app, "Island test");
+        assert_eq!(r.manifest.store, meta);
         assert_eq!(r.files, files);
-        assert!(r.thumbnail.is_some());
+        assert_eq!(r.media, media);
+    }
+
+    #[test]
+    fn reads_a_2_5_0_file_and_refuses_unknown_media() {
+        let json = serde_json::to_vec(&image_scene()).unwrap();
+        // 2.5.0 : vignette à la racine → lue comme store/thumbnail.png.
+        let r = read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("a.png", &tiny_png()), ("thumbnail.png", &tiny_png())])).unwrap();
+        assert_eq!(r.media.thumbnail.unwrap().0, "store/thumbnail.png");
+        let bad = read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("a.png", &tiny_png()), ("store/x.exe", b"MZ")]));
+        assert_eq!(bad.err().unwrap(), "badMedia:store/x.exe");
+        let fake = read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("a.png", &tiny_png()), ("store/banner.png", b"faux")]));
+        assert_eq!(fake.err().unwrap(), "invalidImage:store/banner.png");
     }
 }

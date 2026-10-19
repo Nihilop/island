@@ -18,6 +18,7 @@ pub mod error;
 pub mod github;
 pub mod items;
 pub mod login;
+pub mod media;
 pub mod sanitize;
 pub mod scan;
 pub mod session;
@@ -64,6 +65,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/items/{id}", get(items::detail).patch(items::update).delete(items::remove))
         .route("/v1/items/{id}/download", get(items::download))
         .route("/v1/items/{id}/thumbnail", get(items::thumbnail))
+        .route("/v1/items/{id}/media/{kind}/{position}", get(items::media))
         .route("/v1/items/{id}/reports", post(items::report))
         .route("/v1/me/items", get(items::mine))
         .route("/v1/auth/device", post(login::device))

@@ -18,7 +18,7 @@ import ScenePanel from "./ScenePanel.vue";
 import MaskPainter from "./MaskPainter.vue";
 import { Preview } from "./preview";
 import { DEFAULTS, layerBox, layerId, maskNames, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
-import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, shareError } from "./api";
+import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, saveThumbnail, shareError } from "./api";
 import { t } from "../notch/i18n";
 
 const win = getCurrentWindow();
@@ -297,6 +297,9 @@ async function save(): Promise<boolean> {
     const s = JSON.parse(JSON.stringify(toRaw(scene.value))) as Scene;
     s.name = s.name.trim() || t("wall.untitled");
     await saveScene(id.value, s);
+    // Vignette : un vrai rendu de la scène (outil du notch, partage, magasin). Un échec ne
+    // fait pas échouer l'enregistrement (l'ancienne vignette approchée reste).
+    if (preview) await preview.snapshot().then((png) => saveThumbnail(id.value, png)).catch((e) => console.warn("vignette :", e));
     scene.value.name = s.name;
     baseline.value = JSON.stringify(scene.value);
     isNew.value = false;

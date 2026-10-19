@@ -112,6 +112,9 @@ pub struct Manifest {
     pub contributes: Contributes,
     #[serde(default)]
     pub locales: std::collections::BTreeMap<String, String>,
+    /// Résumé, étiquettes, liens, licence (fiche du magasin).
+    #[serde(flatten)]
+    pub store: crate::media::StoreMeta,
 }
 
 impl Manifest {
@@ -177,6 +180,8 @@ pub struct Package {
     pub signature: Signature,
     /// Clé publique du signataire (base64), si signé.
     pub key: Option<String>,
+    /// Médias de la fiche du magasin (`store/…`, images vérifiées).
+    pub media: crate::media::Media,
 }
 
 #[derive(Deserialize)]
@@ -261,8 +266,13 @@ pub fn read<R: Read + Seek>(reader: R, trusted: &[&str]) -> Result<Package, Stri
     if let Some(missing) = needed.iter().find(|p| !has(p)) {
         return Err(format!("missingFile:{missing}"));
     }
+    let mut media = crate::media::Media::default();
+    for (name, bytes) in files.iter().filter(|(n, _)| n.starts_with(crate::media::PREFIX)) {
+        media.add(name, bytes.clone())?;
+    }
+    media.check()?;
     let (signature, key) = verify(&files, trusted);
-    Ok(Package { manifest, files, signature, key })
+    Ok(Package { manifest, files, signature, key, media })
 }
 
 #[cfg(test)]

@@ -227,6 +227,8 @@ pub fn run() {
             wallpaper::wallpaper_import_image,
             wallpaper::wallpaper_image,
             wallpaper::wallpaper_save_mask,
+            wallpaper::wallpaper_save_thumbnail,
+            wallpaper::wallpaper_thumbnail,
             wallpaper::share::wallpaper_export,
             wallpaper::share::wallpaper_import,
             wallpaper::share::wallpaper_take_imported,

@@ -65,6 +65,8 @@ export interface Scene {
 export interface SceneEntry {
   id: string;
   preset: boolean;
+  /** Rendu enregistré par l'éditeur (sinon : vignette approchée, calque de fond). */
+  thumbnail: boolean;
   scene: Scene;
   updated: number;
 }

@@ -4,10 +4,12 @@
 //!
 //! - [`scene`] : scènes de fonds animés (calques, effets, masques) ;
 //! - [`islandscene`] : fichier de partage `.islandscene` (lecture vérifiée, écriture) ;
-//! - [`package`] : paquets d'extension `.island` (manifeste, empreinte, signature).
+//! - [`package`] : paquets d'extension `.island` (manifeste, empreinte, signature) ;
+//! - [`media`] : médias de la fiche du magasin (`store/`), communs aux deux formats.
 //!
 //! Aucune dépendance à Tauri ni à l'OS : tout part d'octets ou de lecteurs.
 
 pub mod islandscene;
+pub mod media;
 pub mod package;
 pub mod scene;

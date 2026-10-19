@@ -9,7 +9,7 @@ import IconButton from "../../ui/IconButton.vue";
 import TextField from "../../ui/TextField.vue";
 import { Spinner } from "@/sdk/ui/spinner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/sdk/ui/collapsible";
-import { apply, deleteScene, displays as listDisplays, exportScene, fillCss, imageUrl, openEditor, pickAndImport, sceneOn, shareError, thumbLayer, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
+import { apply, deleteScene, displays as listDisplays, exportScene, fillCss, imageUrl, openEditor, pickAndImport, sceneOn, shareError, thumbLayer, thumbnailUrl, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
 import type { SceneEntry } from "../../wallpaper/scene";
 import { t } from "../../notch/i18n";
 
@@ -91,8 +91,19 @@ async function thumb(id: string, img: string) {
   if (!thumbs[id + img]) thumbs[id + img] = await imageUrl(id, img).catch(() => "");
 }
 
-/** Vignette : le calque de fond de la scène (image ou couleur / dégradé). */
+const cover = (url: string | undefined) =>
+  url ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "var(--color-fill-2)" };
+
+/** Vignette : le rendu enregistré par l'éditeur ; à défaut, le calque de fond de la scène. */
 function style(e: SceneEntry | undefined) {
+  if (e?.thumbnail) {
+    const k = `snap:${e.id}:${e.updated}`;
+    if (!(k in thumbs)) {
+      thumbs[k] = "";
+      void thumbnailUrl(e.id, e.updated).then((u) => (thumbs[k] = u)).catch(() => {});
+    }
+    return cover(thumbs[k]);
+  }
   const l = e && thumbLayer(e.scene);
   if (!e || !l) return { background: "var(--color-fill-2)" };
   if (l.kind === "image" && l.image) {

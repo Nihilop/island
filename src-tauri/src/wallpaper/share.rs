@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use island_formats::islandscene::{self as format, EXT};
+use island_formats::media::{Media, StoreMeta};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -33,10 +34,16 @@ pub fn export(app: &AppHandle, id: &str, path: &Path) -> Result<(), String> {
             }
         }
     }
-    let thumb = format::thumbnail(&s, |f| dir.as_ref().and_then(|d| image::open(d.join(f)).ok()));
+    // Vignette : le rendu enregistré par l'éditeur, sinon une approximation (calque de fond).
+    let snapshot = dir.as_ref().and_then(|d| std::fs::read(d.join(super::SNAPSHOT)).ok());
+    let thumb = match snapshot {
+        Some(b) => b,
+        None => format::png(&format::thumbnail(&s, |f| dir.as_ref().and_then(|d| image::open(d.join(f)).ok())))?,
+    };
+    let media = Media { thumbnail: Some((super::SNAPSHOT.into(), thumb)), ..Default::default() };
     let tmp = path.with_extension("islandscene.part");
     let file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
-    let written = format::write(file, &s, &files, &format::png(&thumb)?, &format!("Island {}", app.package_info().version));
+    let written = format::write(file, &s, &files, &media, &StoreMeta::default(), &format!("Island {}", app.package_info().version));
     match written.and_then(|_| std::fs::rename(&tmp, path).map_err(|e| e.to_string())) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -73,7 +80,7 @@ fn unique_name(app: &AppHandle, name: &str) -> String {
 
 /// Importe un `.islandscene` : nouvelle scène (à toi, modifiable). Renvoie son id et son nom.
 pub fn import(app: &AppHandle, path: &Path) -> Result<Imported, String> {
-    let format::Contents { scene: mut s, files, .. } = read(path)?;
+    let format::Contents { scene: mut s, files, media, .. } = read(path)?;
     s.name = unique_name(app, &s.name);
     let id = new_id();
     let dir = super::scene_dir(app, &id)?;
@@ -81,6 +88,12 @@ pub fn import(app: &AppHandle, path: &Path) -> Result<Imported, String> {
     let write = || -> Result<(), String> {
         for (name, bytes) in &files {
             std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
+        }
+        // Vignette fournie (vérifiée par `read`) : gardée, ré-encodée en PNG.
+        if let Some(img) = media.thumbnail.as_ref().and_then(|(_, b)| image::load_from_memory(b).ok()) {
+            let path = dir.join(super::SNAPSHOT);
+            std::fs::create_dir_all(path.parent().expect("store/")).map_err(|e| e.to_string())?;
+            img.save_with_format(&path, image::ImageFormat::Png).map_err(|e| e.to_string())?;
         }
         std::fs::write(dir.join("scene.json"), serde_json::to_vec_pretty(&s).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     };

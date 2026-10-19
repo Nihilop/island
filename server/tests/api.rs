@@ -12,6 +12,7 @@ use axum::http::{Request, StatusCode};
 use axum::Router;
 use http_body_util::BodyExt;
 use island_formats::islandscene;
+use island_formats::media::{Media, StoreMeta};
 use island_formats::scene::{Layer, Scene};
 use island_store::{app, AppState, Storage};
 use serde_json::{json, Value};
@@ -65,13 +66,24 @@ fn png_with_gps() -> Vec<u8> {
 }
 
 fn scene_file(name: &str) -> Vec<u8> {
+    scene_file_with(name, Media::default(), StoreMeta::default())
+}
+
+/// Vignette fournie par Island (rendu de la scène) : un PNG 1600×900 vert.
+fn snapshot() -> Vec<u8> {
+    let mut out = Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(1600, 900, image::Rgb([20, 200, 60])).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+fn scene_file_with(name: &str, media: Media, meta: StoreMeta) -> Vec<u8> {
     let s = Scene {
         name: name.into(),
         layers: vec![Layer { id: "bg".into(), kind: "image".into(), image: Some("bg.png".into()), ..Default::default() }],
         ..Default::default()
     };
     let mut out = Cursor::new(Vec::new());
-    islandscene::write(&mut out, &s, &[("bg.png".into(), png_with_gps())], b"thumb", "Island test").unwrap();
+    islandscene::write(&mut out, &s, &[("bg.png".into(), png_with_gps())], &media, &meta, "Island test").unwrap();
     out.into_inner()
 }
 
@@ -158,7 +170,9 @@ async fn a_published_scene_is_listed_downloadable_and_cleaned(db: PgPool) {
     let (_, img) = &got.files[0];
     assert!(!img.windows(11).any(|w| w == b"lat=48.8566"));
     assert!(image::load_from_memory(img).is_ok());
-    assert_ne!(got.thumbnail.as_deref(), Some(&b"thumb"[..]));
+    // Pas de vignette fournie : approximation du serveur, en JPEG 960×540.
+    let (_, thumb) = got.media.thumbnail.as_ref().unwrap();
+    assert_eq!(image::load_from_memory_with_format(thumb, image::ImageFormat::Jpeg).unwrap().width(), 960);
     let (_, page) = get_json(&r, "/v1/items").await;
     assert_eq!(page["items"][0]["downloads"], 1);
 
@@ -248,4 +262,47 @@ async fn reports_are_validated_and_rate_limited(db: PgPool) {
     // L'IP n'est jamais stockée, seulement son empreinte.
     let ips: Vec<String> = sqlx::query_scalar("SELECT ip_hash FROM reports").fetch_all(&db).await.unwrap();
     assert!(ips.iter().all(|h| h.len() == 64 && !h.contains("203.0.113.7")));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn the_item_page_is_filled_from_the_package_media(db: PgPool) {
+    let r = router(db.clone());
+    let (_, token) = user(&db, "alice").await;
+    let mut media = Media::default();
+    media.add("store/thumbnail.png", snapshot()).unwrap();
+    media.add("store/banner.png", snapshot()).unwrap();
+    media.add("store/screenshots/2.png", snapshot()).unwrap();
+    media.add("store/screenshots/1.png", snapshot()).unwrap();
+    media.add("store/README.md", "# Diablotin
+Une longue description.".as_bytes().to_vec()).unwrap();
+    let meta = StoreMeta {
+        summary: Some("Un diablotin et ses braises".into()),
+        tags: vec!["Démon".into(), "feu".into()],
+        homepage: Some("https://exemple.com".into()),
+        repository: Some("http://pas-https.example".into()),
+        license: Some("CC-BY-4.0".into()),
+    };
+    let (s, body) = publish(&r, Some(&token), &[("file", &scene_file_with("Diablotin", media, meta))]).await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    let id = body["id"].as_str().unwrap();
+    let (_, d) = get_json(&r, &format!("/v1/items/{id}")).await;
+    assert_eq!(d["summary"], "Un diablotin et ses braises");
+    assert_eq!(d["description"], "# Diablotin
+Une longue description.");
+    assert_eq!(d["homepage"], "https://exemple.com");
+    assert_eq!(d["repository"], Value::Null); // pas en https : ignoré
+    assert_eq!(d["license"], "CC-BY-4.0");
+    assert_eq!(d["tags"], json!(["feu"])); // « Démon » : étiquette invalide, ignorée
+    assert_eq!(d["media"]["screenshots"].as_array().unwrap().len(), 2);
+
+    // Médias servis à part, ré-encodés en JPEG aux tailles de la fiche ; vignette = celle fournie (verte).
+    let fetch = |uri: String| { let r = r.clone(); async move { send(&r, Request::get(uri).body(Body::empty()).unwrap()).await } };
+    let (s, thumb) = fetch(d["media"]["thumbnail"].as_str().unwrap().to_string()).await;
+    assert_eq!(s, StatusCode::OK);
+    let img = image::load_from_memory_with_format(&thumb, image::ImageFormat::Jpeg).unwrap().to_rgb8();
+    assert_eq!(img.dimensions(), (960, 540));
+    assert!(img.get_pixel(480, 270).0[1] > 150);
+    let (_, banner) = fetch(d["media"]["banner"].as_str().unwrap().to_string()).await;
+    assert_eq!(image::load_from_memory(&banner).unwrap().width(), 1920);
+    assert_eq!(fetch(format!("/v1/items/{id}/media/screenshot/9")).await.0, StatusCode::NOT_FOUND);
 }

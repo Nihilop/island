@@ -6,8 +6,12 @@
 //!   1. `islandscene::read` (tailles, noms simples, images décodées, scène validée) ;
 //!   2. métadonnées retirées des images (EXIF, GPS…) ;
 //!   3. analyse ClamAV (si configurée) ;
-//!   4. vignette RÉGÉNÉRÉE par le serveur (celle du fichier n'est pas fiable) ;
-//!   5. fichier réécrit (images nettoyées, vignette du serveur), stocké, puis publié.
+//!   4. médias de la fiche (`store/` : vignette — le rendu fait par Island —, bannière,
+//!      captures) décodés et RÉ-ENCODÉS en JPEG borné ; sans vignette, une approximation ;
+//!   5. fiche remplie depuis le paquet (README, résumé, étiquettes, liens, licence du
+//!      manifeste), les champs du formulaire restant prioritaires ;
+//!   6. fichier réécrit (images nettoyées, médias ré-encodés), stocké ; médias stockés À PART
+//!      (le catalogue ne rouvre jamais le paquet).
 
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -71,12 +75,24 @@ pub struct VersionInfo {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaUrls {
+    pub thumbnail: Option<String>,
+    pub banner: Option<String>,
+    pub screenshots: Vec<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Detail {
     #[serde(flatten)]
     pub card: Card,
     pub description: String,
+    pub homepage: Option<String>,
+    pub repository: Option<String>,
+    pub license: Option<String>,
+    pub media: MediaUrls,
     pub versions: Vec<VersionInfo>,
 }
 
@@ -150,14 +166,25 @@ async fn visible_card(st: &AppState, id: &str) -> ApiResult<Card> {
 
 pub async fn detail(State(st): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Detail>> {
     let card = visible_card(&st, &id).await?;
-    let description: String = sqlx::query_scalar("SELECT description FROM items WHERE id = $1").bind(&id).fetch_one(&st.db).await?;
+    let (description, homepage, repository, license): (String, Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT description, homepage, repository, license FROM items WHERE id = $1").bind(&id).fetch_one(&st.db).await?;
+    let assets: Vec<(String, i32)> = sqlx::query_as("SELECT kind, position FROM assets WHERE item_id = $1 ORDER BY kind, position").bind(&id).fetch_all(&st.db).await?;
+    let mut media = MediaUrls::default();
+    for (kind, pos) in assets {
+        let url = format!("/v1/items/{id}/media/{kind}/{pos}");
+        match kind.as_str() {
+            "thumbnail" => media.thumbnail = Some(url),
+            "banner" => media.banner = Some(url),
+            _ => media.screenshots.push(url),
+        }
+    }
     let versions = sqlx::query_as::<_, VersionInfo>(
         "SELECT version, size, changelog, created_at FROM versions WHERE item_id = $1 AND status = 'approved' ORDER BY id DESC",
     )
     .bind(&id)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(Detail { card, description, versions }))
+    Ok(Json(Detail { card, description, homepage, repository, license, media, versions }))
 }
 
 // --- Téléchargement et vignette ------------------------------------------------------------
@@ -203,18 +230,30 @@ pub async fn download(State(st): State<AppState>, Path(id): Path<String>, Query(
         .into_response())
 }
 
-pub async fn thumbnail(State(st): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
-    visible_card(&st, &id).await?;
-    let key: Option<String> = sqlx::query_scalar("SELECT file_key FROM assets WHERE item_id = $1 AND kind = 'thumbnail' AND position = 0")
-        .bind(&id)
+async fn serve_asset(st: &AppState, id: &str, kind: &str, position: i32) -> ApiResult<Response> {
+    visible_card(st, id).await?;
+    let key: Option<String> = sqlx::query_scalar("SELECT file_key FROM assets WHERE item_id = $1 AND kind = $2 AND position = $3")
+        .bind(id)
+        .bind(kind)
+        .bind(position)
         .fetch_optional(&st.db)
         .await?;
-    let bytes = match key {
-        Some(k) => st.storage.get(&k).await.map_err(ApiError::internal)?,
-        None => None,
-    };
-    let bytes = bytes.ok_or_else(ApiError::not_found)?;
-    Ok(([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "public, max-age=300")], bytes).into_response())
+    let key = key.ok_or_else(ApiError::not_found)?;
+    let bytes = st.storage.get(&key).await.map_err(ApiError::internal)?.ok_or_else(ApiError::not_found)?;
+    let mime = if key.ends_with(".png") { "image/png" } else { "image/jpeg" };
+    Ok(([(header::CONTENT_TYPE, mime), (header::CACHE_CONTROL, "public, max-age=300")], bytes).into_response())
+}
+
+pub async fn thumbnail(State(st): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
+    serve_asset(&st, &id, "thumbnail", 0).await
+}
+
+/// `/v1/items/{id}/media/{thumbnail|banner|screenshot}/{position}`.
+pub async fn media(State(st): State<AppState>, Path((id, kind, position)): Path<(String, String, i32)>) -> ApiResult<Response> {
+    if !matches!(kind.as_str(), "thumbnail" | "banner" | "screenshot") {
+        return Err(ApiError::not_found());
+    }
+    serve_asset(&st, &id, &kind, position).await
 }
 
 // --- Publication -----------------------------------------------------------------------------
@@ -321,12 +360,29 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
         tracing::warn!("publication refusée ({}) : menace {threat}", user.login);
         return Err(ApiError::bad("malware"));
     }
-    // 4. Vignette du serveur.
-    let thumb = islandscene::thumbnail(&scene, |n| files.iter().find(|(f, _)| f == n).and_then(|(_, b)| image::load_from_memory(b).ok()));
-    let thumb = islandscene::png(&thumb).map_err(ApiError::internal)?;
-    // 5. Fichier réécrit.
+    // 4. Médias ré-encodés (vignette = rendu fait par Island ; sinon approximation).
+    let fallback = || islandscene::thumbnail(&scene, |n| files.iter().find(|(f, _)| f == n).and_then(|(_, b)| image::load_from_memory(b).ok()));
+    let processed = crate::media::process(&contents.media, fallback).map_err(ApiError::bad)?;
+    // 5. Fiche : le formulaire d'abord, puis le paquet (README, manifeste).
+    let store = contents.manifest.store;
+    let readme = contents.media.readme.clone();
+    let summary = f.summary.clone().or(store.summary.clone()).map(|s| s.chars().take(MAX_SUMMARY).collect::<String>());
+    let description = f.description.clone().or(readme.clone()).map(|s| s.chars().take(MAX_DESCRIPTION).collect::<String>());
+    let tags = match tags {
+        Some(t) => Some(t),
+        // Étiquettes du paquet : on garde les valides (le formulaire, lui, est strict).
+        None if !store.tags.is_empty() => {
+            let ok: Vec<String> = store.tags.iter().filter(|t| clean_tags(std::slice::from_ref(*t)).is_ok()).take(MAX_TAGS).cloned().collect();
+            Some(clean_tags(&ok).unwrap_or_default())
+        }
+        None => None,
+    };
+    let link = |v: &Option<String>| v.as_deref().map(str::trim).filter(|u| u.starts_with("https://") && u.len() <= 300).map(String::from);
+    let (homepage, repository) = (link(&store.homepage), link(&store.repository));
+    let license = store.license.as_deref().map(|l| l.trim().chars().take(60).collect::<String>()).filter(|l| !l.is_empty());
+    // 6. Fichier réécrit.
     let mut out = Cursor::new(Vec::new());
-    islandscene::write(&mut out, &scene, &files, &thumb, &contents.manifest.app).map_err(ApiError::internal)?;
+    islandscene::write(&mut out, &scene, &files, &processed.as_media(readme), &store, &contents.manifest.app).map_err(ApiError::internal)?;
     let packed = out.into_inner();
     let sha: String = Sha256::digest(&packed).iter().map(|b| format!("{b:02x}")).collect();
 
@@ -347,35 +403,54 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
             let n: i64 = sqlx::query_scalar("SELECT count(*) FROM versions WHERE item_id = $1").bind(id).fetch_one(&mut *tx).await?;
             sqlx::query(
                 "UPDATE items SET name = $2, summary = COALESCE($3, summary), description = COALESCE($4, description),
-                 tags = COALESCE($5, tags), updated_at = now() WHERE id = $1",
+                 tags = COALESCE($5, tags), homepage = COALESCE($6, homepage), repository = COALESCE($7, repository),
+                 license = COALESCE($8, license), updated_at = now() WHERE id = $1",
             )
             .bind(id)
             .bind(&name)
-            .bind(&f.summary)
-            .bind(&f.description)
+            .bind(&summary)
+            .bind(&description)
             .bind(tags.as_ref().map(|t| serde_json::json!(t)))
+            .bind(&homepage)
+            .bind(&repository)
+            .bind(&license)
             .execute(&mut *tx)
             .await?;
             (id.clone(), (n + 1).to_string())
         }
         None => {
             let id = new_id("sc");
-            sqlx::query("INSERT INTO items (id, kind, owner_id, name, summary, description, tags) VALUES ($1, 'scene', $2, $3, $4, $5, $6)")
-                .bind(&id)
-                .bind(user.id)
-                .bind(&name)
-                .bind(f.summary.as_deref().unwrap_or(""))
-                .bind(f.description.as_deref().unwrap_or(""))
-                .bind(serde_json::json!(tags.unwrap_or_default()))
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(
+                "INSERT INTO items (id, kind, owner_id, name, summary, description, tags, homepage, repository, license)
+                 VALUES ($1, 'scene', $2, $3, $4, $5, $6, $7, $8, $9)",
+            )
+            .bind(&id)
+            .bind(user.id)
+            .bind(&name)
+            .bind(summary.as_deref().unwrap_or(""))
+            .bind(description.as_deref().unwrap_or(""))
+            .bind(serde_json::json!(tags.clone().unwrap_or_default()))
+            .bind(&homepage)
+            .bind(&repository)
+            .bind(&license)
+            .execute(&mut *tx)
+            .await?;
             (id, "1".to_string())
         }
     };
     let file_key = format!("items/{id}/{version}.{}", islandscene::EXT);
-    let thumb_key = format!("items/{id}/thumbnail.png");
     st.storage.put(&file_key, &packed).await.map_err(ApiError::internal)?;
-    st.storage.put(&thumb_key, &thumb).await.map_err(ApiError::internal)?;
+    // Médias À PART (le catalogue les sert sans rouvrir le paquet). Une version remplace la fiche.
+    let mut assets: Vec<(&str, i32, String, &[u8])> = vec![("thumbnail", 0, format!("items/{id}/thumbnail-{version}.jpg"), &processed.thumbnail)];
+    if let Some(b) = &processed.banner {
+        assets.push(("banner", 0, format!("items/{id}/banner-{version}.jpg"), b));
+    }
+    for (n, b) in &processed.screenshots {
+        assets.push(("screenshot", *n as i32, format!("items/{id}/screenshot-{version}-{n}.jpg"), b));
+    }
+    for (_, _, key, bytes) in &assets {
+        st.storage.put(key, bytes).await.map_err(ApiError::internal)?;
+    }
     sqlx::query("INSERT INTO versions (item_id, version, status, file_key, size, sha256, scan, changelog) VALUES ($1, $2, 'approved', $3, $4, $5, $6, $7)")
         .bind(&id)
         .bind(&version)
@@ -386,11 +461,16 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
         .bind(f.changelog.as_deref().unwrap_or(""))
         .execute(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO assets (item_id, kind, position, file_key) VALUES ($1, 'thumbnail', 0, $2) ON CONFLICT (item_id, kind, position) DO UPDATE SET file_key = $2")
-        .bind(&id)
-        .bind(&thumb_key)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query("DELETE FROM assets WHERE item_id = $1").bind(&id).execute(&mut *tx).await?;
+    for (kind, position, key, _) in &assets {
+        sqlx::query("INSERT INTO assets (item_id, kind, position, file_key) VALUES ($1, $2, $3, $4)")
+            .bind(&id)
+            .bind(kind)
+            .bind(position)
+            .bind(key)
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
     tracing::info!("publié : {id} v{version} par {} (analyse : {})", user.login, scan.label());
     Ok((StatusCode::CREATED, Json(Published { id, version, scan: scan.label() })))
