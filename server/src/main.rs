@@ -45,7 +45,20 @@ async fn main() {
         .init();
 
     let url = env("DATABASE_URL").unwrap_or_else(|| fail("DATABASE_URL manquant"));
-    let db = PgPoolOptions::new().max_connections(10).connect(&url).await.unwrap_or_else(|e| fail(format!("base : {e}")));
+    // La base peut démarrer après le serveur (Postgres du même docker compose) : on attend
+    // jusqu'à une minute avant d'abandonner.
+    let mut tries = 0;
+    let db = loop {
+        match PgPoolOptions::new().max_connections(10).connect(&url).await {
+            Ok(db) => break db,
+            Err(e) if tries < 30 => {
+                tries += 1;
+                tracing::warn!("base injoignable ({e}) : nouvel essai dans 2 s ({tries}/30)");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            Err(e) => fail(format!("base : {e}")),
+        }
+    };
     migrate(&db).await.unwrap_or_else(|e| fail(format!("migrations : {e}")));
 
     let args: Vec<String> = std::env::args().skip(1).collect();
