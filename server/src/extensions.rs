@@ -57,17 +57,69 @@ pub fn is_extension(bytes: &[u8]) -> bool {
     package::read(Cursor::new(bytes), &[]).is_ok()
 }
 
-/// Vignette par défaut : l'icône de l'extension centrée sur un fond sombre.
+const ICON: u32 = 200;
+const MAX_SVG: usize = 512 << 10;
+
+/// Forme de l'icône (canal alpha, `ICON`×`ICON`) : SVG rasterisé par `resvg` (sans polices,
+/// images ni ressources externes), ou image matricielle.
+fn icon_mask(path: &str, bytes: &[u8]) -> Option<image::GrayImage> {
+    if path.to_ascii_lowercase().ends_with(".svg") {
+        use resvg::{tiny_skia, usvg};
+        if bytes.len() > MAX_SVG {
+            return None;
+        }
+        let tree = usvg::Tree::from_data(bytes, &usvg::Options::default()).ok()?;
+        let size = tree.size();
+        let scale = (ICON as f32 / size.width()).min(ICON as f32 / size.height());
+        let (dx, dy) = ((ICON as f32 - size.width() * scale) / 2.0, (ICON as f32 - size.height() * scale) / 2.0);
+        let mut pixmap = tiny_skia::Pixmap::new(ICON, ICON)?;
+        resvg::render(&tree, tiny_skia::Transform::from_scale(scale, scale).post_translate(dx, dy), &mut pixmap.as_mut());
+        let alpha: Vec<u8> = pixmap.data().chunks_exact(4).map(|p| p[3]).collect();
+        return image::GrayImage::from_raw(ICON, ICON, alpha);
+    }
+    let img = image::load_from_memory(bytes).ok()?.resize(ICON, ICON, image::imageops::FilterType::Triangle).to_rgba8();
+    let mut mask = image::GrayImage::new(ICON, ICON);
+    let (ox, oy) = ((ICON - img.width()) / 2, (ICON - img.height()) / 2);
+    for (x, y, p) in img.enumerate_pixels() {
+        mask.put_pixel(x + ox, y + oy, image::Luma([p.0[3]]));
+    }
+    Some(mask)
+}
+
+/// Vignette par défaut : l'icône de l'extension, comme l'app l'affiche (une forme peinte en
+/// clair, donc lisible même noire ou en `currentColor`), centrée sur un fond sombre.
 fn fallback_thumbnail(pkg: &Package) -> image::RgbaImage {
     let (w, h) = crate::media::THUMBNAIL;
-    let mut canvas = image::RgbaImage::from_pixel(w, h, image::Rgba([28, 28, 30, 255]));
-    let icon = pkg.manifest.icon.as_ref().and_then(|p| pkg.files.iter().find(|(n, _)| n == p)).and_then(|(_, b)| image::load_from_memory(b).ok());
-    if let Some(icon) = icon {
-        let icon = icon.resize(256, 256, image::imageops::FilterType::Triangle).to_rgba8();
-        let (x, y) = ((w - icon.width()) / 2, (h - icon.height()) / 2);
-        image::imageops::overlay(&mut canvas, &icon, x as i64, y as i64);
+    let (bg, fg) = ([28u8, 28, 30], [229u8, 229, 234]);
+    let mut canvas = image::RgbaImage::from_pixel(w, h, image::Rgba([bg[0], bg[1], bg[2], 255]));
+    let icon = pkg.manifest.icon.as_ref().and_then(|p| pkg.files.iter().find(|(n, _)| n == p)).and_then(|(p, b)| icon_mask(p, b));
+    if let Some(mask) = icon {
+        let (x0, y0) = ((w - ICON) / 2, (h - ICON) / 2);
+        for (x, y, a) in mask.enumerate_pixels() {
+            let a = a.0[0] as u16;
+            let mix = |b: u8, f: u8| ((b as u16 * (255 - a) + f as u16 * a) / 255) as u8;
+            canvas.put_pixel(x0 + x, y0 + y, image::Rgba([mix(bg[0], fg[0]), mix(bg[1], fg[1]), mix(bg[2], fg[2]), 255]));
+        }
     }
     canvas
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn svg_icons_become_a_light_shape() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect x="2" y="2" width="6" height="6" fill="currentColor"/></svg>"#;
+        let mask = icon_mask("icons/a.svg", svg).unwrap();
+        assert_eq!(mask.dimensions(), (ICON, ICON));
+        assert_eq!(mask.get_pixel(ICON / 2, ICON / 2).0[0], 255); // dans le carré
+        assert_eq!(mask.get_pixel(2, 2).0[0], 0); // hors du carré
+        // Une image externe n'est jamais chargée, et un SVG invalide ne casse rien.
+        let external = br#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10"><image href="https://example.com/x.png" width="10" height="10"/></svg>"#;
+        assert_eq!(icon_mask("x.svg", external).unwrap().pixels().map(|p| p.0[0] as u32).sum::<u32>(), 0);
+        assert!(icon_mask("x.svg", b"pas du svg").is_none());
+    }
 }
 
 /// Fiche mise de côté jusqu'à l'approbation.

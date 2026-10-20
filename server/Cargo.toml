@@ -27,6 +27,7 @@ hmac = "0.12" # cookie de session signé (panneau d'administration)
 dotenvy = "0.15" # .env local (développement), jamais commité
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+resvg = { version = "0.45", default-features = false } # icône SVG des extensions → vignette (sans polices, images ni réseau)
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
