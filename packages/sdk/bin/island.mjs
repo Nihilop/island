@@ -278,7 +278,9 @@ async function publish(file) {
   for (const k of ["summary", "changelog"]) if (arg(`--${k}`)) form.set(k, arg(`--${k}`));
   if (arg("--tags")) form.set("tags", JSON.stringify(arg("--tags").split(",").map((t) => t.trim()).filter(Boolean)));
   form.set("file", new Blob([readFileSync(path)]), basename(path));
-  console.log(item ? `envoi d'une nouvelle version de ${item}…` : "envoi d'un nouvel élément…");
+  // Extension : l'élément est désigné par l'id de son manifeste (côté magasin).
+  const isExtension = /\.island$/i.test(path);
+  console.log(isExtension ? "envoi de l'extension…" : item ? `envoi d'une nouvelle version de ${item}…` : "envoi d'un nouvel élément…");
   const r = await api("POST", "/v1/items", { body: form });
   if (r.status === 503 && r.data?.error === "publishingPaused") {
     const s = await api("GET", "/v1/store/status", { auth: false });
@@ -293,7 +295,7 @@ async function publish(file) {
   const scan = r.data.scan === "skipped" ? " (non analysé par l'antivirus)" : "";
   if (r.data.status === "pending") console.log(`déposée : ${r.data.id} v${r.data.version}${scan}, en attente de relecture par la modération`);
   else console.log(`publié : ${r.data.id} v${r.data.version}${scan}\n  ${STORE}/v1/items/${r.data.id}`);
-  if (!item) console.log("  republier ce fichier enverra une nouvelle version (--new pour créer un autre élément)");
+  if (!item && !isExtension) console.log("  republier ce fichier enverra une nouvelle version (--new pour créer un autre élément)");
 }
 
 const [cmd, ...rest] = positionals();
