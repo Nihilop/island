@@ -137,6 +137,7 @@ async fn an_extension_waits_for_review_then_ships_signed_by_the_store(db: PgPool
     assert_eq!(s, StatusCode::OK);
     assert_eq!((item["kind"].as_str(), item["version"].as_str(), item["summary"].as_str()), (Some("extension"), Some("1.0.0"), Some("Météo locale")));
     assert_eq!((item["homepage"].as_str(), item["license"].as_str(), item["tags"].clone()), (Some("https://example.com/meteo"), Some("MIT"), json!(["meteo", "ciel"])));
+    assert_eq!(item["permissions"], json!(["network:api.example.com"]));
     // Lien non https : ignoré.
     assert!(item["repository"].is_null());
     let (s, bytes) = send(&r, Request::get("/v1/items/dev.example.meteo/download").body(Body::empty()).unwrap()).await;

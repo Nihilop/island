@@ -202,6 +202,13 @@ async fn search_is_french_and_ignores_accents(db: PgPool) {
     assert_eq!(page["items"][0]["name"], "Nuit de neige");
     let (s, _) = get_json(&r, "/v1/items?q=%27%3A*%20%26%20%21").await;
     assert_eq!(s, axum::http::StatusCode::OK);
+    // Filtres : étiquettes des éléments visibles, les plus utilisées d'abord.
+    publish(&r, Some(&token), &[("file", &scene_file("Aube")), ("tags", br#"["nuit","ciel"]"#)]).await;
+    publish(&r, Some(&token), &[("file", &scene_file("Crépuscule")), ("tags", br#"["nuit"]"#)]).await;
+    let (_, tags) = get_json(&r, "/v1/tags?kind=scene").await;
+    assert_eq!(tags, serde_json::json!([{ "tag": "nuit", "count": 2 }, { "tag": "ciel", "count": 1 }]));
+    let (_, tags) = get_json(&r, "/v1/tags?kind=extension").await;
+    assert_eq!(tags, serde_json::json!([]));
 }
 
 #[sqlx::test(migrations = "./migrations")]

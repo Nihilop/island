@@ -58,7 +58,7 @@ fn error(e: ureq::Error) -> String {
 /// Lecture seule de l'API publique (`/v1/items…`, `/v1/store/status`).
 #[tauri::command]
 pub async fn market_get(app: AppHandle, path: String, query: Option<Vec<(String, String)>>) -> Result<serde_json::Value, String> {
-    let allowed = path.starts_with("/v1/items") || path == "/v1/store/status";
+    let allowed = path.starts_with("/v1/items") || path == "/v1/store/status" || path == "/v1/tags";
     if !allowed || path.contains("..") || path.contains("/download") {
         return Err("invalidPath".into());
     }

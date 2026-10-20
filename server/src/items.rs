@@ -109,6 +109,8 @@ pub struct Detail {
     pub license: Option<String>,
     pub media: MediaUrls,
     pub versions: Vec<VersionInfo>,
+    /// Extension : permissions de la dernière version (affichées avant l'installation).
+    pub permissions: Option<serde_json::Value>,
 }
 
 const CARD_SELECT: &str = "SELECT i.id, i.kind, i.name, i.summary, i.tags, i.downloads, i.updated_at,
@@ -220,7 +222,9 @@ pub async fn detail(State(st): State<AppState>, Path(id): Path<String>) -> ApiRe
     .bind(&id)
     .fetch_all(&st.db)
     .await?;
-    Ok(Json(Detail { card, description, homepage, repository, license, media, versions }))
+    let permissions: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT permissions FROM versions WHERE item_id = $1 AND status = 'approved' ORDER BY id DESC LIMIT 1").bind(&id).fetch_optional(&st.db).await?.flatten();
+    Ok(Json(Detail { card, description, homepage, repository, license, media, versions, permissions }))
 }
 
 // --- Téléchargement et vignette ------------------------------------------------------------
@@ -767,4 +771,33 @@ pub async fn updates(State(st): State<AppState>, Json(b): Json<UpdatesBody>) -> 
     .await?;
     let newer = |u: &Update| b.items.iter().any(|i| i.id == u.id && island_formats::package::newer(&u.version, &i.version));
     Ok(Json(rows.into_iter().filter(newer).collect()))
+}
+
+// --- Étiquettes ------------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct TagsQuery {
+    kind: Option<String>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct TagCount {
+    tag: String,
+    count: i64,
+}
+
+/// `GET /v1/tags?kind=` : étiquettes des éléments visibles, les plus utilisées d'abord (filtres
+/// du magasin).
+pub async fn tags(State(st): State<AppState>, Query(q): Query<TagsQuery>) -> ApiResult<Json<Vec<TagCount>>> {
+    let kind = q.kind.filter(|k| k == "scene" || k == "extension");
+    let rows = sqlx::query_as::<_, TagCount>(&format!(
+        "SELECT t.tag, count(*) AS count
+         FROM items i JOIN users u ON u.id = i.owner_id, jsonb_array_elements_text(i.tags) AS t(tag)
+         WHERE {VISIBLE} AND ($1::text IS NULL OR i.kind = $1)
+         GROUP BY t.tag ORDER BY count DESC, t.tag LIMIT 30"
+    ))
+    .bind(kind)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
 }

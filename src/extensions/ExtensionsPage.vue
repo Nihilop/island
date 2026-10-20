@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Réglages › Extensions : compte du magasin, extensions installées (activation,
-// désinstallation, réglages générés depuis le manifeste), magasin (ExtensionStore), mode
+// désinstallation, réglages générés depuis le manifeste ; le catalogue est dans la fenêtre
+// Magasin), mode
 // développeur (dossiers ; « Empaqueter » un .island, « Publier » au magasin pour relecture).
 // L'installation elle-même se fait dans sa fenêtre (InstallWindow.vue).
 import { onMounted, reactive, ref, watch } from "vue";
@@ -26,7 +27,7 @@ import { all, extUrl, installed, type Manifest, type SettingDecl } from "./runti
 import { readSetting, writeSetting } from "./settings";
 import { commandShortcut, setCommandShortcut, shortcutPrefs, shortcutStatus } from "./slots";
 import ShortcutField from "../ui/ShortcutField.vue";
-import ExtensionStore from "./ExtensionStore.vue";
+import { openStore } from "../store/open";
 import StoreAccount from "../tools/wallpaper/StoreAccount.vue";
 import { checkUpdates, marketError, session, storeStatus, updateFor, updates, watchAccount, watchUpdates } from "../market/api";
 import { openPackage } from "./install";
@@ -269,6 +270,9 @@ const errorText = (e: string) => {
 
     <!-- Extensions installées -->
     <Group :title="t('ext.installed')" section="extensions">
+      <Row :label="t('store.title')" :help="t('ext.storeHelp')">
+        <Button variant="default" @click="openStore({ section: 'extensions' })"><PhStorefront weight="bold" />{{ t("store.open") }}</Button>
+      </Row>
       <Row :label="t('ext.install')" :help="t('ext.installHelp')">
         <Button @click="pickPackage">{{ t("ext.installAction") }}</Button>
       </Row>
@@ -319,8 +323,6 @@ const errorText = (e: string) => {
         />
       </Row>
     </Group>
-
-    <ExtensionStore />
 
     <!-- Réglages de chaque extension active -->
     <template v-for="x in all" :key="`s-${x.manifest.id}`">

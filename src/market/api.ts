@@ -35,6 +35,8 @@ export interface Detail extends Card {
   license: string | null;
   media: { thumbnail: string | null; banner: string | null; screenshots: string[] };
   versions: Version[];
+  /** Extension : permissions de la dernière version. */
+  permissions: string[] | null;
 }
 
 export interface Page {
@@ -59,10 +61,14 @@ async function get<T>(path: string, query?: Record<string, string | undefined>):
   return invoke<T>("market_get", { path, query: q });
 }
 
-export const catalog = (p: { kind?: "scene" | "extension"; q?: string; tag?: string; sort?: "recent" | "popular"; page?: number }) =>
-  get<Page>("/v1/items", { kind: p.kind ?? "scene", q: p.q, tag: p.tag, sort: p.sort, page: p.page ? String(p.page) : undefined });
+/** `kind` : scènes par défaut ; `null` = tout le magasin. */
+export const catalog = (p: { kind?: "scene" | "extension" | null; q?: string; tag?: string; sort?: "recent" | "popular"; page?: number }) =>
+  get<Page>("/v1/items", { kind: p.kind === null ? undefined : (p.kind ?? "scene"), q: p.q, tag: p.tag, sort: p.sort, page: p.page ? String(p.page) : undefined });
 
 export const item = (id: string) => get<Detail>(`/v1/items/${encodeURIComponent(id)}`);
+
+/** Étiquettes les plus utilisées (filtres du magasin). */
+export const tags = (kind?: "scene" | "extension") => get<{ tag: string; count: number }[]>("/v1/tags", { kind });
 
 export interface Installed {
   scene: string;
