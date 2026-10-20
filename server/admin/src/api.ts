@@ -57,6 +57,8 @@ const MESSAGES: Record<string, string> = {
   notModerator: "Ce compte n'est pas modérateur.",
   csrf: "Requête refusée (protection CSRF).",
   publishingPaused: "Les publications sont suspendues.",
+  noSigningKey: "Clé du magasin absente sur le serveur (STORE_SIGNING_KEY) : approbation impossible.",
+  reasonRequired: "Un motif est obligatoire.",
   internal: "Erreur du serveur.",
 };
 

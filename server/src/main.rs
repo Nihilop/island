@@ -16,6 +16,21 @@ fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
+/// Clé ed25519 du magasin : le PEM PKCS#8, ou le fichier JSON de `island keygen` (contenu ou
+/// chemin).
+fn signing_key(value: &str) -> Result<ed25519_dalek::SigningKey, String> {
+    use ed25519_dalek::pkcs8::DecodePrivateKey;
+    let value = value.trim();
+    let text = if value.starts_with('{') || value.starts_with("-----") { value.to_string() } else { std::fs::read_to_string(value).map_err(|e| e.to_string())? };
+    let pem = if text.trim_start().starts_with('{') {
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        v.get("private").and_then(|p| p.as_str()).ok_or("champ « private » absent")?.to_string()
+    } else {
+        text
+    };
+    ed25519_dalek::SigningKey::from_pkcs8_pem(&pem.replace("\\n", "\n")).map_err(|e| e.to_string())
+}
+
 fn fail(msg: impl std::fmt::Display) -> ! {
     eprintln!("island-store : {msg}");
     std::process::exit(1)
@@ -93,7 +108,12 @@ async fn main() {
         secure_cookies: public_url.starts_with("https://"),
         public_url,
         admin_dist: Some(std::path::PathBuf::from(env("ADMIN_DIST").unwrap_or_else(|| "admin/dist".into()))),
+        signing_key: env("STORE_SIGNING_KEY").map(|k| std::sync::Arc::new(signing_key(&k).unwrap_or_else(|e| fail(format!("STORE_SIGNING_KEY : {e}"))))),
     };
+    match &state.signing_key {
+        Some(k) => tracing::info!("clé du magasin : {}", island_store::extensions::public_key(k)),
+        None => tracing::warn!("STORE_SIGNING_KEY absent : les extensions ne peuvent pas être approuvées"),
+    }
     if state.clamav.is_none() {
         tracing::warn!("CLAMAV_URL absent : les fichiers publiés ne sont pas analysés (scan: skipped)");
     }

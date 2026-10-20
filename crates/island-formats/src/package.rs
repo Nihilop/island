@@ -166,6 +166,8 @@ impl Manifest {
 pub enum Signature {
     /// Signé par une clé de confiance.
     Official,
+    /// Signé par la clé du magasin : extension relue et approuvée par sa modération.
+    Store,
     /// Signature valide, mais clé inconnue.
     Untrusted,
     Unsigned,
@@ -212,6 +214,11 @@ pub fn fingerprint(key: &str) -> String {
 
 /// État de signature d'un paquet ; `trusted` = clés publiques (base64) de confiance.
 pub fn verify(files: &[(String, Vec<u8>)], trusted: &[&str]) -> (Signature, Option<String>) {
+    verify_with(files, trusted, &[])
+}
+
+/// Comme `verify`, avec en plus les clés du magasin (état `Store`).
+pub fn verify_with(files: &[(String, Vec<u8>)], official: &[&str], store: &[&str]) -> (Signature, Option<String>) {
     use ed25519_dalek::{Signature as Sig, Verifier, VerifyingKey};
     let Some((_, raw)) = files.iter().find(|(p, _)| p == SIGNATURE_FILE) else { return (Signature::Unsigned, None) };
     let b64 = base64::engine::general_purpose::STANDARD;
@@ -224,7 +231,8 @@ pub fn verify(files: &[(String, Vec<u8>)], trusted: &[&str]) -> (Signature, Opti
     };
     let key = serde_json::from_slice::<SigFile>(raw).ok().map(|s| s.key);
     match check() {
-        Some(true) if key.as_deref().is_some_and(|k| trusted.contains(&k)) => (Signature::Official, key),
+        Some(true) if key.as_deref().is_some_and(|k| official.contains(&k)) => (Signature::Official, key),
+        Some(true) if key.as_deref().is_some_and(|k| store.contains(&k)) => (Signature::Store, key),
         Some(true) => (Signature::Untrusted, key),
         _ => (Signature::Invalid, key),
     }
@@ -233,6 +241,11 @@ pub fn verify(files: &[(String, Vec<u8>)], trusted: &[&str]) -> (Signature, Opti
 /// Lit et vérifie un paquet `.island` (zip) : chemins sûrs, tailles bornées, manifeste
 /// valide, fichiers référencés présents, signature (`trusted` = clés de confiance).
 pub fn read<R: Read + Seek>(reader: R, trusted: &[&str]) -> Result<Package, String> {
+    read_with(reader, trusted, &[])
+}
+
+/// Comme `read`, en reconnaissant aussi les clés du magasin (état `Store`).
+pub fn read_with<R: Read + Seek>(reader: R, official: &[&str], store: &[&str]) -> Result<Package, String> {
     let mut zip = zip::ZipArchive::new(reader).map_err(|_| "corrupt")?;
     if zip.len() > MAX_ENTRIES {
         return Err("tooLarge".into());
@@ -271,8 +284,75 @@ pub fn read<R: Read + Seek>(reader: R, trusted: &[&str]) -> Result<Package, Stri
         media.add(name, bytes.clone())?;
     }
     media.check()?;
-    let (signature, key) = verify(&files, trusted);
+    let (signature, key) = verify_with(&files, official, store);
     Ok(Package { manifest, files, signature, key, media })
+}
+
+// --- Écriture, signature ------------------------------------------------------------------
+
+/// Écrit un paquet `.island` (zip, deflate), fichiers triés par chemin.
+pub fn write<W: std::io::Write + Seek>(writer: W, files: &[(String, Vec<u8>)]) -> Result<(), String> {
+    use std::io::Write as _;
+    let mut zip = zip::ZipWriter::new(writer);
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut sorted: Vec<&(String, Vec<u8>)> = files.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(&b.0));
+    for (name, bytes) in sorted {
+        if !valid_rel(name) {
+            return Err(format!("badPath:{name}"));
+        }
+        zip.start_file(name.as_str(), opts).map_err(|e| e.to_string())?;
+        zip.write_all(bytes).map_err(|e| e.to_string())?;
+    }
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Remplace la signature du paquet par celle de `key` (même empreinte : `digest`).
+pub fn sign(files: &[(String, Vec<u8>)], key: &ed25519_dalek::SigningKey) -> Vec<(String, Vec<u8>)> {
+    use ed25519_dalek::Signer;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut out: Vec<(String, Vec<u8>)> = files.iter().filter(|(p, _)| p != SIGNATURE_FILE).cloned().collect();
+    let sig = key.sign(digest(&out).as_bytes());
+    let json = serde_json::json!({ "key": b64.encode(key.verifying_key().to_bytes()), "sig": b64.encode(sig.to_bytes()) });
+    out.push((SIGNATURE_FILE.into(), json.to_string().into_bytes()));
+    out
+}
+
+/// `a` est une version strictement plus récente que `b` (« 1.10.0 » > « 1.9.2 » ; parties
+/// numériques comparées une à une, un suffixe `-beta…` compte comme antérieur).
+pub fn newer(a: &str, b: &str) -> bool {
+    fn parts(v: &str) -> (Vec<u64>, bool) {
+        let (core, pre) = match v.trim().split_once('-') {
+            Some((c, _)) => (c, true),
+            None => (v.trim(), false),
+        };
+        (core.split('.').map(|p| p.parse().unwrap_or(0)).collect(), pre)
+    }
+    let ((mut x, xp), (mut y, yp)) = (parts(a), parts(b));
+    let n = x.len().max(y.len());
+    x.resize(n, 0);
+    y.resize(n, 0);
+    match x.cmp(&y) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        // Même numéro : la version finale passe devant la préversion.
+        std::cmp::Ordering::Equal => yp && !xp,
+    }
+}
+
+/// Fichiers admis dans un paquet du magasin : ressources web seulement (aucun exécutable ni
+/// script système).
+pub fn allowed_file(path: &str) -> bool {
+    if path == SIGNATURE_FILE {
+        return true;
+    }
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    matches!(
+        ext.as_str(),
+        "html" | "htm" | "js" | "mjs" | "css" | "json" | "wasm" | "map" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "svg" | "ico" | "avif"
+            | "woff" | "woff2" | "ttf" | "otf" | "txt" | "md" | "mp3" | "ogg" | "wav"
+    )
 }
 
 #[cfg(test)]
@@ -330,6 +410,43 @@ mod tests {
         let d = digest(&files());
         assert!(d.find("dist/main.js").unwrap() < d.find("manifest.json").unwrap());
         assert_eq!(digest(&signed(&SigningKey::from_bytes(&[7; 32]), &files())), d);
+    }
+
+    #[test]
+    fn versions_compare() {
+        assert!(newer("1.10.0", "1.9.2"));
+        assert!(newer("2", "1.9"));
+        assert!(newer("1.0.0", "1.0.0-beta.1"));
+        assert!(!newer("1.0.0", "1.0.0"));
+        assert!(!newer("1.0.0-beta", "1.0.0"));
+        assert!(!newer("0.9", "1.0"));
+    }
+
+    #[test]
+    fn only_web_files_are_allowed() {
+        assert!(allowed_file("dist/main.js"));
+        assert!(allowed_file("icons/a.SVG"));
+        assert!(!allowed_file("tools/run.exe"));
+        assert!(!allowed_file("x.ps1"));
+        assert!(!allowed_file("README"));
+    }
+
+    #[test]
+    fn store_signature_replaces_the_author_one() {
+        let author = SigningKey::from_bytes(&[7; 32]);
+        let store = SigningKey::from_bytes(&[9; 32]);
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let store_pub = b64.encode(store.verifying_key().to_bytes());
+        let resigned = sign(&signed(&author, &files()), &store);
+        assert_eq!(resigned.iter().filter(|(p, _)| p == SIGNATURE_FILE).count(), 1);
+        assert!(verify_with(&resigned, &[], &[&store_pub]).0 == Signature::Store);
+        // Écrit puis relu : même contenu, même état.
+        let mut out = std::io::Cursor::new(Vec::new());
+        write(&mut out, &resigned).unwrap();
+        let bytes = out.into_inner();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(z.len(), 3);
+        assert!(z.by_name("dist/main.js").is_ok());
     }
 
     #[test]

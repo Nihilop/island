@@ -53,7 +53,8 @@ pub async fn ensure_open(st: &AppState) -> ApiResult<()> {
 /// `GET /v1/store/status` (public) : l'app sait si elle peut proposer de publier.
 pub async fn status(State(st): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
     let p = publishing(&st).await?.publishing;
-    Ok(Json(serde_json::json!({ "publishing": p })))
+    let key = st.signing_key.as_deref().map(crate::extensions::public_key);
+    Ok(Json(serde_json::json!({ "publishing": p, "signingKey": key })))
 }
 
 /// `GET /v1/mod/publishing`.

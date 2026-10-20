@@ -33,9 +33,9 @@ use crate::scan::{self, Scan};
 use crate::AppState;
 
 const PAGE: i64 = 24;
-const MAX_SUMMARY: usize = 200;
-const MAX_DESCRIPTION: usize = 5000;
-const MAX_TAGS: usize = 8;
+pub(crate) const MAX_SUMMARY: usize = 200;
+pub(crate) const MAX_DESCRIPTION: usize = 5000;
+pub(crate) const MAX_TAGS: usize = 8;
 const MAX_TAG: usize = 24;
 /// Signalements par IP et par heure.
 const REPORTS_PER_HOUR: i64 = 5;
@@ -287,13 +287,13 @@ pub async fn media(State(st): State<AppState>, Path((id, kind, position)): Path<
 // --- Publication -----------------------------------------------------------------------------
 
 #[derive(Default)]
-struct Form {
-    file: Option<Vec<u8>>,
-    item: Option<String>,
-    summary: Option<String>,
-    description: Option<String>,
-    tags: Option<Vec<String>>,
-    changelog: Option<String>,
+pub(crate) struct Form {
+    pub file: Option<Vec<u8>>,
+    pub item: Option<String>,
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub changelog: Option<String>,
 }
 
 async fn read_form(mut mp: Multipart) -> ApiResult<Form> {
@@ -318,7 +318,7 @@ async fn read_form(mut mp: Multipart) -> ApiResult<Form> {
 }
 
 /// Étiquettes : 8 au plus, minuscules `[a-z0-9-]`, 24 caractères, sans doublon.
-fn clean_tags(tags: &[String]) -> ApiResult<Vec<String>> {
+pub(crate) fn clean_tags(tags: &[String]) -> ApiResult<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     for t in tags {
         let t = t.trim().to_lowercase();
@@ -355,6 +355,8 @@ pub struct Published {
     pub id: String,
     pub version: String,
     pub scan: &'static str,
+    /// `approved` (scène : en ligne tout de suite) ou `pending` (extension : à relire).
+    pub status: &'static str,
 }
 
 /// `POST /v1/items` (multipart) : `file` (requis), `item` (nouvelle version d'un élément
@@ -368,9 +370,9 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
     check_len(&f.description, MAX_DESCRIPTION, "descriptionTooLong")?;
     check_len(&f.changelog, MAX_DESCRIPTION, "changelogTooLong")?;
     let tags = f.tags.as_deref().map(clean_tags).transpose()?;
-    // Une extension est un zip qui contient un manifest.json : pas avant l'étape 6.
-    if island_formats::package::read(Cursor::new(bytes), &[]).is_ok() {
-        return Err(ApiError::bad("extensionsNotYet"));
+    // Une extension est un zip qui contient un manifest.json : file de relecture.
+    if crate::extensions::is_extension(bytes) {
+        return crate::extensions::publish(&st, &user, &f, bytes).await;
     }
 
     // 1. Lecture vérifiée.
@@ -503,7 +505,7 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
     }
     tx.commit().await?;
     tracing::info!("publié : {id} v{version} par {} (analyse : {})", user.login, scan.label());
-    Ok((StatusCode::CREATED, Json(Published { id, version, scan: scan.label() })))
+    Ok((StatusCode::CREATED, Json(Published { id, version, scan: scan.label(), status: "approved" })))
 }
 
 // --- Modification, retrait ------------------------------------------------------------------
@@ -574,14 +576,21 @@ pub struct Mine {
     pub updated_at: DateTime<Utc>,
     pub versions: i64,
     pub thumbnail: Option<String>,
+    /// Dernière version déposée et son état (`pending`, `approved`, `rejected`…).
+    pub last_version: Option<String>,
+    pub last_status: Option<String>,
+    pub reject_reason: Option<String>,
 }
 
 pub async fn mine(State(st): State<AppState>, user: User) -> ApiResult<Json<Vec<Mine>>> {
     let rows = sqlx::query_as::<_, Mine>(
         "SELECT i.id, i.kind, i.name, i.status, i.downloads, i.updated_at,
                 (SELECT count(*) FROM versions v WHERE v.item_id = i.id) AS versions,
+                l.version AS last_version, l.status AS last_status, l.reject_reason,
                 (SELECT a.file_key FROM assets a WHERE a.item_id = i.id AND a.kind = 'thumbnail' AND a.position = 0) AS thumbnail
-         FROM items i WHERE i.owner_id = $1 AND i.status <> 'removed' ORDER BY i.updated_at DESC",
+         FROM items i
+         LEFT JOIN LATERAL (SELECT version, status, reject_reason FROM versions WHERE item_id = i.id ORDER BY id DESC LIMIT 1) l ON true
+         WHERE i.owner_id = $1 AND i.status <> 'removed' ORDER BY i.updated_at DESC",
     )
     .bind(user.id)
     .fetch_all(&st.db)

@@ -186,7 +186,11 @@ const token = () => readJson(CREDENTIALS)[STORE];
 const MESSAGES = {
   unauthorized: "session expirée ou révoquée : relance « island login »",
   publishingPaused: "les publications sont suspendues pour le moment",
-  extensionsNotYet: "le magasin n'accepte pas encore les extensions (seulement les scènes .islandscene)",
+  idTaken: "cet identifiant d'extension appartient à un autre auteur",
+  versionNotGreater: "la version du manifeste doit être plus récente que la dernière publiée",
+  invalidSignature: "la signature du paquet est fausse (paquet modifié après signature ?)",
+  idMismatch: "l'id du manifeste ne correspond pas à --item",
+  reservedId: "les identifiants dev.island.* sont réservés aux extensions officielles",
   forbidden: "cet élément ne t'appartient pas",
   notFound: "élément introuvable (supprimé ?) : publie-le comme nouveau avec --new",
   kindMismatch: "le fichier n'est pas du même type que l'élément visé",
@@ -265,7 +269,7 @@ async function publish(file) {
   if (!file || file.startsWith("--")) die("usage : island publish <fichier.islandscene> [--item <id>] [--new] [--summary …] [--tags a,b] [--changelog …]");
   const path = resolve(file);
   if (!existsSync(path)) die(`fichier introuvable : ${file}`);
-  if (!/\.(islandscene|island)$/i.test(path)) die("le fichier doit être une scène .islandscene (ou, plus tard, une extension .island)");
+  if (!/\.(islandscene|island)$/i.test(path)) die("le fichier doit être une scène .islandscene ou une extension .island");
   const known = readJson(PUBLISHED)[path];
   const remembered = !process.argv.includes("--new") && known?.store === STORE ? known.item : undefined;
   const item = arg("--item") ?? remembered;
@@ -281,10 +285,14 @@ async function publish(file) {
     const why = s.data?.publishing?.message;
     die(`${MESSAGES.publishingPaused}${why ? ` : ${why}` : ""}`);
   }
-  if (r.status !== 201 && r.status !== 200) fail(r);
+  if (r.status !== 201 && r.status !== 200 && r.status !== 202) {
+    if (r.data?.error?.startsWith("fileType:")) die(`fichier non admis dans un paquet du magasin : ${r.data.error.slice(9)} (ressources web seulement)`);
+    fail(r);
+  }
   writeJson(PUBLISHED, { ...readJson(PUBLISHED), [path]: { store: STORE, item: r.data.id } });
   const scan = r.data.scan === "skipped" ? " (non analysé par l'antivirus)" : "";
-  console.log(`publié : ${r.data.id} v${r.data.version}${scan}\n  ${STORE}/v1/items/${r.data.id}`);
+  if (r.data.status === "pending") console.log(`déposée : ${r.data.id} v${r.data.version}${scan}, en attente de relecture par la modération`);
+  else console.log(`publié : ${r.data.id} v${r.data.version}${scan}\n  ${STORE}/v1/items/${r.data.id}`);
   if (!item) console.log("  republier ce fichier enverra une nouvelle version (--new pour créer un autre élément)");
 }
 

@@ -15,6 +15,7 @@
 pub mod admin;
 pub mod auth;
 pub mod error;
+pub mod extensions;
 pub mod github;
 pub mod items;
 pub mod login;
@@ -54,6 +55,9 @@ pub struct AppState {
     pub secure_cookies: bool,
     /// Panneau d'administration construit (`server/admin/dist`) ; None = page d'attente.
     pub admin_dist: Option<std::path::PathBuf>,
+    /// Clé du magasin (`STORE_SIGNING_KEY`) : signe les extensions approuvées. None = la
+    /// relecture marche, l'approbation non (`noSigningKey`).
+    pub signing_key: Option<Arc<ed25519_dalek::SigningKey>>,
 }
 
 /// Publication : le fichier entier passe par le serveur (jamais d'envoi direct au stockage).
@@ -82,6 +86,11 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/mod/items/{id}/hide", post(admin::hide))
         .route("/v1/mod/items/{id}/restore", post(admin::restore))
         .route("/v1/mod/publishing", get(settings::get_publishing).put(settings::set_publishing))
+        .route("/v1/mod/reviews", get(extensions::queue))
+        .route("/v1/mod/reviews/{id}", get(extensions::detail))
+        .route("/v1/mod/reviews/{id}/file", get(extensions::file))
+        .route("/v1/mod/reviews/{id}/approve", post(extensions::approve))
+        .route("/v1/mod/reviews/{id}/reject", post(extensions::reject))
         .route("/v1/admin/users", get(admin::users))
         .route("/v1/admin/moderators", post(admin::add_moderator))
         .route("/v1/admin/moderators/{id}", delete(admin::remove_moderator))

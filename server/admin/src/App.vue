@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Panneau d'administration du magasin : session (cookie GitHub) vérifiée par /v1/me ;
-// onglets par `#` — signalements, éléments, extensions (file de relecture, étape 6),
+// onglets par `#` — signalements, éléments, relecture (extensions en attente),
 // comptes et journal (admin seulement). En tête : l'interrupteur d'urgence des publications
 // (modérateurs et admin).
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
@@ -10,6 +10,7 @@ import Reports from "./views/Reports.vue";
 import Items from "./views/Items.vue";
 import Users from "./views/Users.vue";
 import Journal from "./views/Journal.vue";
+import Reviews from "./views/Reviews.vue";
 
 type Tab = "reports" | "items" | "extensions" | "users" | "audit";
 
@@ -23,7 +24,7 @@ const tabs = computed(() =>
   [
     { id: "reports" as Tab, label: "Signalements", count: summary.value.openReports },
     { id: "items" as Tab, label: "Éléments", count: summary.value.hiddenItems, hint: "masqués" },
-    { id: "extensions" as Tab, label: "Extensions", count: summary.value.pendingVersions, hint: "à relire" },
+    { id: "extensions" as Tab, label: "Relecture", count: summary.value.pendingVersions, hint: "extensions à relire" },
     ...(isAdmin.value ? [{ id: "users" as Tab, label: "Comptes", count: 0 }, { id: "audit" as Tab, label: "Journal", count: 0 }] : []),
   ],
 );
@@ -157,10 +158,7 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash));
     <main>
       <Reports v-if="tab === 'reports'" @changed="refreshSummary" />
       <Items v-else-if="tab === 'items'" @changed="refreshSummary" />
-      <div v-else-if="tab === 'extensions'" class="empty">
-        La relecture des extensions (fichiers, différences entre versions, signature du magasin) arrive avec la publication des
-        extensions.
-      </div>
+      <Reviews v-else-if="tab === 'extensions'" @changed="refreshSummary" />
       <Users v-else-if="tab === 'users' && me" :me="me.id" />
       <Journal v-else-if="tab === 'audit'" />
     </main>

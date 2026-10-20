@@ -76,6 +76,7 @@ All settings are environment variables. `server/.env.example` lists them with co
 | `R2_BUCKET` | `island-store` | **public** bucket for media |
 | `R2_MEDIA_URL` | `https://cdn.example.com` | custom domain of the public bucket |
 | `R2_PACKAGES_BUCKET` | `island-packages` | **private** bucket for packages |
+| `STORE_SIGNING_KEY` | `/run/secrets/store-key.json` | store key (ed25519) that signs approved extensions: a file made by `island keygen`, its content, or a PKCS#8 PEM |
 | `CLAMAV_URL` | `clamav:3310` | `host:port` of `clamd`; if unset, files are not scanned and are marked `skipped` |
 | `TRUST_PROXY` | `1` | read the client IP from `X-Forwarded-For`; enable **only** behind a reverse proxy |
 | `ADMIN_DIST` | `admin/dist` | built admin panel |
@@ -130,7 +131,25 @@ No CORS rules are needed: Island downloads files natively, not from a browser pa
 
 ---
 
-## 5. GitHub OAuth App
+## 5. Store signing key
+
+Extensions are reviewed by moderators before they are published. On approval, the server
+**replaces** the author's signature with the store's, so Island shows them as
+“verified by the store”.
+
+```bash
+node packages/sdk/bin/island.mjs keygen store-key.json   # keep it OUT of the repository
+```
+
+- Give the file to the server through `STORE_SIGNING_KEY`, as a secret.
+- The public key is printed at startup and exposed by `GET /v1/store/status` (`signingKey`).
+  Island must list it among its trusted store keys.
+- Back the key up. Losing it means publishing a new key in an Island update.
+- Without it, reviewing works but approving fails with `noSigningKey`.
+- Extension ids starting with `dev.island.` are reserved for the admin (official
+  extensions).
+
+## 6. GitHub OAuth App
 
 In GitHub, open *Settings › Developer settings › OAuth Apps › New OAuth App*:
 
@@ -149,7 +168,7 @@ Roles:
 
 ---
 
-## 6. Behind a reverse proxy or tunnel
+## 7. Behind a reverse proxy or tunnel
 
 - Set `PUBLIC_URL` to the public `https://` address, and `TRUST_PROXY=1`.
 - Do **not** expose the server port directly when `TRUST_PROXY=1`: clients could forge
@@ -160,7 +179,7 @@ Roles:
 
 ---
 
-## 7. Operations
+## 8. Operations
 
 - **Health check**: `GET /health` returns `ok`.
 - **Emergency stop for uploads**: moderators can pause all publishing from the admin panel

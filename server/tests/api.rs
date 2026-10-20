@@ -34,6 +34,7 @@ fn router(db: PgPool) -> Router {
         public_url: "http://localhost".into(),
         secure_cookies: false,
         admin_dist: None,
+        signing_key: Some(Arc::new(ed25519_dalek::SigningKey::from_bytes(&[42; 32]))),
     })
 }
 
