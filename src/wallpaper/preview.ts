@@ -4,6 +4,7 @@
 // joue le rôle du curseur sur le bureau : parallaxe, traînée, ondulation au clic — sauf
 // quand l'éditeur la réserve au déplacement d'un calque (`interactive = false`).
 
+import { invoke } from "@tauri-apps/api/core";
 import layerShader from "../../src-tauri/src/wallpaper/layer.wgsl?raw";
 import compositeShader from "../../src-tauri/src/wallpaper/composite.wgsl?raw";
 import { blendIndex, COMPOSITE_VEC4S, LAYER_VEC4S, maskNames, packComposite, packLayer, RIPPLES, TRAIL, type Frame, type Layer, type Scene } from "./scene";
@@ -47,6 +48,8 @@ export class Preview {
   private compBind: GPU = null;
   private layerRes = new Map<string, { uniforms: GPU; bind: GPU; key: string; tex: [number, number] }>();
   private images = new Map<string, Tex | "loading">();
+  /** Textes des calques : image rendue par le Rust (même rendu que le fond), par calque. */
+  private texts = new Map<string, { key: string; tex: Tex; at: number; busy: boolean }>();
   /** Vidéos des calques : balise <video> en boucle, copiée dans sa texture à chaque image. */
   private videos = new Map<string, { el: HTMLVideoElement; url: string; texture: GPU | null; tex: Tex | null; start: number }>();
   private raf = 0;
@@ -120,6 +123,7 @@ export class Preview {
   resetImages() {
     this.images.clear();
     this.layerRes.clear();
+    this.texts.clear();
     this.dropVideos();
   }
 
@@ -136,6 +140,7 @@ export class Preview {
   /** Taille de l'image (ou de la vidéo) d'un calque (1×1 tant qu'elle n'est pas chargée). */
   texSize(l: Layer): [number, number] {
     if (l.kind === "video") return (l.video && this.videos.get(l.video)?.tex?.size) || [1, 1];
+    if (l.kind === "text") return this.texts.get(l.id)?.tex.size ?? [1, 1];
     const t = l.image ? this.images.get(l.image) : null;
     return t && t !== "loading" ? t.size : [1, 1];
   }
@@ -182,9 +187,38 @@ export class Preview {
     return v.tex ?? this.blank;
   }
 
-  /** Image ou vidéo affichée par un calque. */
+  /** Texture d'un texte : redemandée quand le style ou la taille changent, et chaque seconde
+   * (variables : heure, météo…). */
+  private text(l: Layer): Tex {
+    if (!l.text) return this.blank;
+    const key = `${JSON.stringify(l.text)}|${this.canvas.height}`;
+    let t = this.texts.get(l.id);
+    const now = performance.now();
+    if (!t || (!t.busy && (t.key !== key || now - t.at > 1000))) {
+      const entry = t ?? { key, tex: this.blank, at: 0, busy: false };
+      entry.busy = true;
+      entry.key = key;
+      entry.at = now;
+      this.texts.set(l.id, entry);
+      t = entry;
+      void invoke<ArrayBuffer>("wallpaper_text_raster", { style: l.text, height: this.canvas.height })
+        .then((buf) => {
+          const head = new DataView(buf, 0, 8);
+          const [w, h] = [head.getUint32(0, true), head.getUint32(4, true)];
+          const tex = this.device.createTexture({ size: [w, h], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST });
+          this.device.queue.writeTexture({ texture: tex }, new Uint8Array(buf, 8), { bytesPerRow: w * 4 }, [w, h]);
+          entry.tex = { view: tex.createView(), size: [w, h] };
+        })
+        .catch(() => {})
+        .finally(() => (entry.busy = false));
+    }
+    return t.tex;
+  }
+
+  /** Image, vidéo ou texte affiché par un calque. */
   private layerTex(l: Layer): Tex {
     if (l.kind === "video") return this.video(l);
+    if (l.kind === "text") return this.text(l);
     return this.image(l.kind === "image" ? l.image : null);
   }
 

@@ -49,6 +49,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 wgpu = { version = "30", default-features = false, features = ["dx12", "wgsl", "std"] } # fonds animés : rendu natif (shaders WGSL partagés avec l'aperçu de l'éditeur)
 pollster = "0.4" # fonds animés : init wgpu (futures bloquants sur le thread de rendu)
 raw-window-handle = "0.6"
+cosmic-text = "0.19.0"
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
 
 # Capture d'écran (Windows Graphics Capture, anti-cheat safe).
 [target.'cfg(windows)'.dependencies.windows-capture]

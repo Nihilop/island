@@ -3,7 +3,7 @@
 // (comme Photoshop ; la scène les stocke du bas vers le haut). Glisser-déposer pour
 // réordonner, œil, cadenas, double-clic pour renommer, dupliquer, supprimer.
 import { computed, nextTick, ref } from "vue";
-import { PhCopy, PhDrop, PhEye, PhEyeSlash, PhFilmStrip, PhGradient, PhImage, PhLock, PhLockOpen, PhPlus, PhSlidersHorizontal, PhSparkle, PhTrash } from "@phosphor-icons/vue";
+import { PhCopy, PhDrop, PhEye, PhEyeSlash, PhFilmStrip, PhGradient, PhImage, PhLock, PhLockOpen, PhPlus, PhSlidersHorizontal, PhSparkle, PhTextT, PhTrash } from "@phosphor-icons/vue";
 import IconButton from "../ui/IconButton.vue";
 import { MAX_LAYERS, type Layer, type LayerKind, type Scene } from "./scene";
 import { t } from "../notch/i18n";
@@ -16,7 +16,7 @@ const rows = computed(() => [...props.scene.layers].reverse());
 const full = computed(() => props.scene.layers.length >= MAX_LAYERS);
 const adding = ref(false);
 
-const ICONS = { image: PhImage, video: PhFilmStrip, fill: PhGradient, particles: PhSparkle } as const;
+const ICONS = { image: PhImage, video: PhFilmStrip, text: PhTextT, fill: PhGradient, particles: PhSparkle } as const;
 function icon(l: Layer) {
   if (l.kind === "fill" && l.fill.mode === "solid") return PhDrop;
   return ICONS[l.kind];
@@ -78,7 +78,7 @@ function add(kind: LayerKind) {
       <div class="relative">
         <IconButton :icon="PhPlus" :label="full ? t('wall.layersFull') : t('wall.addLayer')" :disabled="full" @click="adding = !adding" />
         <div v-if="adding" class="absolute top-full right-0 z-20 mt-1 w-[170px] rounded-[10px] border border-separator bg-elevated p-1 shadow-xl">
-          <button v-for="k in (['image', 'video', 'fill', 'particles'] as const)" :key="k" type="button" class="type-footnote flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left hover:bg-fill-2" @click="add(k)">
+          <button v-for="k in (['image', 'video', 'text', 'fill', 'particles'] as const)" :key="k" type="button" class="type-footnote flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left hover:bg-fill-2" @click="add(k)">
             <component :is="ICONS[k]" :size="14" class="text-label-3" />{{ t(`wall.kind.${k}`) }}
           </button>
         </div>

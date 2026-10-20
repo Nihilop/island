@@ -412,6 +412,14 @@ struct LayerGpu {
     uniforms: wgpu::Buffer,
     bind: wgpu::BindGroup,
     tex: (f32, f32),
+    /// Masques du calque (pour refaire son groupe quand sa texture change : texte).
+    masks: [wgpu::TextureView; 3],
+}
+
+/// Texte d'un calque sur un écran : la valeur affichée et sa texture.
+struct TextGpu {
+    shown: String,
+    _tex: wgpu::Texture,
 }
 
 /// Un écran : sa scène, sa fenêtre enfant du calque, sa surface, son image intermédiaire et
@@ -428,6 +436,8 @@ struct Output {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     paused: bool,
+    /// Textes des calques texte (par indice de calque), refaits quand leur valeur change.
+    texts: HashMap<usize, TextGpu>,
     _win: Win,
 }
 
@@ -453,10 +463,33 @@ impl Output {
                 ];
                 let uniforms = gpu.buffer(scene::LAYER_VEC4S);
                 let bind = gpu.bind_layer(&uniforms, &t.0, masks);
-                LayerGpu { uniforms, bind, tex: t.1 }
+                LayerGpu { uniforms, bind, tex: t.1, masks: masks.map(|m| m.clone()) }
             })
             .collect();
         self.scene = sc.scene.clone();
+        self.texts.clear();
+    }
+
+    /// Calques texte : valeur recalculée ; image refaite (à la hauteur de cet écran) si elle a
+    /// changé.
+    fn update_texts(&mut self, gpu: &Gpu, now: chrono::DateTime<chrono::Utc>, fr: bool) {
+        let height = self.config.height as f32;
+        for (i, l) in self.scene.layers.iter().enumerate() {
+            let Some(style) = l.text.as_ref().filter(|_| l.kind == "text" && l.visible) else { continue };
+            let shown = super::text::resolve(&style.content, now, fr);
+            if self.texts.get(&i).is_some_and(|t| t.shown == shown) {
+                continue;
+            }
+            let r = super::text::raster(style, &shown, height);
+            let Some(img) = image::RgbaImage::from_raw(r.width, r.height, r.rgba) else { continue };
+            let (view, size) = gpu.upload(&img);
+            let g = &mut self.layers[i];
+            let masks = [&g.masks[0], &g.masks[1], &g.masks[2]];
+            g.bind = gpu.bind_layer(&g.uniforms, &view, masks);
+            g.tex = size;
+            // La vue garde la texture en vie ; on la garde aussi, par clarté.
+            self.texts.insert(i, TextGpu { shown, _tex: view.texture().clone() });
+        }
     }
 }
 
@@ -512,6 +545,7 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, sc: &Loaded, textures:
         surface,
         config,
         paused: false,
+        texts: HashMap::new(),
         _win: win,
     };
     o.set_scene(gpu, textures, sc);
@@ -614,6 +648,8 @@ struct Live {
     textures: Textures,
     videos: Videos,
     outputs: Vec<Output>,
+    /// Langue d'Island (noms des jours et des mois des textes), lue à chaque affectation.
+    fr: bool,
 }
 
 impl Live {
@@ -716,6 +752,7 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
     let mut trail: Vec<(i32, i32, f32)> = Vec::new();
     let mut was_down = false;
     let mut all_paused = false;
+    let mut last_text = Instant::now() - Duration::from_secs(1);
 
     loop {
         // Commandes : bloquant sans scène, sinon on regarde sans attendre.
@@ -743,10 +780,11 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
                     }
                 }
                 let g = gpu.as_ref().unwrap();
-                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), videos: Videos::new(), outputs: Vec::new() });
+                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), videos: Videos::new(), outputs: Vec::new(), fr: true });
                 // Nouvelle affectation : images et vidéos rechargées (elles ont pu changer).
                 l.textures.clear();
                 l.videos.clear();
+                l.fr = super::text::french(&app);
                 l.all = all;
                 l.screens = screens;
                 match layout(g, &mut l) {
@@ -838,6 +876,14 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
         ripples.retain(|(_, _, ts)| t - ts < 6.0);
 
         upload_videos(g, &l.videos);
+        // Textes : valeurs recalculées 4 fois par seconde (refaits seulement s'ils changent).
+        if last_text.elapsed() >= Duration::from_millis(250) {
+            last_text = Instant::now();
+            let now = chrono::Utc::now();
+            for o in l.outputs.iter_mut().filter(|o| !o.paused) {
+                o.update_texts(g, now, l.fr);
+            }
+        }
         for o in l.outputs.iter_mut().filter(|o| !o.paused) {
             let (dx, dy) = (o.display.x, o.display.y);
             let local = |v: &[(i32, i32, f32)]| v.iter().map(|(x, y, ts)| ((x - dx) as f32, (y - dy) as f32, *ts)).collect::<Vec<_>>();

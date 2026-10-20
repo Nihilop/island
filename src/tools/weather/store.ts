@@ -165,7 +165,28 @@ export function choose(p: Place) {
 }
 
 let timer: number | undefined;
+/** Variables des calques texte des fonds animés : poussées au moteur à chaque mise à jour. */
+function pushWallpaperVars() {
+  const c = weather.current;
+  const today = weather.days[0];
+  const vars: Record<string, string> = { "weather.city": place.location?.name ?? "" };
+  if (c) {
+    vars["weather.temp"] = `${Math.round(c.temp)}°`;
+    vars["weather.feels"] = `${Math.round(c.feels)}°`;
+    vars["weather.sky"] = wmo(c.code, c.day).label;
+    vars["weather.code"] = String(c.code);
+  }
+  if (today) {
+    vars["weather.max"] = `${Math.round(today.max)}°`;
+    vars["weather.min"] = `${Math.round(today.min)}°`;
+    vars["sun.rise"] = String(today.sunrise);
+    vars["sun.set"] = String(today.sunset);
+  }
+  void invoke("wallpaper_set_vars", { vars }).catch(() => {});
+}
+
 export async function initWeather() {
+  watch(() => [weather.current, weather.days, place.location], pushWallpaperVars, { deep: true });
   await placeReady;
   if (place.auto || !place.location) await locate();
   watch([() => place.location, fahrenheit], refresh, { immediate: true });

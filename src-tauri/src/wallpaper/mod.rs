@@ -15,6 +15,7 @@
 
 pub mod scene;
 pub mod share;
+pub mod text;
 #[cfg(target_os = "windows")]
 mod engine;
 #[cfg(target_os = "windows")]

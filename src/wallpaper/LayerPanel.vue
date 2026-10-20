@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Propriétés du calque sélectionné : apparence (opacité, fusion, profondeur), contenu selon
-// le type (image, vidéo, couleur / dégradé, particules), placement, effets du calque.
+// le type (image, vidéo, texte, couleur / dégradé, particules), placement, effets du calque.
 import { PhFilmStrip, PhImage, PhPaintBrush, PhX } from "@phosphor-icons/vue";
 import IconButton from "../ui/IconButton.vue";
 import Segmented from "../ui/Segmented.vue";
@@ -8,6 +8,7 @@ import Select from "../ui/Select.vue";
 import { Switch } from "@/sdk/ui/switch";
 import { Button } from "@/sdk/ui/button";
 import Param from "./Param.vue";
+import TextPanel from "./TextPanel.vue";
 import { DEFAULTS, PARTICLE_PRESETS, type Anchor, type Layer } from "./scene";
 import { t } from "../notch/i18n";
 
@@ -104,6 +105,9 @@ function toggleColor(on: boolean) {
         <p class="type-caption text-label-3">{{ t("wall.freeHint") }}</p>
       </template>
     </section>
+
+    <!-- Contenu : texte -->
+    <TextPanel v-else-if="layer.kind === 'text' && layer.text" :layer="layer" />
 
     <!-- Contenu : couleur / dégradé -->
     <section v-else-if="layer.kind === 'fill'" class="space-y-2">

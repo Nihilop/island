@@ -187,7 +187,8 @@ const tick = ref(0);
 let tickTimer: number | undefined;
 
 /** Un calque placé à la main : image en mode « libre ». */
-const movable = (l: Layer) => (l.kind === "image" ? !!l.image : l.kind === "video" && !!l.video) && l.transform.fit === "free" && l.visible && !l.locked;
+const movable = (l: Layer) =>
+  l.visible && !l.locked && (l.kind === "text" ? !!l.text : (l.kind === "image" ? !!l.image : l.kind === "video" && !!l.video) && l.transform.fit === "free");
 
 interface Box {
   x: number;
@@ -271,7 +272,7 @@ function selectLayer(lid: string) {
   if (!painting.value) selected.value = lid;
 }
 
-type Drag = { mode: "move" | "resize"; sign: number; x0: number; y0: number; t0: { x: number; y: number; width: number } };
+type Drag = { mode: "move" | "resize"; sign: number; x0: number; y0: number; t0: { x: number; y: number; width: number; size: number; box: number } };
 let drag: Drag | null = null;
 
 function startDrag(e: PointerEvent, mode: Drag["mode"], sign = 1) {
@@ -279,7 +280,9 @@ function startDrag(e: PointerEvent, mode: Drag["mode"], sign = 1) {
   if (!l) return;
   e.stopPropagation();
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  drag = { mode, sign, x0: e.clientX, y0: e.clientY, t0: { x: l.transform.x, y: l.transform.y, width: l.transform.width } };
+  // Texte : l'étirement agit sur la taille de la police (largeur du texte à l'écran, en px).
+  const box = preview && canvas.value ? (preview.texSize(l)[0] * canvas.value.clientWidth) / Math.max(1, canvas.value.width) : 1;
+  drag = { mode, sign, x0: e.clientX, y0: e.clientY, t0: { x: l.transform.x, y: l.transform.y, width: l.transform.width, size: l.text?.size ?? 0, box } };
   if (preview) preview.interactive = false;
 }
 
@@ -293,6 +296,9 @@ function onDrag(e: PointerEvent) {
   if (drag.mode === "move") {
     l.transform.x = +(drag.t0.x + dx / cw).toFixed(4);
     l.transform.y = +(drag.t0.y + dy / ch).toFixed(4);
+  } else if (l.kind === "text" && l.text) {
+    const k = Math.max(0.1, 1 + (drag.sign * dx * 2) / Math.max(20, drag.t0.box));
+    l.text.size = +Math.min(0.5, Math.max(0.02, drag.t0.size * k)).toFixed(4);
   } else {
     l.transform.width = +Math.min(1.5, Math.max(0.02, drag.t0.width + (drag.sign * dx) / cw)).toFixed(4);
   }

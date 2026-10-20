@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 
 /// Version la plus récente que cette build sait lire. Une scène porte la version minimale
-/// qu'il faut pour la lire (`Scene::required_version`) : 2 dès qu'elle contient une vidéo,
-/// sinon 1 — une scène sans vidéo reste lisible par les versions plus anciennes d'Island.
+/// qu'il faut pour la lire (`Scene::required_version`) : 2 dès qu'elle contient une vidéo
+/// ou un texte, sinon 1 — une scène sans vidéo reste lisible par les versions plus anciennes d'Island.
 pub const VERSION: u32 = 2;
 pub const MAX_LAYERS: usize = 16;
 
@@ -44,7 +44,7 @@ pub struct Layer {
     /// Identifiant dans la scène (`[a-z0-9-]`).
     pub id: String,
     pub name: String,
-    /// "image" | "video" | "fill" | "particles".
+    /// "image" | "video" | "text" | "fill" | "particles".
     pub kind: String,
     pub visible: bool,
     /// Verrouillé dans l'éditeur (ni sélection sur l'aperçu, ni déplacement).
@@ -65,6 +65,8 @@ pub struct Layer {
     /// Vidéo en boucle (MP4 / WebM, sans le son ; nom simple dans le dossier de la scène).
     pub video: Option<String>,
     pub playback: Playback,
+    /// Texte (contenu avec variables `{time}`…, style) ; placé comme une image « libre ».
+    pub text: Option<TextStyle>,
     pub transform: Transform,
     pub effects: LayerEffects,
 }
@@ -86,6 +88,7 @@ impl Default for Layer {
             particles: None,
             video: None,
             playback: Playback::default(),
+            text: None,
             transform: Transform::default(),
             effects: LayerEffects::default(),
         }
@@ -304,6 +307,74 @@ impl Default for Playback {
     }
 }
 
+/// Style d'un calque texte. Les tailles sont relatives à la hauteur de l'écran (la police)
+/// ou à la taille de la police (contour, ombre) : le rendu est le même sur tout écran.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TextStyle {
+    /// Texte, avec variables : `{time}`, `{date:EEEE d MMMM}`, `{time@Europe/Paris}`,
+    /// `{weather.temp}`… ; `{{` et `}}` pour des accolades.
+    pub content: String,
+    /// Famille de police installée (sinon la police par défaut du système).
+    pub font: String,
+    /// 100..900
+    pub weight: u16,
+    pub italic: bool,
+    /// Taille de la police, en fraction de la hauteur de l'écran.
+    pub size: f32,
+    pub color: String,
+    /// "left" | "center" | "right"
+    pub align: String,
+    /// Interlignage (× la taille).
+    pub line_height: f32,
+    /// Espacement des lettres (em).
+    pub letter_spacing: f32,
+    pub uppercase: bool,
+    /// Épaisseur du contour (fraction de la taille ; 0 = aucun).
+    pub outline: f32,
+    pub outline_color: String,
+    pub shadow: Option<TextShadow>,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            content: "{time}".into(),
+            font: String::new(),
+            weight: 600,
+            italic: false,
+            size: 0.12,
+            color: "#ffffff".into(),
+            align: "center".into(),
+            line_height: 1.15,
+            letter_spacing: 0.0,
+            uppercase: false,
+            outline: 0.0,
+            outline_color: "#000000".into(),
+            shadow: None,
+        }
+    }
+}
+
+/// Ombre (ou lueur, sans décalage) d'un texte ; flou et décalage en fraction de la taille.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TextShadow {
+    pub color: String,
+    pub opacity: f32,
+    pub blur: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Default for TextShadow {
+    fn default() -> Self {
+        Self { color: "#000000".into(), opacity: 0.6, blur: 0.08, x: 0.0, y: 0.04 }
+    }
+}
+
+pub const MAX_TEXT: usize = 500;
+
 pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm"];
 
 fn simple_name(n: &str) -> bool {
@@ -359,6 +430,11 @@ impl Scene {
             if !valid_layer_id(&l.id) || l.name.chars().count() > 80 {
                 return Err("invalidLayer".into());
             }
+            if let Some(t) = &l.text {
+                if t.content.chars().count() > MAX_TEXT || t.font.chars().count() > 80 {
+                    return Err("invalidText".into());
+                }
+            }
             for f in l.files() {
                 // La vidéo d'un calque est une vidéo, tout le reste (image, masques) une image.
                 let ok = if Some(f) == l.video.as_ref() { valid_video_name(f) } else { valid_image_name(f) };
@@ -382,7 +458,7 @@ impl Scene {
 
     /// Version minimale d'Island pour lire cette scène (cf. `VERSION`).
     pub fn required_version(&self) -> u32 {
-        if self.layers.iter().any(|l| l.kind == "video") { 2 } else { 1 }
+        if self.layers.iter().any(|l| l.kind == "video" || l.kind == "text") { 2 } else { 1 }
     }
 }
 

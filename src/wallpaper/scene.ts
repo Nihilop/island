@@ -3,7 +3,7 @@
 // ordre, mêmes bornes, mêmes calculs) : l'aperçu de l'éditeur et le fond natif partagent
 // les mêmes shaders (`layer.wgsl`, `composite.wgsl`).
 
-export type LayerKind = "image" | "video" | "fill" | "particles";
+export type LayerKind = "image" | "video" | "text" | "fill" | "particles";
 export type Blend = "normal" | "add" | "screen" | "multiply";
 export type Fit = "cover" | "contain" | "stretch" | "free";
 export type Anchor = "tl" | "t" | "tr" | "l" | "c" | "r" | "bl" | "b" | "br";
@@ -29,6 +29,28 @@ export interface Particles {
   turbulence: number;
   flicker: number;
 }
+/** Ombre (ou lueur, sans décalage) d'un texte ; flou et décalage en fraction de la taille. */
+export interface TextShadow { color: string; opacity: number; blur: number; x: number; y: number }
+/** Style d'un calque texte (mêmes champs que `TextStyle` de scene.rs). */
+export interface TextStyle {
+  /** Avec variables : `{time}`, `{date:EEEE d MMMM}`, `{time@Europe/Paris}`, `{weather.temp}`… */
+  content: string;
+  font: string;
+  weight: number;
+  italic: boolean;
+  /** Fraction de la hauteur de l'écran. */
+  size: number;
+  color: string;
+  align: "left" | "center" | "right";
+  lineHeight: number;
+  /** em */
+  letterSpacing: number;
+  uppercase: boolean;
+  /** Fraction de la taille (0 = aucun). */
+  outline: number;
+  outlineColor: string;
+  shadow: TextShadow | null;
+}
 /** Lecture d'une vidéo de calque : vitesse (0,25 à 4), début de la boucle (secondes). */
 export interface Playback { speed: number; start: number }
 export interface Ripple { radius: number; strength: number; duration: number }
@@ -51,6 +73,7 @@ export interface Layer {
   /** Vidéo en boucle (MP4 / WebM, sans le son). */
   video: string | null;
   playback: Playback;
+  text: TextStyle | null;
   transform: Transform;
   effects: { water: Water | null; heat: Heat | null; color: ColorAdjust | null };
 }
@@ -97,6 +120,22 @@ export const DEFAULTS = {
   trail: (): Trail => ({ width: 10, fade: 0.5, color: "#7cc8ff", intensity: 0.8 }),
   transform: (): Transform => ({ fit: "cover", anchor: "c", x: 0, y: 0, width: 0.3, rotation: 0 }),
   fill: (): Fill => ({ mode: "gradient", colors: ["#1b1f3a", "#3a1b4a"], angle: 90 }),
+  text: (): TextStyle => ({
+    content: "{time}",
+    font: "",
+    weight: 600,
+    italic: false,
+    size: 0.12,
+    color: "#ffffff",
+    align: "center",
+    lineHeight: 1.15,
+    letterSpacing: 0,
+    uppercase: false,
+    outline: 0,
+    outlineColor: "#000000",
+    shadow: null,
+  }),
+  shadow: (): TextShadow => ({ color: "#000000", opacity: 0.6, blur: 0.08, x: 0, y: 0.04 }),
 };
 
 export const layerId = () => `l-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -117,7 +156,9 @@ export function newLayer(kind: LayerKind, name: string): Layer {
     particles: kind === "particles" ? DEFAULTS.particles() : null,
     video: null,
     playback: { speed: 1, start: 0 },
-    transform: DEFAULTS.transform(),
+    text: kind === "text" ? DEFAULTS.text() : null,
+    // Un texte se place librement (ancre, décalage) à sa taille naturelle.
+    transform: kind === "text" ? { ...DEFAULTS.transform(), fit: "free" } : DEFAULTS.transform(),
     effects: { water: null, heat: null, color: null },
   };
 }
@@ -136,6 +177,7 @@ export function normalize(s: Partial<Scene>): Scene {
       fill: { ...base.fill, ...l.fill },
       transform: { ...base.transform, ...l.transform },
       playback: { ...base.playback, ...l.playback },
+      text: l.text ? { ...DEFAULTS.text(), ...l.text } : base.text,
       particles: l.particles ? { ...DEFAULTS.particles(), ...l.particles } : base.particles,
       effects: {
         water: l.effects?.water ? { ...DEFAULTS.water(), ...l.effects.water } : null,
@@ -209,6 +251,14 @@ export function layerBox(s: Scene, l: Layer, f: Frame, tex: [number, number]): [
   const ih = Math.max(tex[1], 1);
   const t = l.transform;
   const media = l.kind === "image" || l.kind === "video";
+  // Texte : placé librement, à sa taille naturelle (image faite à la hauteur du canevas).
+  if (l.kind === "text") {
+    const [hw, hh] = [iw * 0.5 * zoom, ih * 0.5 * zoom];
+    const [ax, ay] = anchor(t.anchor);
+    const cx = ax * w + c(t.x, -2, 2) * w + (0.5 - ax) * 2 * hw;
+    const cy = ay * h + c(t.y, -2, 2) * h + (0.5 - ay) * 2 * hh;
+    return [cx + ox, cy + oy, hw, hh];
+  }
   if (media && (t.fit === "cover" || t.fit === "contain")) {
     const k = (t.fit === "cover" ? Math.max(w / iw, h / ih) : Math.min(w / iw, h / ih)) * zoom;
     return [w * 0.5 + ox, h * 0.5 + oy, iw * k * 0.5, ih * k * 0.5];
@@ -232,10 +282,10 @@ export function packLayer(s: Scene, l: Layer, f: Frame, tex: [number, number]): 
   const u = new Float32Array(LAYER_VEC4S * 4);
   const set = (i: number, v: number[]) => u.set(v, i * 4);
   // Une vidéo se dessine comme une image (seule sa texture change à chaque image).
-  const media = (l.kind === "image" && l.image) || (l.kind === "video" && l.video);
+  const media = (l.kind === "image" && l.image) || (l.kind === "video" && l.video) || (l.kind === "text" && l.text);
   const kind = media ? 0 : l.kind === "particles" && l.particles ? 3 : l.kind === "fill" && l.fill.mode === "solid" ? 1 : 2;
-  const edges = l.transform.fit === "cover" || l.transform.fit === "stretch" ? 1 : 0;
-  const rotation = l.transform.fit === "free" ? rad(c(l.transform.rotation, -360, 360)) : 0;
+  const edges = l.kind !== "text" && (l.transform.fit === "cover" || l.transform.fit === "stretch") ? 1 : 0;
+  const rotation = l.transform.fit === "free" || l.kind === "text" ? rad(c(l.transform.rotation, -360, 360)) : 0;
   set(0, [f.width, f.height, Math.max(tex[0], 1), Math.max(tex[1], 1)]);
   set(1, [f.time, kind, c(l.opacity, 0, 1), edges]);
   set(2, layerBox(s, l, f, tex));
