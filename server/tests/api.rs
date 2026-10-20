@@ -195,6 +195,13 @@ async fn search_is_french_and_ignores_accents(db: PgPool) {
     assert_eq!(page["total"], 1);
     let (_, page) = get_json(&r, "/v1/items?q=pluie").await;
     assert_eq!(page["total"], 0);
+    // Début de mot tapé au fil de la saisie, et caractères spéciaux sans effet.
+    let (_, page) = get_json(&r, "/v1/items?q=luc").await;
+    assert_eq!(page["total"], 1);
+    let (_, page) = get_json(&r, "/v1/items?q=nei").await;
+    assert_eq!(page["items"][0]["name"], "Nuit de neige");
+    let (s, _) = get_json(&r, "/v1/items?q=%27%3A*%20%26%20%21").await;
+    assert_eq!(s, axum::http::StatusCode::OK);
 }
 
 #[sqlx::test(migrations = "./migrations")]

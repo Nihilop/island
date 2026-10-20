@@ -59,8 +59,8 @@ async function get<T>(path: string, query?: Record<string, string | undefined>):
   return invoke<T>("market_get", { path, query: q });
 }
 
-export const catalog = (p: { q?: string; tag?: string; sort?: "recent" | "popular"; page?: number }) =>
-  get<Page>("/v1/items", { kind: "scene", q: p.q, tag: p.tag, sort: p.sort, page: p.page ? String(p.page) : undefined });
+export const catalog = (p: { kind?: "scene" | "extension"; q?: string; tag?: string; sort?: "recent" | "popular"; page?: number }) =>
+  get<Page>("/v1/items", { kind: p.kind ?? "scene", q: p.q, tag: p.tag, sort: p.sort, page: p.page ? String(p.page) : undefined });
 
 export const item = (id: string) => get<Detail>(`/v1/items/${encodeURIComponent(id)}`);
 

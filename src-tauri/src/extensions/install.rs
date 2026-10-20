@@ -6,7 +6,8 @@
 // lignes `<sha256 hex>  <chemin>\n` de toutes les autres entrées, triées par chemin.
 // Fabriqué et signé par `packages/sdk/bin/island.mjs pack`.
 //
-// Installation normale : signature valide ET clé officielle (`OFFICIAL_KEYS`). Mode
+// Installation normale : signature valide ET clé officielle (`OFFICIAL_KEYS`), ou clé du
+// magasin (`STORE_KEYS` : extension relue puis signée par sa modération). Mode
 // développeur : un paquet non signé ou signé par une autre clé est accepté après un
 // avertissement explicite, et des dossiers non empaquetés peuvent être chargés.
 // Les permissions CONSENTIES sont enregistrées hors du dossier de l'extension
@@ -24,6 +25,18 @@ use super::{root, valid_id, Manifest};
 /// Clés publiques ed25519 (base64) des paquets officiels. La clé privée correspondante
 /// n'est PAS dans le dépôt (créée par `island keygen`, gardée par l'auteur d'Island).
 const OFFICIAL_KEYS: &[&str] = &["IrXutmIS7EwKdJ61YF0Tw2ECeoFjXKLJE9pnCcDTxj4="];
+
+/// Clés publiques du magasin (`STORE_SIGNING_KEY` du serveur ; une liste pour la rotation).
+/// La clé de production s'ajoute ici avant l'ouverture du magasin.
+const STORE_KEYS: &[&str] = &[];
+
+/// Clés du magasin reconnues : `STORE_KEYS`, plus, en DÉVELOPPEMENT seulement, la clé du
+/// serveur local (`crate::market::dev_store_key`).
+fn store_keys() -> Vec<String> {
+    let mut keys: Vec<String> = STORE_KEYS.iter().map(|k| k.to_string()).collect();
+    keys.extend(crate::market::dev_store_key());
+    keys
+}
 
 
 // --- État par extension (permissions consenties, secrets créés) -------------------------
@@ -111,7 +124,9 @@ fn read_package(path: &str) -> Result<Package, String> {
         return Err("notIsland".into());
     }
     let file = std::fs::File::open(path).map_err(|_| "notFound")?;
-    island_formats::package::read(file, OFFICIAL_KEYS)
+    let store = store_keys();
+    let store: Vec<&str> = store.iter().map(String::as_str).collect();
+    island_formats::package::read_with(file, OFFICIAL_KEYS, &store)
 }
 
 #[derive(Serialize)]
@@ -166,7 +181,7 @@ pub async fn ext2_install(app: AppHandle, path: String, allow_untrusted: bool) -
         let pkg = read_package(&path)?;
         let dev = DEV.lock().unwrap_or_else(|p| p.into_inner()).enabled;
         match pkg.signature {
-            Signature::Official => {}
+            Signature::Official | Signature::Store => {}
             Signature::Invalid => return Err("invalidSignature".into()),
             _ if allow_untrusted && dev => {}
             _ => return Err("unsigned".into()),

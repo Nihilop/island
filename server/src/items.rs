@@ -147,13 +147,24 @@ pub async fn list(State(st): State<AppState>, Query(p): Query<ListQuery>) -> Api
     if let Some(t) = p.tag.as_deref().filter(|t| !t.is_empty()) {
         sql.push(" AND i.tags ? ").push_bind(t.to_lowercase());
     }
+    // Recherche : les mots entiers (racines françaises), mais aussi des DÉBUTS de mots tapés au
+    // fil de la saisie (« gi » → « GitHub »), et le nom tel quel.
+    let prefix = q.map(prefix_query).filter(|p| !p.is_empty());
     if let Some(q) = q {
-        sql.push(" AND i.search @@ websearch_to_tsquery('french', island_unaccent(").push_bind(q.to_string()).push("))");
+        sql.push(" AND (i.search @@ websearch_to_tsquery('french', island_unaccent(").push_bind(q.to_string()).push("))");
+        if let Some(p) = &prefix {
+            sql.push(" OR i.search @@ to_tsquery('french', island_unaccent(").push_bind(p.clone()).push("))");
+        }
+        let like = format!("%{}%", q.replace(['%', '_', '\\'], ""));
+        sql.push(" OR island_unaccent(i.name) ILIKE island_unaccent(").push_bind(like).push("))");
     }
     // Ordre : pertinence d'abord quand on cherche, puis le tri demandé.
     sql.push(" ORDER BY ");
     if let Some(q) = q {
         sql.push("ts_rank(i.search, websearch_to_tsquery('french', island_unaccent(").push_bind(q.to_string()).push("))) DESC, ");
+        if let Some(p) = &prefix {
+            sql.push("ts_rank(i.search, to_tsquery('french', island_unaccent(").push_bind(p.clone()).push("))) DESC, ");
+        }
     }
     sql.push(match p.sort.as_deref() {
         Some("popular") => "i.downloads DESC, i.updated_at DESC",
@@ -170,6 +181,12 @@ pub async fn list(State(st): State<AppState>, Query(p): Query<ListQuery>) -> Api
     let rows: Vec<Row> = sql.build_query_as().fetch_all(&st.db).await?;
     let total = rows.first().map(|r| r.total).unwrap_or(0);
     Ok(Json(Page { items: rows.into_iter().map(|r| r.card.resolve(&st)).collect(), page, total }))
+}
+
+/// « gi hub » → `gi:* & hub:*` (mots réduits aux lettres et chiffres : rien d'autre n'entre
+/// dans la requête `to_tsquery`).
+fn prefix_query(q: &str) -> String {
+    q.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).take(8).map(|w| format!("{w}:*")).collect::<Vec<_>>().join(" & ")
 }
 
 async fn visible_card(st: &AppState, id: &str) -> ApiResult<Card> {

@@ -100,8 +100,9 @@ pub fn market_installed(app: AppHandle) -> serde_json::Map<String, serde_json::V
     installed_map(&app)
 }
 
+/// Id d'un élément du magasin : `sc_…` (scène) ou l'id d'une extension (`dev.exemple.ext`).
 fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 40 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !id.is_empty() && id.len() <= 100 && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 /// Télécharge l'élément `id` (dernière version, ou `version`) et l'installe.
@@ -357,7 +358,7 @@ fn multipart(fields: &[(&str, String)], file: &[u8]) -> (String, Vec<u8>) {
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
     }
     body.extend_from_slice(
-        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"scene.islandscene\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"package\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
     );
     body.extend_from_slice(file);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
@@ -423,4 +424,193 @@ fn publish(app: &AppHandle, scene: &str, summary: &str, tags: &[String], changel
 #[tauri::command]
 pub async fn market_publish(app: AppHandle, scene: String, summary: String, tags: Vec<String>, changelog: String) -> Result<Publication, String> {
     tauri::async_runtime::spawn_blocking(move || publish(&app, &scene, &summary, &tags, &changelog)).await.map_err(|e| e.to_string())?
+}
+
+// --- Extensions --------------------------------------------------------------------------------
+
+/// Clé du magasin LOCAL, en développement seulement : le serveur de dev a sa propre clé
+/// (`STORE_SIGNING_KEY`), que l'app ne connaît pas d'avance. Jamais en production : là, seules
+/// les clés écrites dans l'app (`extensions::install::STORE_KEYS`) font foi.
+pub fn dev_store_key() -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let base = base_url();
+    if !(base.starts_with("http://127.0.0.1") || base.starts_with("http://localhost")) {
+        return None;
+    }
+    static KEY: Mutex<Option<String>> = Mutex::new(None);
+    if let Some(k) = KEY.lock().unwrap_or_else(|p| p.into_inner()).clone() {
+        return Some(k);
+    }
+    let status: serde_json::Value = ureq::get(&format!("{base}/v1/store/status")).timeout(Duration::from_secs(3)).call().ok()?.into_json().ok()?;
+    let key = status.get("signingKey")?.as_str()?.to_string();
+    *KEY.lock().unwrap_or_else(|p| p.into_inner()) = Some(key.clone());
+    Some(key)
+}
+
+/// Télécharge l'extension `id` du magasin dans un fichier temporaire ; le front ouvre ensuite
+/// la fiche de consentement habituelle (`ext2_inspect` / `ext2_install`) sur ce chemin.
+fn download_extension(app: &AppHandle, id: &str) -> Result<String, String> {
+    if !island_formats::package::valid_id(id) {
+        return Err("invalidId".into());
+    }
+    let res = agent(app, Duration::from_secs(300)).get(&format!("{}/v1/items/{id}/download", base_url())).call().map_err(error)?;
+    let mut bytes = Vec::new();
+    res.into_reader().take(island_formats::package::MAX_TOTAL + 1).read_to_end(&mut bytes).map_err(|_| "offline".to_string())?;
+    if bytes.len() as u64 > island_formats::package::MAX_TOTAL {
+        return Err("tooLarge".into());
+    }
+    let dir = std::env::temp_dir().join("island-market");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{id}.island"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn market_download_extension(app: AppHandle, id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || download_extension(&app, &id)).await.map_err(|e| e.to_string())?
+}
+
+/// Dossiers inclus dans un paquet (comme `island pack`), en plus des fichiers référencés.
+const PACK_DIRS: &[&str] = &["dist", "icons", "locales", "assets", "store"];
+
+/// Empaquette un dossier d'extension en développement (même contenu que `island pack`).
+fn pack(folder: &std::path::Path) -> Result<(island_formats::package::Manifest, Vec<u8>), String> {
+    use island_formats::package;
+    let raw = std::fs::read_to_string(folder.join("manifest.json")).map_err(|_| "noManifest")?;
+    let manifest: package::Manifest = serde_json::from_str(&raw).map_err(|e| format!("manifest:{e}"))?;
+    manifest.validate()?;
+    let mut paths: std::collections::BTreeSet<String> = ["manifest.json".to_string()].into();
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut std::collections::BTreeSet<String>) -> Result<(), String> {
+        for e in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let p = e.map_err(|e| e.to_string())?.path();
+            if p.is_dir() {
+                walk(&p, root, out)?;
+            } else if let Ok(rel) = p.strip_prefix(root) {
+                out.insert(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        Ok(())
+    }
+    for d in PACK_DIRS {
+        let dir = folder.join(d);
+        if dir.is_dir() {
+            walk(&dir, folder, &mut paths)?;
+        }
+    }
+    let mut refs = vec![manifest.main.clone()];
+    refs.extend(manifest.icon.clone());
+    refs.extend(manifest.locales.values().cloned());
+    for t in &manifest.contributes.tools {
+        refs.push(t.view.clone());
+        refs.extend(t.icon.clone());
+    }
+    for w in &manifest.contributes.windows {
+        refs.push(w.view.clone());
+    }
+    for r in refs {
+        if !folder.join(&r).is_file() {
+            return Err(format!("missingFile:{r}"));
+        }
+        paths.insert(r);
+    }
+    if let Some(bad) = paths.iter().find(|p| !package::allowed_file(p)) {
+        return Err(format!("fileType:{bad}"));
+    }
+    let mut files = Vec::new();
+    for p in paths.into_iter().filter(|p| p != package::SIGNATURE_FILE) {
+        let bytes = std::fs::read(folder.join(&p)).map_err(|_| format!("missingFile:{p}"))?;
+        files.push((p, bytes));
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    package::write(&mut out, &files)?;
+    Ok((manifest, out.into_inner()))
+}
+
+#[derive(Serialize)]
+pub struct Packed {
+    files: usize,
+    size: usize,
+}
+
+/// Mode développeur : empaquette le dossier dans `path` (`.island`, non signé).
+#[tauri::command]
+pub async fn market_pack_extension(folder: String, path: String) -> Result<Packed, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !path.to_lowercase().ends_with(".island") {
+            return Err("invalidPath".to_string());
+        }
+        let (_, bytes) = pack(std::path::Path::new(&folder))?;
+        let files = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).map(|z| z.len()).unwrap_or(0);
+        std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+        Ok(Packed { files, size: bytes.len() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Submitted {
+    id: String,
+    version: String,
+    /// `pending` : en attente de relecture.
+    status: String,
+}
+
+fn publish_extension(app: &AppHandle, folder: &str, changelog: &str) -> Result<Submitted, String> {
+    let token = token().ok_or("notSignedIn")?;
+    let (manifest, file) = pack(std::path::Path::new(folder))?;
+    let mut fields: Vec<(&str, String)> = Vec::new();
+    if !changelog.trim().is_empty() {
+        fields.push(("changelog", changelog.trim().to_string()));
+    }
+    let (ctype, body) = multipart(&fields, &file);
+    let res = agent(app, Duration::from_secs(300))
+        .post(&format!("{}/v1/items", base_url()))
+        .set("authorization", &format!("Bearer {token}"))
+        .set("content-type", &ctype)
+        .send_bytes(&body);
+    match res {
+        Ok(r) => {
+            let p: serde_json::Value = r.into_json().map_err(|e| e.to_string())?;
+            let field = |k: &str| p.get(k).and_then(|v| v.as_str()).map(String::from);
+            Ok(Submitted {
+                id: field("id").unwrap_or(manifest.id),
+                version: field("version").unwrap_or(manifest.version),
+                status: field("status").unwrap_or_else(|| "pending".into()),
+            })
+        }
+        Err(ureq::Error::Status(401, _)) => {
+            forget_token();
+            let _ = app.emit("market://account", ());
+            Err("unauthorized".into())
+        }
+        Err(e) => Err(error(e)),
+    }
+}
+
+/// Mode développeur : empaquette le dossier et le dépose au magasin (relecture).
+#[tauri::command]
+pub async fn market_publish_extension(app: AppHandle, folder: String, changelog: String) -> Result<Submitted, String> {
+    tauri::async_runtime::spawn_blocking(move || publish_extension(&app, &folder, &changelog)).await.map_err(|e| e.to_string())?
+}
+
+/// Éléments du compte (`/v1/me/items`) : état de la dernière version, motif d'un refus.
+#[tauri::command]
+pub async fn market_mine(app: AppHandle) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let t = token().ok_or("notSignedIn")?;
+        agent(&app, Duration::from_secs(20))
+            .get(&format!("{}/v1/me/items", base_url()))
+            .set("authorization", &format!("Bearer {t}"))
+            .call()
+            .map_err(error)?
+            .into_json()
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
