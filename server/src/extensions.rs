@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 
 use crate::auth::User;
 use crate::error::{ApiError, ApiResult};
-use crate::items::{clean_tags, Form, Published, MAX_DESCRIPTION, MAX_SUMMARY, MAX_TAGS};
+use crate::items::{clean_tags, license, link, Form, Published, MAX_DESCRIPTION, MAX_SUMMARY, MAX_TAGS};
 use crate::scan::{self, Scan};
 use crate::AppState;
 
@@ -121,7 +121,6 @@ pub(crate) async fn publish(st: &AppState, user: &User, f: &Form, bytes: &[u8]) 
         }
         None => None,
     };
-    let link = |v: &Option<String>| v.as_deref().map(str::trim).filter(|u| u.starts_with("https://") && u.len() <= 300).map(String::from);
     let processed = crate::media::process(&pkg.media, || fallback_thumbnail(&pkg)).map_err(ApiError::bad)?;
 
     // 4. Identifiant et version.
@@ -178,9 +177,9 @@ pub(crate) async fn publish(st: &AppState, user: &User, f: &Form, bytes: &[u8]) 
         summary,
         description,
         tags,
-        homepage: link(&store.homepage),
-        repository: link(&store.repository),
-        license: store.license.as_deref().map(|l| l.trim().chars().take(60).collect::<String>()).filter(|l| !l.is_empty()),
+        homepage: link(f.homepage.as_deref().or(store.homepage.as_deref())),
+        repository: link(f.repository.as_deref().or(store.repository.as_deref())),
+        license: license(f.license.as_deref().or(store.license.as_deref())),
         assets: assets.iter().map(|(k, p, key, _)| (k.clone(), *p, key.clone())).collect(),
     };
     sqlx::query(

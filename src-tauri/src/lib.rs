@@ -248,6 +248,7 @@ pub fn run() {
             market::market_download_extension,
             market::market_publish_extension,
             market::market_pack_extension,
+            market::market_dev_info,
             market::market_mine,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,

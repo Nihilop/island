@@ -560,12 +560,31 @@ pub struct Submitted {
     status: String,
 }
 
-fn publish_extension(app: &AppHandle, folder: &str, changelog: &str) -> Result<Submitted, String> {
+/// Fiche saisie dans la fenêtre de publication (vide = valeur du paquet ou de la version
+/// précédente).
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Listing {
+    summary: String,
+    description: String,
+    tags: Vec<String>,
+    homepage: String,
+    repository: String,
+    license: String,
+    changelog: String,
+}
+
+fn publish_extension(app: &AppHandle, folder: &str, l: &Listing) -> Result<Submitted, String> {
     let token = token().ok_or("notSignedIn")?;
     let (manifest, file) = pack(std::path::Path::new(folder))?;
     let mut fields: Vec<(&str, String)> = Vec::new();
-    if !changelog.trim().is_empty() {
-        fields.push(("changelog", changelog.trim().to_string()));
+    for (k, v) in [("summary", &l.summary), ("description", &l.description), ("homepage", &l.homepage), ("repository", &l.repository), ("license", &l.license), ("changelog", &l.changelog)] {
+        if !v.trim().is_empty() {
+            fields.push((k, v.trim().to_string()));
+        }
+    }
+    if !l.tags.is_empty() {
+        fields.push(("tags", serde_json::to_string(&l.tags).unwrap_or_default()));
     }
     let (ctype, body) = multipart(&fields, &file);
     let res = agent(app, Duration::from_secs(300))
@@ -594,8 +613,45 @@ fn publish_extension(app: &AppHandle, folder: &str, changelog: &str) -> Result<S
 
 /// Mode développeur : empaquette le dossier et le dépose au magasin (relecture).
 #[tauri::command]
-pub async fn market_publish_extension(app: AppHandle, folder: String, changelog: String) -> Result<Submitted, String> {
-    tauri::async_runtime::spawn_blocking(move || publish_extension(&app, &folder, &changelog)).await.map_err(|e| e.to_string())?
+pub async fn market_publish_extension(app: AppHandle, folder: String, listing: Listing) -> Result<Submitted, String> {
+    let r = tauri::async_runtime::spawn_blocking(move || {
+        let r = publish_extension(&app, &folder, &listing);
+        if r.is_ok() {
+            let _ = app.emit("market://published", ());
+        }
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    r
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevInfo {
+    manifest: island_formats::package::Manifest,
+    /// Médias trouvés (`store/thumbnail.*`, `store/banner.*`, `store/screenshots/*`).
+    media: Vec<String>,
+    /// `README.md` du dossier (description proposée).
+    readme: Option<String>,
+    files: usize,
+    size: usize,
+}
+
+/// Fenêtre de publication : ce que contient le dossier, tel qu'il partira au magasin.
+#[tauri::command]
+pub async fn market_dev_info(folder: String) -> Result<DevInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = std::path::Path::new(&folder);
+        let (manifest, bytes) = pack(dir)?;
+        let z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).map_err(|e| e.to_string())?;
+        let media: Vec<String> = z.file_names().filter(|n| n.starts_with(island_formats::media::PREFIX)).map(String::from).collect();
+        let files = z.len();
+        let readme = std::fs::read_to_string(dir.join("README.md")).ok().map(|r| r.chars().take(5000).collect());
+        Ok(DevInfo { manifest, media, readme, files, size: bytes.len() })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Éléments du compte (`/v1/me/items`) : état de la dernière version, motif d'un refus.

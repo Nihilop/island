@@ -6,7 +6,8 @@
     "note-*",
     "ext-*",
     "wallpaper-*",
-    "install-*"
+    "install-*",
+    "publish-*"
   ],
   "permissions": [
     "core:default",

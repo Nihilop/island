@@ -28,7 +28,8 @@ import { commandShortcut, setCommandShortcut, shortcutPrefs, shortcutStatus } fr
 import ShortcutField from "../ui/ShortcutField.vue";
 import ExtensionStore from "./ExtensionStore.vue";
 import StoreAccount from "../tools/wallpaper/StoreAccount.vue";
-import { marketError, session, watchAccount } from "../market/api";
+import { marketError, session, storeStatus, watchAccount } from "../market/api";
+import { listen } from "@tauri-apps/api/event";
 import {
   addDevFolder,
   pickPackage,
@@ -172,6 +173,7 @@ watch(
     watchAccount();
     void loadDevIds();
     void loadMine();
+    void loadPaused();
   },
   { immediate: true },
 );
@@ -207,24 +209,28 @@ async function packDev(dir: string) {
   }
 }
 
+/** « Publier » : la fenêtre de publication (fiche, médias, état au magasin). */
 async function publishDev(dir: string) {
   if (publishing.value) return;
-  const changelog = window.prompt(t("ext.publish.changelog"), "");
-  if (changelog === null) return;
   publishing.value = dir;
   publishMsg.delete(dir);
   try {
-    const r = await invoke<{ id: string; version: string; status: string }>("market_publish_extension", { folder: dir, changelog });
-    publishMsg.set(dir, { ok: true, text: t("ext.publish.sent", { v: r.version }) });
-    await loadMine();
-  } catch (e) {
-    const code = String(e);
-    const text = code.startsWith("fileType:") ? t("ext.publish.fileType", { f: code.slice(9) }) : marketError(e);
-    publishMsg.set(dir, { ok: false, text });
+    await invoke("window_open", { kind: "publish", key: "extension", title: t("ext.publishWin.title"), size: [640, 760], minSize: [480, 520], args: { folder: dir } });
   } finally {
     publishing.value = null;
   }
 }
+
+/** Publications suspendues par la modération : « Publier » désactivé, avec son message. */
+const paused = ref<string | null>(null);
+async function loadPaused() {
+  const s = await storeStatus().catch(() => null);
+  paused.value = s && !s.publishing.open ? s.publishing.message || t("market.publish.pausedDefault") : null;
+}
+void listen("market://published", () => {
+  void loadMine();
+  void loadPaused();
+});
 
 const errorText = (e: string) => {
   const key = `ext.err.${e.split(":")[0]}`;
@@ -369,8 +375,8 @@ const errorText = (e: string) => {
           <Button
             size="sm"
             :loading="publishing === dir"
-            :disabled="!!publishing || !session.account"
-            :title="session.account ? t('ext.publish.help') : t('ext.publish.signIn')"
+            :disabled="!!publishing || !session.account || !!paused"
+            :title="paused ? `${t('market.publish.paused')} ${paused}` : session.account ? t('ext.publish.help') : t('ext.publish.signIn')"
             @click="publishDev(dir)"
           >
             <PhStorefront weight="bold" />{{ t("ext.publish.button") }}

@@ -67,8 +67,16 @@ async fn call(r: &Router, method: &str, uri: &str, token: &str, body: Option<Val
 }
 
 async fn publish(r: &Router, token: &str, file: &[u8]) -> (StatusCode, Value) {
+    publish_with(r, token, file, &[]).await
+}
+
+async fn publish_with(r: &Router, token: &str, file: &[u8], fields: &[(&str, &str)]) -> (StatusCode, Value) {
     let boundary = "x-island";
-    let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"e.island\"\r\n\r\n").into_bytes();
+    let mut body = Vec::new();
+    for (k, v) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").as_bytes());
+    }
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"e.island\"\r\n\r\n").as_bytes());
     body.extend_from_slice(file);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     let req = Request::post("/v1/items")
@@ -92,7 +100,14 @@ async fn an_extension_waits_for_review_then_ships_signed_by_the_store(db: PgPool
     let author = account(&db, "auteur", "user").await;
     let moderator = account(&db, "modo", "moderator").await;
 
-    let (s, p) = publish(&r, &author, &extension("dev.example.meteo", "1.0.0", &["network:api.example.com"], &[])).await;
+    let fields = [
+        ("summary", "Météo locale"),
+        ("tags", r#"["meteo","ciel"]"#),
+        ("homepage", "https://example.com/meteo"),
+        ("repository", "javascript:alert(1)"),
+        ("license", "MIT"),
+    ];
+    let (s, p) = publish_with(&r, &author, &extension("dev.example.meteo", "1.0.0", &["network:api.example.com"], &[]), &fields).await;
     assert_eq!(s, StatusCode::ACCEPTED, "{p}");
     assert_eq!((p["id"].as_str(), p["status"].as_str()), (Some("dev.example.meteo"), Some("pending")));
     // Rien de public avant l'approbation.
@@ -120,7 +135,10 @@ async fn an_extension_waits_for_review_then_ships_signed_by_the_store(db: PgPool
     assert_eq!(call(&r, "POST", &format!("/v1/mod/reviews/{vid}/approve"), &moderator, None).await.0, StatusCode::NO_CONTENT);
     let (s, item) = call(&r, "GET", "/v1/items/dev.example.meteo", &author, None).await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!((item["kind"].as_str(), item["version"].as_str(), item["summary"].as_str()), (Some("extension"), Some("1.0.0"), Some("La météo dans l'île")));
+    assert_eq!((item["kind"].as_str(), item["version"].as_str(), item["summary"].as_str()), (Some("extension"), Some("1.0.0"), Some("Météo locale")));
+    assert_eq!((item["homepage"].as_str(), item["license"].as_str(), item["tags"].clone()), (Some("https://example.com/meteo"), Some("MIT"), json!(["meteo", "ciel"])));
+    // Lien non https : ignoré.
+    assert!(item["repository"].is_null());
     let (s, bytes) = send(&r, Request::get("/v1/items/dev.example.meteo/download").body(Body::empty()).unwrap()).await;
     assert_eq!(s, StatusCode::OK);
     use base64::Engine as _;

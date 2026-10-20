@@ -311,6 +311,19 @@ pub(crate) struct Form {
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
     pub changelog: Option<String>,
+    pub homepage: Option<String>,
+    pub repository: Option<String>,
+    pub license: Option<String>,
+}
+
+/// Lien de la fiche : https seulement, 300 caractères au plus.
+pub(crate) fn link(v: Option<&str>) -> Option<String> {
+    v.map(str::trim).filter(|u| u.starts_with("https://") && u.len() <= 300 && !u.contains(char::is_whitespace)).map(String::from)
+}
+
+/// Licence : 60 caractères au plus.
+pub(crate) fn license(v: Option<&str>) -> Option<String> {
+    v.map(|l| l.trim().chars().take(60).collect::<String>()).filter(|l| !l.is_empty())
 }
 
 async fn read_form(mut mp: Multipart) -> ApiResult<Form> {
@@ -327,6 +340,9 @@ async fn read_form(mut mp: Multipart) -> ApiResult<Form> {
             "summary" => f.summary = Some(text),
             "description" => f.description = Some(text),
             "changelog" => f.changelog = Some(text),
+            "homepage" => f.homepage = Some(text),
+            "repository" => f.repository = Some(text),
+            "license" => f.license = Some(text),
             "tags" => f.tags = Some(serde_json::from_str(&text).map_err(|_| ApiError::bad("invalidTags"))?),
             _ => {}
         }
@@ -426,9 +442,10 @@ pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> A
         }
         None => None,
     };
-    let link = |v: &Option<String>| v.as_deref().map(str::trim).filter(|u| u.starts_with("https://") && u.len() <= 300).map(String::from);
-    let (homepage, repository) = (link(&store.homepage), link(&store.repository));
-    let license = store.license.as_deref().map(|l| l.trim().chars().take(60).collect::<String>()).filter(|l| !l.is_empty());
+    // Liens et licence : le formulaire d'abord, puis le manifeste.
+    let homepage = link(f.homepage.as_deref().or(store.homepage.as_deref()));
+    let repository = link(f.repository.as_deref().or(store.repository.as_deref()));
+    let license = license(f.license.as_deref().or(store.license.as_deref()));
     // 6. Fichier réécrit.
     let mut out = Cursor::new(Vec::new());
     islandscene::write(&mut out, &scene, &files, &processed.as_media(readme), &store, &contents.manifest.app).map_err(ApiError::internal)?;

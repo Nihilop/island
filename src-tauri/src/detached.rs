@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 /// Types de fenêtres détachées connus de `main.ts`.
-const KINDS: &[&str] = &["note", "ext", "wallpaper", "install"];
+const KINDS: &[&str] = &["note", "ext", "wallpaper", "install", "publish"];
 
 /// Fenêtres détachées actuellement en plein écran (handle Win32) : l'île les traite comme
 /// une app plein écran (masquage « en plein écran », cf. host.rs), alors qu'elle ignore

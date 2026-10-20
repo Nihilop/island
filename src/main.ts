@@ -22,6 +22,7 @@ async function root(): Promise<Component> {
   if (label.startsWith("ext-")) return (await import("./extensions/ExtWindow.vue")).default;
   if (label === "wallpaper-editor") return (await import("./wallpaper/EditorWindow.vue")).default;
   if (label === "install-extension") return (await import("./extensions/InstallWindow.vue")).default;
+  if (label === "publish-extension") return (await import("./extensions/PublishWindow.vue")).default;
   if (label === "capture-select") return (await import("./capture/CaptureSelect.vue")).default;
   return (await import("./windows/Overlay.vue")).default;
 }
