@@ -261,14 +261,16 @@ dans l'isolation habituelle (iframes sandboxées, CSP, permissions consenties).
 
 ## Stockage R2
 
-Un seul compartiment (`island-store`), relié au domaine public `R2_MEDIA_URL`, rangé en
-dossiers ; le développement (`STORE_ENV=dev`) écrit dans les dossiers suffixés `-dev` :
+Deux compartiments ; le développement (`STORE_ENV=dev`) écrit dans les dossiers suffixés
+`-dev` :
 
 ```
-island-store/
-  media/<id>/thumbnail-<v>.jpg, banner-<v>.jpg, screenshot-<v>-<n>.jpg   ← publics (CDN)
-  packages/<id>/<v>.islandscene                                           ← liens signés
-  media-dev/   packages-dev/                                              ← développement
+island-store/      PUBLIC, domaine R2_MEDIA_URL (cdn.streemkit.com)
+  media/<id>/thumbnail-<v>.jpg, banner-<v>.jpg, screenshot-<v>-<n>.jpg
+  media-dev/
+island-packages/   PRIVÉ : ni domaine personnalisé, ni URL r2.dev
+  packages/<id>/<v>.islandscene
+  packages-dev/
 ```
 
 - **Versions** : chaque publication crée un fichier `packages/<id>/<v>…` neuf, jamais
@@ -277,12 +279,10 @@ island-store/
 - **Médias** : la fiche renvoie directement les URL du CDN (cache d'un an, immuable : une
   version = de nouveaux noms) ; les routes `/v1/items/{id}/media/…` y redirigent.
 - **Paquets** : `/download` compte le téléchargement puis redirige (303) vers une URL
-  **signée de 5 minutes** sur l'API S3 ; masquer un élément coupe donc tout nouveau lien.
-- **Règle WAF obligatoire** (Cloudflare › domaine › *Security › WAF › Custom rules*), sinon
-  un paquet masqué reste accessible par son adresse publique :
-  `(http.host eq "cdn.streemkit.com" and starts_with(http.request.uri.path, "/packages"))`
-  → **Block**.
-- Jeton R2 : *Object Read & Write*, limité au compartiment. Le jeton de développement a donc
+  **signée de 5 minutes** sur l'API S3 du compartiment privé : sans lien valide, R2 répond
+  403 ; masquer un élément coupe tout nouveau lien et les anciens expirent. Le serveur
+  refuse de démarrer si les deux compartiments sont le même.
+- Jeton R2 : *Object Read & Write*, limité aux deux compartiments. Le jeton de développement a donc
   aussi accès aux dossiers de production : en production, un jeton à part.
 
 ## Configuration (variables d'environnement)
@@ -292,7 +292,8 @@ island-store/
 | `DATABASE_URL` | Postgres (Neon) ; en local, un Postgres de développement ou une branche Neon |
 | `STORAGE` | `local:./data/files` (dev) ou `r2` |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | stockage |
-| `R2_MEDIA_URL` | domaine public du compartiment (`https://cdn.streemkit.com`) |
+| `R2_MEDIA_URL` | domaine public du compartiment des médias (`https://cdn.streemkit.com`) |
+| `R2_PACKAGES_BUCKET` | compartiment privé des paquets (`island-packages`) |
 | `STORE_ENV` | `dev` : dossiers `media-dev/`, `packages-dev/` |
 | `GITHUB_CLIENT_ID` | OAuth (le *device flow* n'a pas besoin du secret) |
 | `GITHUB_CLIENT_SECRET` | OAuth web du panneau d'administration |

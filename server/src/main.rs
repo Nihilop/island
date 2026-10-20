@@ -48,6 +48,7 @@ async fn main() {
                 &need("R2_ACCESS_KEY_ID"),
                 &need("R2_SECRET_ACCESS_KEY"),
                 &need("R2_BUCKET"),
+                &need("R2_PACKAGES_BUCKET"),
                 &need("R2_MEDIA_URL"),
                 dev,
             )

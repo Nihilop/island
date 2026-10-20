@@ -22,6 +22,7 @@ pub mod media;
 pub mod sanitize;
 pub mod scan;
 pub mod session;
+pub mod settings;
 pub mod storage;
 
 use std::sync::Arc;
@@ -68,6 +69,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/items/{id}/media/{kind}/{position}", get(items::media))
         .route("/v1/items/{id}/reports", post(items::report))
         .route("/v1/me/items", get(items::mine))
+        .route("/v1/store/status", get(settings::status))
         .route("/v1/auth/device", post(login::device))
         .route("/v1/auth/token", post(login::token))
         .route("/v1/me", get(login::me))
@@ -79,6 +81,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/mod/items", get(admin::items))
         .route("/v1/mod/items/{id}/hide", post(admin::hide))
         .route("/v1/mod/items/{id}/restore", post(admin::restore))
+        .route("/v1/mod/publishing", get(settings::get_publishing).put(settings::set_publishing))
         .route("/v1/admin/users", get(admin::users))
         .route("/v1/admin/moderators", post(admin::add_moderator))
         .route("/v1/admin/moderators/{id}", delete(admin::remove_moderator))

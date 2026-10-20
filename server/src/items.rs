@@ -360,6 +360,8 @@ pub struct Published {
 /// `POST /v1/items` (multipart) : `file` (requis), `item` (nouvelle version d'un élément
 /// existant), `summary`, `description`, `tags` (tableau JSON), `changelog`.
 pub async fn publish(State(st): State<AppState>, user: User, mp: Multipart) -> ApiResult<(StatusCode, Json<Published>)> {
+    // Publications fermées : refus AVANT de lire le fichier envoyé.
+    crate::settings::ensure_open(&st).await?;
     let f = read_form(mp).await?;
     let bytes = f.file.as_ref().ok_or_else(|| ApiError::bad("fileRequired"))?;
     check_len(&f.summary, MAX_SUMMARY, "summaryTooLong")?;
@@ -525,6 +527,7 @@ pub struct Patch {
 }
 
 pub async fn update(State(st): State<AppState>, user: User, Path(id): Path<String>, Json(p): Json<Patch>) -> ApiResult<StatusCode> {
+    crate::settings::ensure_open(&st).await?;
     editable(&st, &user, &id).await?;
     if let Some(n) = &p.name {
         if n.trim().is_empty() || n.chars().count() > 80 {

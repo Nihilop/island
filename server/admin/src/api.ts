@@ -30,6 +30,14 @@ export interface Page<T> {
   total: number;
 }
 
+/** Interrupteur d'urgence des publications. */
+export interface Publishing {
+  open: boolean;
+  message: string;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
 export interface Me {
   id: number;
   login: string;
@@ -48,6 +56,7 @@ const MESSAGES: Record<string, string> = {
   invalidLogin: "Nom GitHub invalide.",
   notModerator: "Ce compte n'est pas modérateur.",
   csrf: "Requête refusée (protection CSRF).",
+  publishingPaused: "Les publications sont suspendues.",
   internal: "Erreur du serveur.",
 };
 

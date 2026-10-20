@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // Panneau d'administration du magasin : session (cookie GitHub) vérifiée par /v1/me ;
 // onglets par `#` — signalements, éléments, extensions (file de relecture, étape 6),
-// comptes et journal (admin seulement).
+// comptes et journal (admin seulement). En tête : l'interrupteur d'urgence des publications
+// (modérateurs et admin).
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { api, ApiError, message, type Me } from "./api";
+import { api, ApiError, date, message, type Me, type Publishing } from "./api";
 import Btn from "./Btn.vue";
 import Reports from "./views/Reports.vue";
 import Items from "./views/Items.vue";
@@ -50,13 +51,40 @@ async function init() {
     }
     state.value = "ready";
     readHash();
-    await refreshSummary();
+    await Promise.all([refreshSummary(), loadPublishing()]);
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) state.value = "anonymous";
     else {
       error.value = message(e);
       state.value = "error";
     }
+  }
+}
+
+const publishing = ref<Publishing | null>(null);
+const switching = ref(false);
+const switchError = ref<string | null>(null);
+async function loadPublishing() {
+  publishing.value = await api<Publishing>("GET", "/v1/mod/publishing").catch(() => publishing.value);
+}
+async function setPublishing(open: boolean) {
+  let msg = "";
+  if (!open) {
+    const answer = window.prompt(
+      "Suspendre TOUTES les publications (nouveaux éléments, versions, médias, modifications de fiches) ?\n\nMessage affiché aux auteurs (facultatif) :",
+      "Les publications sont suspendues temporairement.",
+    );
+    if (answer === null) return;
+    msg = answer;
+  }
+  switching.value = true;
+  switchError.value = null;
+  try {
+    publishing.value = await api<Publishing>("PUT", "/v1/mod/publishing", { open, message: msg });
+  } catch (e) {
+    switchError.value = message(e);
+  } finally {
+    switching.value = false;
   }
 }
 
@@ -105,12 +133,27 @@ onBeforeUnmount(() => window.removeEventListener("hashchange", readHash));
         </button>
       </nav>
       <div class="row">
+        <Btn v-if="publishing?.open" variant="danger" :loading="switching" title="Bloque tout envoi au magasin" @click="setPublishing(false)">
+          Suspendre les publications
+        </Btn>
         <img v-if="me?.avatarUrl" :src="me.avatarUrl" alt="" class="avatar" />
         <span>{{ me?.login }}</span>
         <span class="badge" :class="isAdmin ? 'blue' : 'green'">{{ isAdmin ? "admin" : "modérateur" }}</span>
         <Btn :loading="loggingOut" @click="logout">Déconnexion</Btn>
       </div>
     </header>
+    <div v-if="publishing && !publishing.open" class="paused">
+      <div>
+        <b>Publications suspendues</b>
+        <span class="muted small">
+          · {{ date(publishing.updatedAt) }}<template v-if="publishing.updatedBy"> par {{ publishing.updatedBy }}</template>
+        </span>
+        <div v-if="publishing.message" class="small">« {{ publishing.message }} »</div>
+        <div class="small muted">Aucun envoi ni modification de fiche n'est accepté ; le catalogue et les téléchargements continuent.</div>
+      </div>
+      <Btn variant="primary" :loading="switching" @click="setPublishing(true)">Rouvrir les publications</Btn>
+    </div>
+    <p v-if="switchError" class="error">{{ switchError }}</p>
     <main>
       <Reports v-if="tab === 'reports'" @changed="refreshSummary" />
       <Items v-else-if="tab === 'items'" @changed="refreshSummary" />
@@ -174,6 +217,17 @@ nav {
 .tab.on {
   color: var(--text);
   background: var(--panel);
+}
+.paused {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--red);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 .count {
   min-width: 18px;

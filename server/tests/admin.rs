@@ -135,3 +135,40 @@ async fn reports_are_resolved_and_items_hidden_or_restored(db: PgPool) {
     assert_eq!(req(&r, "GET", "/v1/items/sc_b", &moderator, None).await.0, StatusCode::OK);
     assert_eq!(req(&r, "POST", "/v1/mod/items/sc_b/restore", &moderator, None).await.0, StatusCode::NOT_FOUND);
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn publishing_can_be_paused_in_an_emergency(db: PgPool) {
+    let r = router(db.clone(), Some(1)).await;
+    let (author, user) = account(&db, "user9", "user", Some(9)).await;
+    let (_, moderator) = account(&db, "user8", "moderator", Some(8)).await;
+    scene(&db, "sc_a", author).await;
+    let (_, status) = req(&r, "GET", "/v1/store/status", &user, None).await;
+    assert_eq!(status["publishing"]["open"], true);
+    // Un simple compte ne peut pas fermer.
+    let pause = json!({ "open": false, "message": "  Vague de spam, on revient vite.  " });
+    assert_eq!(req(&r, "PUT", "/v1/mod/publishing", &user, Some(pause.clone())).await.0, StatusCode::FORBIDDEN);
+    let (s, state) = req(&r, "PUT", "/v1/mod/publishing", &moderator, Some(pause)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!((state["open"].clone(), state["message"].clone(), state["updatedBy"].clone()), (json!(false), json!("Vague de spam, on revient vite."), json!("user8")));
+    // Fermé : publication refusée avant même de lire le corps, fiches figées.
+    let upload = Request::post("/v1/items")
+        .header("authorization", format!("Bearer {user}"))
+        .header("content-type", "multipart/form-data; boundary=x")
+        .body(Body::from("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a\"\r\n\r\nnot read\r\n--x--\r\n"))
+        .unwrap();
+    let res = r.clone().oneshot(upload).await.unwrap();
+    let s = res.status();
+    let e: Value = serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!((s, e["error"].clone()), (StatusCode::SERVICE_UNAVAILABLE, json!("publishingPaused")));
+    assert_eq!(req(&r, "PATCH", "/v1/items/sc_a", &user, Some(json!({ "name": "x" }))).await.0, StatusCode::SERVICE_UNAVAILABLE);
+    // Le reste du magasin continue.
+    assert_eq!(req(&r, "GET", "/v1/items/sc_a", &user, None).await.0, StatusCode::OK);
+    let (_, status) = req(&r, "GET", "/v1/store/status", &user, None).await;
+    assert_eq!(status["publishing"]["message"], "Vague de spam, on revient vite.");
+    // Rouvert : le message est effacé, et tout est au journal.
+    let (_, state) = req(&r, "PUT", "/v1/mod/publishing", &moderator, Some(json!({ "open": true, "message": "x" }))).await;
+    assert_eq!((state["open"].clone(), state["message"].clone()), (json!(true), json!("")));
+    assert_eq!(req(&r, "PATCH", "/v1/items/sc_a", &user, Some(json!({ "name": "Nouveau" }))).await.0, StatusCode::NO_CONTENT);
+    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit WHERE action LIKE 'publishing.%' ORDER BY id").fetch_all(&db).await.unwrap();
+    assert_eq!(actions, ["publishing.pause", "publishing.open"]);
+}

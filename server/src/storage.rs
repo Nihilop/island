@@ -1,13 +1,12 @@
 //! Stockage des fichiers publiés : dossier local (développement) ou Cloudflare R2 (API S3).
 //!
-//! Deux dossiers, suffixés `-dev` en développement (`STORE_ENV=dev`), dans le même
-//! compartiment :
-//!   `media/`     vignettes, bannières, captures — PUBLICS, servis par le CDN
-//!                (`R2_MEDIA_URL`, ex. https://cdn.streemkit.com) ;
-//!   `packages/`  paquets (`.islandscene`, `.island`) — distribués par des URL SIGNÉES de
-//!                5 minutes, délivrées par le serveur (compteur, élément masqué = plus de
-//!                lien). Sur le domaine public, une règle WAF Cloudflare bloque
-//!                `/packages*` (cf. README) : un lien direct ne survit pas à un masquage.
+//! Deux compartiments, dossiers suffixés `-dev` en développement (`STORE_ENV=dev`) :
+//!   `R2_BUCKET` (PUBLIC, domaine `R2_MEDIA_URL`, ex. https://cdn.streemkit.com)
+//!       `media/`     vignettes, bannières, captures, servies par le CDN ;
+//!   `R2_PACKAGES_BUCKET` (PRIVÉ : ni domaine ni `r2.dev`)
+//!       `packages/`  paquets (`.islandscene`, `.island`), distribués par des URL SIGNÉES de
+//!                    5 minutes délivrées par le serveur (compteur ; élément masqué = plus
+//!                    de lien, et les anciens expirent).
 //!
 //! Les clés sont produites par le serveur et revérifiées ici : jamais de `..` ni de chemin
 //! absolu.
@@ -25,11 +24,20 @@ pub const DOWNLOAD_TTL: Duration = Duration::from_secs(300);
 const SERVER_TTL: Duration = Duration::from_secs(120);
 
 pub struct R2 {
-    bucket: Bucket,
+    /// Compartiment public (médias).
+    media: Bucket,
+    /// Compartiment privé (paquets).
+    packages: Bucket,
     creds: Credentials,
     http: reqwest::Client,
     /// `https://cdn.streemkit.com` (sans `/` final).
     public_url: String,
+}
+
+impl R2 {
+    fn bucket(&self, key: &str) -> &Bucket {
+        if Storage::is_media(key) { &self.media } else { &self.packages }
+    }
 }
 
 pub enum Backend {
@@ -60,13 +68,24 @@ impl Storage {
         Self { backend: Backend::Local(dir), suffix: if dev { "-dev".into() } else { String::new() } }
     }
 
-    /// R2 : `account` = identifiant du compte Cloudflare, `public_url` = domaine public.
-    pub fn r2(account: &str, key: &str, secret: &str, bucket: &str, public_url: &str, dev: bool) -> Result<Self, String> {
-        let endpoint = format!("https://{account}.r2.cloudflarestorage.com").parse().map_err(|e| format!("R2_ACCOUNT_ID : {e}"))?;
-        let bucket = Bucket::new(endpoint, UrlStyle::Path, bucket.to_string(), "auto").map_err(|e| format!("R2_BUCKET : {e}"))?;
+    /// R2 : `account` = identifiant du compte Cloudflare ; `media` = compartiment public
+    /// relié au domaine `public_url` ; `packages` = compartiment privé.
+    #[allow(clippy::too_many_arguments)]
+    pub fn r2(account: &str, key: &str, secret: &str, media: &str, packages: &str, public_url: &str, dev: bool) -> Result<Self, String> {
+        if media == packages {
+            return Err("R2_PACKAGES_BUCKET doit être un compartiment PRIVÉ, distinct de R2_BUCKET (public)".into());
+        }
+        let endpoint: url::Url = format!("https://{account}.r2.cloudflarestorage.com").parse().map_err(|e| format!("R2_ACCOUNT_ID : {e}"))?;
+        let bucket = |name: &str, var: &str| Bucket::new(endpoint.clone(), UrlStyle::Path, name.to_string(), "auto").map_err(|e| format!("{var} : {e}"));
+        let (media, packages) = (bucket(media, "R2_BUCKET")?, bucket(packages, "R2_PACKAGES_BUCKET")?);
         let http = reqwest::Client::builder().timeout(Duration::from_secs(120)).build().map_err(|e| e.to_string())?;
-        let r2 = R2 { bucket, creds: Credentials::new(key, secret), http, public_url: public_url.trim_end_matches('/').to_string() };
+        let r2 = R2 { media, packages, creds: Credentials::new(key, secret), http, public_url: public_url.trim_end_matches('/').to_string() };
         Ok(Self { backend: Backend::R2(Box::new(r2)), suffix: if dev { "-dev".into() } else { String::new() } })
+    }
+
+    /// Les médias vont dans le compartiment public, tout le reste dans le privé.
+    fn is_media(key: &str) -> bool {
+        key.starts_with("media/") || key.starts_with("media-dev/")
     }
 
     /// Clé d'un média public (`media[-dev]/<chemin>`).
@@ -82,7 +101,7 @@ impl Storage {
     /// URL publique d'un média (CDN), si le stockage en a une.
     pub fn public_url(&self, key: &str) -> Option<String> {
         match &self.backend {
-            Backend::R2(r) if key.starts_with("media") => Some(format!("{}/{key}", r.public_url)),
+            Backend::R2(r) if Self::is_media(key) => Some(format!("{}/{key}", r.public_url)),
             _ => None,
         }
     }
@@ -92,7 +111,7 @@ impl Storage {
     pub fn signed_download(&self, key: &str, disposition: &str) -> Option<String> {
         match &self.backend {
             Backend::R2(r) => {
-                let mut a = GetObject::new(&r.bucket, Some(&r.creds), key);
+                let mut a = GetObject::new(r.bucket(key), Some(&r.creds), key);
                 a.query_mut().insert("response-content-disposition", disposition.to_string());
                 Some(a.sign(DOWNLOAD_TTL).to_string())
             }
@@ -117,9 +136,9 @@ impl Storage {
                 tokio::fs::rename(&tmp, &path).await.map_err(|e| e.to_string())
             }
             Backend::R2(r) => {
-                let url = PutObject::new(&r.bucket, Some(&r.creds), key).sign(SERVER_TTL);
+                let url = PutObject::new(r.bucket(key), Some(&r.creds), key).sign(SERVER_TTL);
                 // Médias : mis en cache longtemps (une nouvelle version = un nouveau nom).
-                let cache = if key.starts_with("media") { "public, max-age=31536000, immutable" } else { "private, no-store" };
+                let cache = if Self::is_media(key) { "public, max-age=31536000, immutable" } else { "private, no-store" };
                 r.http
                     .put(url)
                     .header("content-type", content_type)
@@ -127,7 +146,7 @@ impl Storage {
                     .body(bytes.to_vec())
                     .send()
                     .await
-                    .and_then(|res| res.error_for_status())
+                    .and_then(|res| res.error_for_status()).map_err(reqwest::Error::without_url)
                     .map(|_| ())
                     .map_err(|e| format!("R2 put {key} : {e}"))
             }
@@ -144,12 +163,12 @@ impl Storage {
                 Err(e) => Err(e.to_string()),
             },
             Backend::R2(r) => {
-                let url = GetObject::new(&r.bucket, Some(&r.creds), key).sign(SERVER_TTL);
-                let res = r.http.get(url).send().await.map_err(|e| e.to_string())?;
+                let url = GetObject::new(r.bucket(key), Some(&r.creds), key).sign(SERVER_TTL);
+                let res = r.http.get(url).send().await.map_err(|e| e.without_url().to_string())?;
                 if res.status() == reqwest::StatusCode::NOT_FOUND {
                     return Ok(None);
                 }
-                let res = res.error_for_status().map_err(|e| format!("R2 get {key} : {e}"))?;
+                let res = res.error_for_status().map_err(|e| format!("R2 get {key} : {}", e.without_url()))?;
                 Ok(Some(res.bytes().await.map_err(|e| e.to_string())?.to_vec()))
             }
         }
@@ -178,8 +197,8 @@ impl Storage {
                 _ => Ok(()),
             },
             Backend::R2(r) => {
-                let url = DeleteObject::new(&r.bucket, Some(&r.creds), key).sign(SERVER_TTL);
-                r.http.delete(url).send().await.and_then(|res| res.error_for_status()).map(|_| ()).map_err(|e| format!("R2 delete {key} : {e}"))
+                let url = DeleteObject::new(r.bucket(key), Some(&r.creds), key).sign(SERVER_TTL);
+                r.http.delete(url).send().await.and_then(|res| res.error_for_status()).map_err(reqwest::Error::without_url).map(|_| ()).map_err(|e| format!("R2 delete {key} : {e}"))
             }
         }
     }
@@ -201,14 +220,15 @@ mod tests {
 
     #[test]
     fn folders_and_urls_follow_the_environment() {
-        let dev = Storage::r2("e7149cb0b926dddf52a0f4d30c11ea45", "k", "s", "island-store", "https://cdn.streemkit.com/", true).unwrap();
+        let dev = Storage::r2("e7149cb0b926dddf52a0f4d30c11ea45", "k", "s", "island-store", "island-packages", "https://cdn.streemkit.com/", true).unwrap();
         assert_eq!(dev.media_key("sc_a/thumbnail-1.jpg"), "media-dev/sc_a/thumbnail-1.jpg");
         assert_eq!(dev.package_key("sc_a/1.islandscene"), "packages-dev/sc_a/1.islandscene");
         assert_eq!(dev.public_url("media-dev/sc_a/t.jpg").as_deref(), Some("https://cdn.streemkit.com/media-dev/sc_a/t.jpg"));
         // Jamais d'URL publique pour un paquet : seulement un lien signé.
         assert_eq!(dev.public_url("packages-dev/sc_a/1.islandscene"), None);
         let link = dev.signed_download("packages-dev/sc_a/1.islandscene", "attachment; filename=\"Aurore.islandscene\"").unwrap();
-        assert!(link.starts_with("https://e7149cb0b926dddf52a0f4d30c11ea45.r2.cloudflarestorage.com/island-store/packages-dev/sc_a/1.islandscene?"));
+        assert!(link.starts_with("https://e7149cb0b926dddf52a0f4d30c11ea45.r2.cloudflarestorage.com/island-packages/packages-dev/sc_a/1.islandscene?"));
+        assert!(Storage::r2("a", "k", "s", "island-store", "island-store", "https://x", false).is_err());
         assert!(link.contains("X-Amz-Signature=") && link.contains("X-Amz-Expires=300"));
         let prod = Storage::local(PathBuf::from("x"), false);
         assert_eq!(prod.media_key("a.jpg"), "media/a.jpg");
