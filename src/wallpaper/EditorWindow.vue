@@ -16,6 +16,7 @@ import Outliner from "./Outliner.vue";
 import LayerPanel from "./LayerPanel.vue";
 import ScenePanel from "./ScenePanel.vue";
 import MaskPainter from "./MaskPainter.vue";
+import PublishPopover from "./PublishPopover.vue";
 import { Preview } from "./preview";
 import { DEFAULTS, layerBox, layerId, maskNames, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
 import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, saveThumbnail, shareError } from "./api";
@@ -340,6 +341,9 @@ async function share() {
   }
 }
 
+/** Avant la publication au magasin : la scène doit être enregistrée (c'est elle qui part). */
+const prepareForStore = async () => (dirty.value || isNew.value ? save() : true);
+
 async function close() {
   if (dirty.value && !window.confirm(t("wall.discard"))) return;
   await win.close();
@@ -400,6 +404,7 @@ onBeforeUnmount(() => {
       <div class="flex-1 self-stretch" data-tauri-drag-region />
       <Button size="sm" :loading="saving" :disabled="!dirty && !isNew" @click="save">{{ t("common.save") }}</Button>
       <Button size="sm" :loading="sharing" @click="share"><PhShareNetwork />{{ t("wall.share.export") }}</Button>
+      <PublishPopover :scene="id" :prepare="prepareForStore" />
       <Button size="sm" variant="default" :loading="applying" @click="saveAndApply"><PhMonitor />{{ t("wall.apply") }}</Button>
       <div class="mx-1 h-4 w-px bg-separator" />
       <IconButton :icon="PhMinus" :label="t('notes.minimize')" @click="win.minimize()" />

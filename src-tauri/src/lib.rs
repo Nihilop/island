@@ -243,6 +243,8 @@ pub fn run() {
             market::market_login_cancel,
             market::market_account,
             market::market_logout,
+            market::market_published,
+            market::market_publish,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,
             wallpaper::wallpaper_set_options,

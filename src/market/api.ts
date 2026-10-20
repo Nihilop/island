@@ -140,3 +140,35 @@ export const loginStart = (lang: string) => invoke<LoginStart>("market_login_sta
 export const loginState = () => invoke<LoginStart | null>("market_login_state");
 export const loginCancel = () => invoke("market_login_cancel");
 export const logout = () => invoke("market_logout");
+
+// --- Publication (éditeur) ------------------------------------------------------------------
+
+export interface Publication {
+  item: string;
+  version: string;
+}
+
+/** Élément du magasin d'une scène déjà publiée, sinon null. */
+export const published = (scene: string) => invoke<Publication | null>("market_published", { scene });
+
+/** Publie la scène enregistrée : nouvel élément, ou nouvelle version de son élément. */
+export const publish = (scene: string, p: { summary: string; tags: string[]; changelog: string }) =>
+  invoke<Publication>("market_publish", { scene, summary: p.summary, tags: p.tags, changelog: p.changelog });
+
+export const storeStatus = () => get<{ publishing: { open: boolean; message: string } }>("/v1/store/status");
+
+/** Étiquettes saisies librement → format du magasin (8 au plus, `a-z0-9-`, 24 caractères). */
+export function cleanTags(raw: string): string[] {
+  const out: string[] = [];
+  for (const w of raw.split(/[,\s]+/)) {
+    const tag = w
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24);
+    if (tag && !out.includes(tag)) out.push(tag);
+  }
+  return out.slice(0, 8);
+}

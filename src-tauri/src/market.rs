@@ -325,3 +325,102 @@ pub async fn market_logout(app: AppHandle) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())
 }
+
+// --- Publication ------------------------------------------------------------------------------
+//
+// Une scène locale publiée est liée à son élément du magasin (`__market_published__` :
+// scène → { élément, version }) : la publier à nouveau envoie une NOUVELLE VERSION du même
+// élément. Le paquet est celui du partage (`share::export`, avec le rendu de l'éditeur en
+// vignette) ; le magasin le revérifie entièrement.
+
+const PUBLISHED: &str = "__market_published__";
+
+#[derive(Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Publication {
+    pub item: String,
+    pub version: String,
+}
+
+/// Élément du magasin d'une scène déjà publiée (pour proposer « nouvelle version »).
+#[tauri::command]
+pub fn market_published(app: AppHandle, scene: String) -> Option<Publication> {
+    crate::store::read_store(&app, PUBLISHED).get(&scene).and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
+fn multipart(fields: &[(&str, String)], file: &[u8]) -> (String, Vec<u8>) {
+    let mut b = [0u8; 12];
+    let _ = getrandom::getrandom(&mut b);
+    let boundary = format!("island{}", b.iter().map(|x| format!("{x:02x}")).collect::<String>());
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+    }
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"scene.islandscene\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
+    );
+    body.extend_from_slice(file);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (format!("multipart/form-data; boundary={boundary}"), body)
+}
+
+fn publish(app: &AppHandle, scene: &str, summary: &str, tags: &[String], changelog: &str) -> Result<Publication, String> {
+    let token = token().ok_or("notSignedIn")?;
+    let tmp = std::env::temp_dir().join(format!("island-publish-{}-{}.islandscene", std::process::id(), scene.replace(|c: char| !c.is_ascii_alphanumeric(), "")));
+    share::export(app, scene, &tmp)?;
+    let file = std::fs::read(&tmp).map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&tmp);
+    let file = file?;
+    let mut map = crate::store::read_store(app, PUBLISHED);
+    let mut item: Option<String> = map.get(scene).and_then(|v| v.get("item")).and_then(|v| v.as_str()).map(String::from);
+    loop {
+        let mut fields: Vec<(&str, String)> = Vec::new();
+        if let Some(i) = &item {
+            fields.push(("item", i.clone()));
+        }
+        if !summary.trim().is_empty() {
+            fields.push(("summary", summary.trim().to_string()));
+        }
+        if !tags.is_empty() {
+            fields.push(("tags", serde_json::to_string(tags).unwrap_or_default()));
+        }
+        if !changelog.trim().is_empty() {
+            fields.push(("changelog", changelog.trim().to_string()));
+        }
+        let (ctype, body) = multipart(&fields, &file);
+        let res = agent(app, Duration::from_secs(600))
+            .post(&format!("{}/v1/items", base_url()))
+            .set("authorization", &format!("Bearer {token}"))
+            .set("content-type", &ctype)
+            .send_bytes(&body);
+        match res {
+            Ok(r) => {
+                let p: serde_json::Value = r.into_json().map_err(|e| e.to_string())?;
+                let publication = Publication {
+                    item: p.get("id").and_then(|v| v.as_str()).ok_or("badResponse")?.to_string(),
+                    version: p.get("version").and_then(|v| v.as_str()).ok_or("badResponse")?.to_string(),
+                };
+                map.insert(scene.to_string(), serde_json::json!(publication));
+                crate::store::write_store(app, PUBLISHED, &map);
+                return Ok(publication);
+            }
+            // L'élément lié a été supprimé du magasin (ou n'est plus à nous) : on en crée un nouveau.
+            Err(ureq::Error::Status(404 | 403, _)) if item.is_some() => {
+                item = None;
+                map.remove(scene);
+            }
+            Err(ureq::Error::Status(401, _)) => {
+                forget_token();
+                let _ = app.emit("market://account", ());
+                return Err("unauthorized".into());
+            }
+            Err(e) => return Err(error(e)),
+        }
+    }
+}
+
+/// Publie la scène (déjà enregistrée) : nouvel élément, ou nouvelle version s'il existe.
+#[tauri::command]
+pub async fn market_publish(app: AppHandle, scene: String, summary: String, tags: Vec<String>, changelog: String) -> Result<Publication, String> {
+    tauri::async_runtime::spawn_blocking(move || publish(&app, &scene, &summary, &tags, &changelog)).await.map_err(|e| e.to_string())?
+}
