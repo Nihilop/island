@@ -1,0 +1,11 @@
+# Build context = repository root: only send what the image needs.
+*
+!crates/island-formats
+!server/Cargo.toml
+!server/Cargo.lock
+!server/src
+!server/migrations
+!server/admin
+crates/island-formats/target
+server/admin/node_modules
+server/admin/dist

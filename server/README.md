@@ -299,7 +299,7 @@ island-packages/   PRIVÉ : ni domaine personnalisé, ni URL r2.dev
 | `GITHUB_CLIENT_SECRET` | OAuth web du panneau d'administration |
 | `ADMIN_GITHUB_ID` | identifiant numérique GitHub du super admin |
 | `SESSION_KEY` | clé de signature des cookies du panneau |
-| `CLAMAV_URL` | `tcp://clamav:3310` (optionnel) |
+| `CLAMAV_URL` | `clamav:3310` (hôte:port de clamd, optionnel) |
 | `STORE_SIGNING_KEY` | clé privée ed25519 du magasin (PEM) |
 | `PUBLIC_URL` | `https://store.island…` |
 
