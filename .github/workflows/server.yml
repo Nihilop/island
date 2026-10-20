@@ -62,6 +62,9 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 11
+          # Le package.json de la racine (l'app) fixe une autre version de pnpm : celui du
+          # panneau, qui n'en fixe aucune, évite le conflit.
+          package_json_file: server/admin/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
