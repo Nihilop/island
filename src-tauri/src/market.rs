@@ -6,8 +6,7 @@
 // lien signé de R2), puis l'importe comme une scène partagée : mêmes vérifications que
 // pour un fichier reçu (cf. `wallpaper::share`).
 //
-// Adresse du magasin : `ISLAND_STORE_URL` si défini, sinon le serveur local en
-// développement et `https://store.streemkit.com` en production.
+// Adresse du magasin : cf. `base_url` (réglable à la compilation pour un autre magasin).
 //
 // Scènes installées : `__market__` (stockage clé → valeur d'Island), élément du magasin →
 // { scène locale, version } ; sert à afficher « Installée » et, plus tard, les mises à jour.
@@ -29,11 +28,22 @@ use crate::wallpaper::share::{self, Imported};
 
 const SPACE: &str = "__market__";
 
+/// Magasin officiel, si la compilation n'en désigne pas un autre.
+const DEFAULT_STORE: &str = "https://store.streemkit.com";
+
+/// Adresse du magasin :
+///   1. `ISLAND_STORE_URL` à l'exécution (essais) ;
+///   2. en développement, le serveur local ;
+///   3. sinon `ISLAND_STORE_URL` À LA COMPILATION (`build.rs` : environnement ou `.env` ;
+///      variable du dépôt en CI) — un fork pointe ainsi sur son propre magasin ;
+///   4. sinon le magasin officiel.
 pub fn base_url() -> String {
-    if let Ok(u) = std::env::var("ISLAND_STORE_URL") {
-        return u.trim_end_matches('/').to_string();
-    }
-    if cfg!(debug_assertions) { "http://127.0.0.1:8080".into() } else { "https://store.streemkit.com".into() }
+    let url = match std::env::var("ISLAND_STORE_URL") {
+        Ok(u) if !u.trim().is_empty() => u,
+        _ if cfg!(debug_assertions) => "http://127.0.0.1:8080".into(),
+        _ => option_env!("ISLAND_STORE_URL").unwrap_or(DEFAULT_STORE).into(),
+    };
+    url.trim().trim_end_matches('/').to_string()
 }
 
 fn agent(app: &AppHandle, timeout: Duration) -> ureq::Agent {

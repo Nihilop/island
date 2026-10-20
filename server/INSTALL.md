@@ -55,6 +55,35 @@ docker run --env-file server/.env -p 8080:8080 island-store
 The image listens on `0.0.0.0:8080` (`BIND`) and serves the admin panel from
 `/app/admin/dist` (`ADMIN_DIST`).
 
+A GitHub Action (`.github/workflows/server-image.yml`) publishes it to GHCR as
+`ghcr.io/<owner>/island-store`. It runs on pushes to `main` that touch the server, and on
+`store-v*` tags. GHCR packages start **private**: make the package public (*Package
+settings › Change visibility*), or log the host in with `docker login ghcr.io`.
+
+### Deploy with Docker Compose
+
+`server/deploy/` holds a ready-made stack: `docker-compose.yml` and a commented
+`.env.example`. Copy the folder to the host, then:
+
+```bash
+cp .env.example .env                      # fill it in (sections 3 to 6)
+mkdir secrets
+node packages/sdk/bin/island.mjs keygen secrets/store-signing-key.json   # from a repo checkout
+docker compose up -d
+docker compose logs -f store              # prints the store public key at startup
+```
+
+- The `store` service pulls `ghcr.io/${GHCR_OWNER}/island-store`. To build from source
+  instead, swap `image:` for the commented `build:` line.
+- The port is bound to `127.0.0.1` only: the way in is a tunnel or a reverse proxy.
+- Optional services, enabled with `COMPOSE_PROFILES` in `.env`:
+  - `tunnel`: a Cloudflare Tunnel with `TUNNEL_TOKEN`; public HTTPS without opening a port.
+  - `antivirus`: ClamAV, with `CLAMAV_URL=clamav:3310` (about 1.5 GB of RAM).
+  - `local-db`: Postgres in the stack, instead of a hosted one.
+- The `store` container carries the Watchtower label: if a Watchtower runs on the host, it
+  updates the store when a new image is published. Otherwise, update with
+  `docker compose pull && docker compose up -d`.
+
 ---
 
 ## 3. Configuration
@@ -189,3 +218,28 @@ Roles:
 - **Development tokens**, without GitHub:
   `island-store token <login> [--role user|moderator|admin] [--name <label>]`.
 - **Backups**: back up Postgres (the R2 file keys are stored there) and both buckets.
+
+---
+
+## 9. Point the Island app at your store
+
+The Island app talks to one store, chosen **when the app is built**. Released builds of the
+official repository use the official store. To ship Island with your own store (a fork),
+set these build settings:
+
+| Setting | Value |
+|---|---|
+| `ISLAND_STORE_URL` | your `PUBLIC_URL`, e.g. `https://store.example.com` |
+| `ISLAND_STORE_KEYS` | the store public key, printed at startup (log line `clé du magasin : …`) and returned by `GET /v1/store/status` as `signingKey`; several keys are comma-separated (key rotation) |
+
+- **Local build**: copy `.env.example` (repository root) to `.env` and fill it in.
+  `src-tauri/build.rs` reads it.
+- **Release builds (GitHub Actions)**: in the repository, open *Settings › Secrets and
+  variables › Actions › **Variables*** and add `ISLAND_STORE_URL` and `ISLAND_STORE_KEYS`.
+  `.github/workflows/release.yml` passes them to the build. Both values are public, so
+  plain variables are enough; repository secrets with the same names would also work if
+  you change `vars.` to `secrets.` in the workflow.
+- Development builds always use `http://127.0.0.1:8080`, or `ISLAND_STORE_URL` set at run
+  time.
+- Extensions signed by a key in `ISLAND_STORE_KEYS` install as *Verified by the store*.
+  Changing the store key later requires a new app release that lists both keys.

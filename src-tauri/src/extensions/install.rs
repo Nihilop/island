@@ -26,14 +26,16 @@ use super::{root, valid_id, Manifest};
 /// n'est PAS dans le dépôt (créée par `island keygen`, gardée par l'auteur d'Island).
 const OFFICIAL_KEYS: &[&str] = &["IrXutmIS7EwKdJ61YF0Tw2ECeoFjXKLJE9pnCcDTxj4="];
 
-/// Clés publiques du magasin (`STORE_SIGNING_KEY` du serveur ; une liste pour la rotation).
-/// La clé de production s'ajoute ici avant l'ouverture du magasin.
+/// Clés publiques du magasin officiel (`STORE_SIGNING_KEY` du serveur ; une liste pour la
+/// rotation). La clé de production s'ajoute ici avant l'ouverture du magasin.
 const STORE_KEYS: &[&str] = &[];
 
-/// Clés du magasin reconnues : `STORE_KEYS`, plus, en DÉVELOPPEMENT seulement, la clé du
-/// serveur local (`crate::market::dev_store_key`).
+/// Clés du magasin reconnues : `STORE_KEYS`, celles données À LA COMPILATION
+/// (`ISLAND_STORE_KEYS`, séparées par des virgules : magasin d'un fork), plus, en
+/// DÉVELOPPEMENT seulement, la clé du serveur local (`crate::market::dev_store_key`).
 fn store_keys() -> Vec<String> {
     let mut keys: Vec<String> = STORE_KEYS.iter().map(|k| k.to_string()).collect();
+    keys.extend(option_env!("ISLAND_STORE_KEYS").unwrap_or("").split(',').map(str::trim).filter(|k| !k.is_empty()).map(String::from));
     keys.extend(crate::market::dev_store_key());
     keys
 }

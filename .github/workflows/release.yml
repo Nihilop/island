@@ -44,6 +44,10 @@ jobs:
           # Clés de signature de l'updater (à ajouter dans les secrets du dépôt) :
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Magasin visé par cette build (variables du dépôt ; vides = magasin officiel) :
+          # Settings › Secrets and variables › Actions › Variables. Cf. .env.example.
+          ISLAND_STORE_URL: ${{ vars.ISLAND_STORE_URL }}
+          ISLAND_STORE_KEYS: ${{ vars.ISLAND_STORE_KEYS }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Island ${{ github.ref_name }}"
