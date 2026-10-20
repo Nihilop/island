@@ -311,7 +311,8 @@ island-packages/   PRIVÉ : ni domaine personnalisé, ni URL r2.dev
 3. ✅ Auth GitHub (device flow, jetons ; OAuth web), rôles, admin par `ADMIN_GITHUB_ID`.
 4. ✅ Panneau d'administration : comptes, modérateurs, signalements, journal ; médias de la
    fiche (convention `store/`) ; stockage R2 (CDN + liens signés).
-5. Écran Magasin dans Island + `island publish` dans le SDK.
+5. ✅ Écran Magasin dans Island (catalogue, fiche, installation), connexion GitHub, publication
+   depuis l'éditeur, `island login` / `publish` dans le SDK.
 6. Extensions : types autorisés, file de modération (fichiers, différences), signature du
    magasin, état `Store` dans l'app, mises à jour.
 7. Production : Neon, R2, ClamAV, déploiement, CI.
