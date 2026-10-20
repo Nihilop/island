@@ -327,12 +327,13 @@ async function saveAndApply() {
 }
 
 const sharing = ref(false);
-/** Partager : enregistre la scène (si besoin) puis l'écrit dans un `.islandscene`. */
+/** Partager : enregistre la scène (rendu de la vignette compris) puis l'écrit dans un
+ * `.islandscene`. */
 async function share() {
   if (sharing.value) return;
   sharing.value = true;
   try {
-    if ((dirty.value || isNew.value) && !(await save())) return;
+    if (!(await save())) return;
     await exportScene(id.value, scene.value.name);
   } catch (e) {
     error.value = shareError(e);
@@ -341,8 +342,10 @@ async function share() {
   }
 }
 
-/** Avant la publication au magasin : la scène doit être enregistrée (c'est elle qui part). */
-const prepareForStore = async () => (dirty.value || isNew.value ? save() : true);
+/** Avant la publication au magasin : enregistrée, avec un rendu à jour de la scène (la
+ * vignette). Toujours, même sans modification : une scène enregistrée avant l'arrivée des
+ * vignettes n'en a pas, et le magasin retomberait sur une vignette approchée. */
+const prepareForStore = () => save();
 
 async function close() {
   if (dirty.value && !window.confirm(t("wall.discard"))) return;

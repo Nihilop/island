@@ -163,27 +163,117 @@ pub fn write<W: Write + Seek>(writer: W, scene: &Scene, files: &[(String, Vec<u8
     Ok(())
 }
 
-/// Vignette 480 × 270 : le calque de fond (le plus bas des calques visibles), image
-/// recadrée ou couleur / dégradé. `image` charge un fichier de la scène par son nom.
+/// Vignette 480 × 270 approchée, quand la scène n'a pas de rendu de l'éditeur : les calques
+/// visibles composés de bas en haut (couleurs, dégradés, images placées), avec opacité,
+/// masque, mode de fusion et vignettage ; sans les particules ni les effets animés. `image`
+/// charge un fichier de la scène par son nom.
 pub fn thumbnail(s: &Scene, image: impl Fn(&str) -> Option<image::DynamicImage>) -> image::RgbaImage {
     let (w, h) = (480u32, 270u32);
-    let bottom = s.layers.iter().find(|l| l.visible && (l.kind == "fill" || (l.kind == "image" && l.image.is_some())));
-    if let Some(l) = bottom.filter(|l| l.kind == "image") {
-        if let Some(img) = l.image.as_deref().and_then(&image) {
-            return img.resize_to_fill(w, h, image::imageops::FilterType::Triangle).to_rgba8();
+    let mut px = vec![[0f32; 3]; (w * h) as usize];
+    // De bas (`layers[0]`) en haut, comme le moteur ; les particules (animées) sont ignorées.
+    for l in s.layers.iter().filter(|l| l.visible && l.opacity > 0.0) {
+        let opacity = l.opacity.clamp(0.0, 1.0);
+        match l.kind.as_str() {
+            "fill" => {
+                let mask = l.mask.as_deref().and_then(&image).map(|m| m.resize_exact(w, h, image::imageops::FilterType::Triangle).to_luma8());
+                let color = fill_color(&l.fill);
+                for y in 0..h {
+                    for x in 0..w {
+                        let a = opacity * mask.as_ref().map_or(1.0, |m| m.get_pixel(x, y).0[0] as f32 / 255.0);
+                        let c = color(x as f32 / w as f32, y as f32 / h as f32);
+                        blend(&mut px[(y * w + x) as usize], c, a, &l.blend);
+                    }
+                }
+            }
+            "image" => {
+                let Some(img) = l.image.as_deref().and_then(&image) else { continue };
+                let (cx, cy, hw, hh) = place(&l.transform, w as f32, h as f32, img.width() as f32, img.height() as f32);
+                let (bw, bh) = ((hw * 2.0).round().max(1.0) as u32, (hh * 2.0).round().max(1.0) as u32);
+                if bw > w * 6 || bh > h * 6 {
+                    continue;
+                }
+                let tex = img.resize_exact(bw, bh, image::imageops::FilterType::Triangle).to_rgba8();
+                let mask = l.mask.as_deref().and_then(&image).map(|m| m.resize_exact(bw, bh, image::imageops::FilterType::Triangle).to_luma8());
+                let (x0, y0) = ((cx - hw).round() as i64, (cy - hh).round() as i64);
+                for ty in 0..bh {
+                    let y = y0 + ty as i64;
+                    if y < 0 || y >= h as i64 {
+                        continue;
+                    }
+                    for tx in 0..bw {
+                        let x = x0 + tx as i64;
+                        if x < 0 || x >= w as i64 {
+                            continue;
+                        }
+                        let p = tex.get_pixel(tx, ty).0;
+                        let m = mask.as_ref().map_or(1.0, |m| m.get_pixel(tx, ty).0[0] as f32 / 255.0);
+                        let a = p[3] as f32 / 255.0 * opacity * m;
+                        if a > 0.0 {
+                            let c = [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0];
+                            blend(&mut px[(y as u32 * w + x as u32) as usize], c, a, &l.blend);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    let fill = bottom.filter(|l| l.kind == "fill").map(|l| l.fill.clone()).unwrap_or_default();
+    // Vignettage de la scène, comme le rendu final.
+    let vignette = s.vignette.unwrap_or(0.0).clamp(0.0, 1.0);
+    image::RgbaImage::from_fn(w, h, |x, y| {
+        let c = px[(y * w + x) as usize];
+        let (dx, dy) = (x as f32 / w as f32 - 0.5, y as f32 / h as f32 - 0.5);
+        let v = 1.0 - vignette * ((dx * dx + dy * dy).sqrt() * 1.4).powf(2.0).min(1.0);
+        let q = |i: usize| ((c[i] * v).clamp(0.0, 1.0) * 255.0).round() as u8;
+        image::Rgba([q(0), q(1), q(2), 255])
+    })
+}
+
+/// Couleur d'un calque couleur / dégradé en (u, v) ∈ [0,1]² (0° = vers la droite).
+fn fill_color(fill: &scene::Fill) -> impl Fn(f32, f32) -> [f32; 3] {
     let (a, b) = (scene::hex(&fill.colors[0]), scene::hex(&fill.colors[1]));
     let solid = fill.mode == "solid";
     let ang = fill.angle.to_radians();
     let (dx, dy) = (ang.cos(), ang.sin());
-    image::RgbaImage::from_fn(w, h, |x, y| {
-        let g = if solid { 0.0 } else { (((x as f32 / w as f32 - 0.5) * dx + (y as f32 / h as f32 - 0.5) * dy) + 0.5).clamp(0.0, 1.0) };
+    move |u, v| {
+        let g = if solid { 0.0 } else { ((u - 0.5) * dx + (v - 0.5) * dy + 0.5).clamp(0.0, 1.0) };
         let g = g * g * (3.0 - 2.0 * g);
-        let c = |i: usize| ((a[i] + (b[i] - a[i]) * g) * 255.0) as u8;
-        image::Rgba([c(0), c(1), c(2), 255])
-    })
+        [a[0] + (b[0] - a[0]) * g, a[1] + (b[1] - a[1]) * g, a[2] + (b[2] - a[2]) * g]
+    }
+}
+
+/// Boîte d'un calque image (centre, demi-tailles), comme `scene.ts::layerBox` sans parallaxe.
+fn place(t: &scene::Transform, w: f32, h: f32, iw: f32, ih: f32) -> (f32, f32, f32, f32) {
+    let (iw, ih) = (iw.max(1.0), ih.max(1.0));
+    match t.fit.as_str() {
+        "cover" | "contain" => {
+            let k = if t.fit == "cover" { (w / iw).max(h / ih) } else { (w / iw).min(h / ih) };
+            (w * 0.5, h * 0.5, iw * k * 0.5, ih * k * 0.5)
+        }
+        "free" => {
+            let hw = t.width.clamp(0.01, 4.0) * w * 0.5;
+            let hh = hw * ih / iw;
+            let a = &t.anchor;
+            let ax = if a.ends_with('l') { 0.0 } else if a.ends_with('r') { 1.0 } else { 0.5 };
+            let ay = if a.starts_with('t') { 0.0 } else if a.starts_with('b') { 1.0 } else { 0.5 };
+            (ax * w + t.x.clamp(-2.0, 2.0) * w + (0.5 - ax) * 2.0 * hw, ay * h + t.y.clamp(-2.0, 2.0) * h + (0.5 - ay) * 2.0 * hh, hw, hh)
+        }
+        _ => (w * 0.5, h * 0.5, w * 0.5, h * 0.5),
+    }
+}
+
+/// Mélange `src` (opacité `a`) sur `dst` selon le mode de fusion du calque.
+fn blend(dst: &mut [f32; 3], src: [f32; 3], a: f32, mode: &str) {
+    for i in 0..3 {
+        let (d, s) = (dst[i], src[i]);
+        let r = match mode {
+            "add" => (d + s).min(1.0),
+            "screen" => 1.0 - (1.0 - d) * (1.0 - s),
+            "multiply" => d * s,
+            _ => s,
+        };
+        dst[i] = d + (r - d) * a;
+    }
 }
 
 /// PNG d'une image (vignette).
@@ -221,6 +311,25 @@ mod tests {
 
     fn tiny_png() -> Vec<u8> {
         png(&image::RgbaImage::from_pixel(2, 2, image::Rgba([1, 2, 3, 255]))).unwrap()
+    }
+
+    #[test]
+    fn thumbnail_composites_layers_bottom_up() {
+        use crate::scene::{Layer, Scene};
+        let fill = Layer { kind: "fill".into(), fill: crate::scene::Fill { mode: "solid".into(), colors: ["#ff0000".into(), "#ff0000".into()], angle: 0.0 }, ..Default::default() };
+        let mut img = Layer { kind: "image".into(), image: Some("demon.png".into()), ..Default::default() };
+        img.transform.fit = "contain".into();
+        let s = Scene { layers: vec![fill, img], ..Default::default() };
+        // Image carrée bleue en « contain » : bleu au centre, fond rouge sur les côtés.
+        let t = thumbnail(&s, |n| (n == "demon.png").then(|| image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(10, 10, image::Rgba([0, 0, 255, 255])))));
+        assert_eq!(t.get_pixel(240, 135).0, [0, 0, 255, 255]);
+        assert_eq!(t.get_pixel(10, 135).0, [255, 0, 0, 255]);
+        // Un calque à moitié transparent par-dessus laisse voir ce qu'il y a dessous.
+        let mut top = Layer { kind: "fill".into(), opacity: 0.5, ..Default::default() };
+        top.fill = crate::scene::Fill { mode: "solid".into(), colors: ["#000000".into(), "#000000".into()], angle: 0.0 };
+        let s = Scene { layers: vec![s.layers[0].clone(), s.layers[1].clone(), top], ..Default::default() };
+        let t = thumbnail(&s, |n| (n == "demon.png").then(|| image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(10, 10, image::Rgba([0, 0, 255, 255])))));
+        assert_eq!(t.get_pixel(240, 135).0, [0, 0, 128, 255]);
     }
 
     fn manifest() -> Vec<u8> {

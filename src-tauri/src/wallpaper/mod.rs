@@ -102,7 +102,7 @@ fn load(app: &AppHandle, id: &str) -> Result<(Scene, Option<PathBuf>), String> {
 pub struct Entry {
     pub(crate) id: String,
     preset: bool,
-    /// Rendu enregistré par l'éditeur (`wallpaper_thumbnail`) ; sinon, vignette approchée.
+    /// Vignette disponible (`wallpaper_thumbnail` : rendu de l'éditeur, sinon calques composés).
     thumbnail: bool,
     scene: Scene,
     /// Modification (ms) ; 0 pour un préréglage.
@@ -111,7 +111,7 @@ pub struct Entry {
 
 #[tauri::command]
 pub fn wallpaper_list(app: AppHandle) -> Result<Vec<Entry>, String> {
-    let mut out: Vec<Entry> = scene::presets().into_iter().map(|(id, scene)| Entry { id: id.into(), preset: true, thumbnail: false, scene, updated: 0 }).collect();
+    let mut out: Vec<Entry> = scene::presets().into_iter().map(|(id, scene)| Entry { id: id.into(), preset: true, thumbnail: true, scene, updated: 0 }).collect();
     let dir = scenes_dir(&app)?;
     let mut mine = Vec::new();
     for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -124,8 +124,7 @@ pub fn wallpaper_list(app: AppHandle) -> Result<Vec<Entry>, String> {
             Ok(m) => {
                 if let Ok((scene, _)) = load(&app, &id) {
                     let updated = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    let thumbnail = e.path().join(SNAPSHOT).is_file();
-                    mine.push(Entry { id, preset: false, thumbnail, scene, updated });
+                    mine.push(Entry { id, preset: false, thumbnail: true, scene, updated });
                 }
             }
             // Brouillon jamais enregistré (image importée puis éditeur fermé) : ménage après 1 jour.
@@ -251,11 +250,22 @@ pub fn wallpaper_save_thumbnail(app: AppHandle, id: String, data: String) -> Res
     Ok(())
 }
 
-/// Rendu enregistré de la scène (cartes de l'outil, écrans).
+/// Vignette de la scène (cartes de l'outil, écrans) : le rendu enregistré par l'éditeur ;
+/// à défaut (préréglage, scène ancienne), les calques composés (`islandscene::thumbnail`).
 #[tauri::command]
-pub fn wallpaper_thumbnail(app: AppHandle, id: String) -> Result<tauri::ipc::Response, String> {
-    let bytes = std::fs::read(scene_dir(&app, &id)?.join(SNAPSHOT)).map_err(|_| "notFound")?;
-    Ok(tauri::ipc::Response::new(bytes))
+pub async fn wallpaper_thumbnail(app: AppHandle, id: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !is_preset(&id) {
+            if let Ok(bytes) = std::fs::read(scene_dir(&app, &id)?.join(SNAPSHOT)) {
+                return Ok(tauri::ipc::Response::new(bytes));
+            }
+        }
+        let (s, dir) = load(&app, &id)?;
+        let thumb = island_formats::islandscene::thumbnail(&s, |f| dir.as_ref().and_then(|d| image::open(d.join(f)).ok()));
+        Ok(tauri::ipc::Response::new(island_formats::islandscene::png(&thumb)?))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Octets d'une image ou d'un masque de la scène (aperçu, vignettes).
