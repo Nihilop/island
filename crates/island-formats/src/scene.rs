@@ -10,7 +10,10 @@
 use serde::{Deserialize, Serialize};
 
 
-pub const VERSION: u32 = 1;
+/// Version la plus récente que cette build sait lire. Une scène porte la version minimale
+/// qu'il faut pour la lire (`Scene::required_version`) : 2 dès qu'elle contient une vidéo
+/// ou un texte, sinon 1 — une scène sans vidéo reste lisible par les versions plus anciennes d'Island.
+pub const VERSION: u32 = 2;
 pub const MAX_LAYERS: usize = 16;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -41,7 +44,7 @@ pub struct Layer {
     /// Identifiant dans la scène (`[a-z0-9-]`).
     pub id: String,
     pub name: String,
-    /// "image" | "fill" | "particles".
+    /// "image" | "video" | "text" | "fill" | "particles".
     pub kind: String,
     pub visible: bool,
     /// Verrouillé dans l'éditeur (ni sélection sur l'aperçu, ni déplacement).
@@ -59,6 +62,13 @@ pub struct Layer {
     pub mask: Option<String>,
     pub fill: Fill,
     pub particles: Option<Particles>,
+    /// Vidéo en boucle (MP4 / WebM, sans le son ; nom simple dans le dossier de la scène).
+    pub video: Option<String>,
+    pub playback: Playback,
+    /// Texte (contenu avec variables `{time}`…, style) ; placé comme une image « libre ».
+    pub text: Option<TextStyle>,
+    /// Visible seulement quand… (moment de la journée réel, heures, ciel) ; None = toujours.
+    pub when: Option<When>,
     pub transform: Transform,
     pub effects: LayerEffects,
 }
@@ -78,6 +88,10 @@ impl Default for Layer {
             mask: None,
             fill: Fill::default(),
             particles: None,
+            video: None,
+            playback: Playback::default(),
+            text: None,
+            when: None,
             transform: Transform::default(),
             effects: LayerEffects::default(),
         }
@@ -279,6 +293,147 @@ impl Default for Trail {
 // --- Validation --------------------------------------------------------------------------
 
 /// Nom de fichier simple (pas de chemin) avec une extension d'image.
+/// Lecture d'un calque vidéo : vitesse, et début de la boucle (les secondes avant sont
+/// sautées, à chaque tour).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Playback {
+    /// 0.25..4
+    pub speed: f32,
+    /// Secondes, ≥ 0.
+    pub start: f32,
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self { speed: 1.0, start: 0.0 }
+    }
+}
+
+/// Style d'un calque texte. Les tailles sont relatives à la hauteur de l'écran (la police)
+/// ou à la taille de la police (contour, ombre) : le rendu est le même sur tout écran.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TextStyle {
+    /// Texte, avec variables : `{time}`, `{date:EEEE d MMMM}`, `{time@Europe/Paris}`,
+    /// `{weather.temp}`… ; `{{` et `}}` pour des accolades.
+    pub content: String,
+    /// Famille de police installée (sinon la police par défaut du système).
+    pub font: String,
+    /// 100..900
+    pub weight: u16,
+    pub italic: bool,
+    /// Taille de la police, en fraction de la hauteur de l'écran.
+    pub size: f32,
+    pub color: String,
+    /// "left" | "center" | "right"
+    pub align: String,
+    /// Interlignage (× la taille).
+    pub line_height: f32,
+    /// Espacement des lettres (em).
+    pub letter_spacing: f32,
+    pub uppercase: bool,
+    /// Épaisseur du contour (fraction de la taille ; 0 = aucun).
+    pub outline: f32,
+    pub outline_color: String,
+    pub shadow: Option<TextShadow>,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            content: "{time}".into(),
+            font: String::new(),
+            weight: 600,
+            italic: false,
+            size: 0.12,
+            color: "#ffffff".into(),
+            align: "center".into(),
+            line_height: 1.15,
+            letter_spacing: 0.0,
+            uppercase: false,
+            outline: 0.0,
+            outline_color: "#000000".into(),
+            shadow: None,
+        }
+    }
+}
+
+/// Ombre (ou lueur, sans décalage) d'un texte ; flou et décalage en fraction de la taille.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TextShadow {
+    pub color: String,
+    pub opacity: f32,
+    pub blur: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Default for TextShadow {
+    fn default() -> Self {
+        Self { color: "#000000".into(), opacity: 0.6, blur: 0.08, x: 0.0, y: 0.04 }
+    }
+}
+
+pub const MAX_TEXT: usize = 500;
+
+/// Condition d'affichage d'un calque. Tous les critères renseignés doivent être vrais ; le
+/// calque apparaît et disparaît en fondu (`fade` secondes).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct When {
+    /// "dawn" | "day" | "dusk" | "night", d'après le vrai lever / coucher du soleil (vide =
+    /// tout moment). Ignoré si `from` / `to` sont donnés.
+    pub moments: Vec<String>,
+    /// Plage horaire précise « HH:MM » (heure locale ; elle peut passer minuit).
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// "clear" | "cloudy" | "fog" | "rain" | "snow" | "storm" (météo réelle ; vide = tout ciel).
+    pub sky: Vec<String>,
+    /// Durée du fondu, en secondes.
+    pub fade: f32,
+}
+
+impl Default for When {
+    fn default() -> Self {
+        Self { moments: Vec::new(), from: None, to: None, sky: Vec::new(), fade: 3.0 }
+    }
+}
+
+pub const MOMENTS: &[&str] = &["dawn", "day", "dusk", "night"];
+pub const SKIES: &[&str] = &["clear", "cloudy", "fog", "rain", "snow", "storm"];
+
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm"];
+
+fn simple_name(n: &str) -> bool {
+    !n.is_empty() && n.len() <= 80 && !n.contains(['/', '\\', ':']) && !n.starts_with('.')
+}
+
+fn extension(n: &str) -> String {
+    n.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
+}
+
+/// Nom d'une vidéo de calque.
+pub fn valid_video_name(n: &str) -> bool {
+    simple_name(n) && VIDEO_EXTENSIONS.contains(&extension(n).as_str())
+}
+
+/// Nom d'un fichier de scène : image, masque ou vidéo.
+pub fn valid_file_name(n: &str) -> bool {
+    valid_image_name(n) || valid_video_name(n)
+}
+
+/// Le contenu est bien une vidéo du format annoncé par son nom (signature du conteneur) :
+/// MP4 (`ftyp` à l'octet 4) ou WebM (en-tête EBML).
+pub fn is_video(name: &str, bytes: &[u8]) -> bool {
+    match extension(name).as_str() {
+        "mp4" => bytes.len() > 12 && &bytes[4..8] == b"ftyp",
+        "webm" => bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        _ => false,
+    }
+}
+
 pub fn valid_image_name(n: &str) -> bool {
     let ext = n.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     !n.is_empty() && n.len() <= 80 && !n.contains(['/', '\\', ':']) && !n.starts_with('.') && ["png", "jpg", "jpeg", "webp", "bmp", "gif"].contains(&ext.as_str())
@@ -304,8 +459,22 @@ impl Scene {
             if !valid_layer_id(&l.id) || l.name.chars().count() > 80 {
                 return Err("invalidLayer".into());
             }
+            if let Some(w) = &l.when {
+                let hhmm = |v: &Option<String>| v.as_deref().is_none_or(|t| t.is_empty() || t.len() <= 5 && t.split_once(':').is_some_and(|(h, m)| h.parse::<u8>().is_ok_and(|h| h < 24) && m.parse::<u8>().is_ok_and(|m| m < 60)));
+                let known = w.moments.iter().all(|m| MOMENTS.contains(&m.as_str())) && w.sky.iter().all(|k| SKIES.contains(&k.as_str()));
+                if !known || !hhmm(&w.from) || !hhmm(&w.to) {
+                    return Err("invalidCondition".into());
+                }
+            }
+            if let Some(t) = &l.text {
+                if t.content.chars().count() > MAX_TEXT || t.font.chars().count() > 80 {
+                    return Err("invalidText".into());
+                }
+            }
             for f in l.files() {
-                if !valid_image_name(f) {
+                // La vidéo d'un calque est une vidéo, tout le reste (image, masques) une image.
+                let ok = if Some(f) == l.video.as_ref() { valid_video_name(f) } else { valid_image_name(f) };
+                if !ok {
                     return Err("invalidImage".into());
                 }
             }
@@ -313,17 +482,28 @@ impl Scene {
         Ok(())
     }
 
-    /// Fichiers référencés par les calques (images et masques).
+    /// Fichiers référencés par les calques (images, masques et vidéos).
     pub fn images(&self) -> impl Iterator<Item = &String> {
         self.layers.iter().flat_map(|l| l.files())
+    }
+
+    /// Vidéos des calques.
+    pub fn videos(&self) -> impl Iterator<Item = &String> {
+        self.layers.iter().filter_map(|l| l.video.as_ref())
+    }
+
+    /// Version minimale d'Island pour lire cette scène (cf. `VERSION`).
+    pub fn required_version(&self) -> u32 {
+        if self.layers.iter().any(|l| l.kind == "video" || l.kind == "text" || l.when.is_some()) { 2 } else { 1 }
     }
 }
 
 impl Layer {
-    /// Image, masque du calque, masques des effets.
+    /// Image, vidéo, masque du calque, masques des effets.
     pub fn files(&self) -> impl Iterator<Item = &String> {
         [
             self.image.as_ref(),
+            self.video.as_ref(),
             self.mask.as_ref(),
             self.effects.water.as_ref().and_then(|w| w.mask.as_ref()),
             self.effects.heat.as_ref().and_then(|h| h.mask.as_ref()),

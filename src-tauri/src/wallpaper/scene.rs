@@ -61,12 +61,22 @@ pub fn layer_box(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [f32; 4] {
     }
     let (iw, ih) = (tex.0.max(1.0), tex.1.max(1.0));
     let t = &l.transform;
+    // Une vidéo se place comme une image.
+    let media = l.kind == "image" || l.kind == "video";
     match t.fit.as_str() {
-        "contain" | "cover" if l.kind == "image" => {
+        "contain" | "cover" if media => {
             let k = if t.fit == "cover" { (w / iw).max(h / ih) } else { (w / iw).min(h / ih) } * zoom;
             [w * 0.5 + ox, h * 0.5 + oy, iw * k * 0.5, ih * k * 0.5]
         }
-        "free" if l.kind == "image" => {
+        // Texte : placé librement, à sa taille naturelle (image faite à la hauteur de l'écran).
+        _ if l.kind == "text" => {
+            let (hw, hh) = (iw * 0.5 * zoom, ih * 0.5 * zoom);
+            let (ax, ay) = anchor(&t.anchor);
+            let cx = ax * w + c01(t.x, -2.0, 2.0) * w + (0.5 - ax) * 2.0 * hw;
+            let cy = ay * h + c01(t.y, -2.0, 2.0) * h + (0.5 - ay) * 2.0 * hh;
+            [cx + ox, cy + oy, hw, hh]
+        }
+        "free" if media => {
             let hw = c01(t.width, 0.01, 4.0) * w * 0.5 * zoom;
             let hh = hw * ih / iw;
             let (ax, ay) = anchor(&t.anchor);
@@ -79,19 +89,24 @@ pub fn layer_box(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [f32; 4] {
     }
 }
 
-pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [[f32; 4]; LAYER_VEC4S] {
+/// `presence` : 0..1, fondu d'un calque qui apparaît ou disparaît selon sa condition.
+pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32), presence: f32) -> [[f32; 4]; LAYER_VEC4S] {
     let mut u = [[0f32; 4]; LAYER_VEC4S];
     let kind = match l.kind.as_str() {
+        // Le shader dessine une vidéo comme une image : seule sa texture change à chaque image.
         "image" if l.image.is_some() => 0.0,
+        "video" if l.video.is_some() => 0.0,
+        "text" if l.text.is_some() => 0.0,
         "particles" if l.particles.is_some() => 3.0,
         "fill" if l.fill.mode == "solid" => 1.0,
         _ => 2.0,
     };
     // Bords étendus : les calques plein écran ne laissent jamais voir de vide sur les bords.
-    let edges = if matches!(l.transform.fit.as_str(), "cover" | "stretch") { 1.0 } else { 0.0 };
-    let rotation = if l.transform.fit == "free" { c01(l.transform.rotation, -360.0, 360.0).to_radians() } else { 0.0 };
+    let edges = if l.kind != "text" && matches!(l.transform.fit.as_str(), "cover" | "stretch") { 1.0 } else { 0.0 };
+    let placed = l.transform.fit == "free" || l.kind == "text";
+    let rotation = if placed { c01(l.transform.rotation, -360.0, 360.0).to_radians() } else { 0.0 };
     u[0] = [f.width, f.height, tex.0.max(1.0), tex.1.max(1.0)];
-    u[1] = [f.time, kind, c01(l.opacity, 0.0, 1.0), edges];
+    u[1] = [f.time, kind, c01(l.opacity, 0.0, 1.0) * presence.clamp(0.0, 1.0), edges];
     u[2] = layer_box(s, l, f, tex);
     u[3] = [rotation, c01(l.fill.angle, -360.0, 360.0).to_radians(), f.height / 1080.0, 0.0];
     let (a, b) = (hex(&l.fill.colors[0]), hex(&l.fill.colors[1]));

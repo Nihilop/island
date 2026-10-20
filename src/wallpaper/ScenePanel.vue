@@ -4,9 +4,16 @@
 import { Switch } from "@/sdk/ui/switch";
 import Param from "./Param.vue";
 import { DEFAULTS, type Scene } from "./scene";
+import Select from "../ui/Select.vue";
+import { MOMENTS, SKIES, real, simulation, type Moment, type Sky } from "./conditions";
 import { t } from "../notch/i18n";
 
 const props = defineProps<{ scene: Scene }>();
+
+/** Aperçu des conditions : la scène telle qu'elle serait à un autre moment / sous un autre ciel. */
+const momentOptions = [{ value: "", label: t("wall.sim.real") }, ...MOMENTS.map((m) => ({ value: m, label: t(`wall.when.m.${m}`) }))];
+const skyOptions = [{ value: "", label: t("wall.sim.real") }, ...SKIES.map((k) => ({ value: k, label: t(`wall.when.s.${k}`) }))];
+const usesConditions = () => props.scene.layers.some((l) => l.when);
 
 type Key = "parallax" | "color" | "grain" | "vignette" | "ripple" | "trail";
 function isOn(k: Key): boolean {
@@ -97,6 +104,23 @@ function setOn(k: Key, on: boolean) {
             <input v-model="scene.interactions.trail.color" type="color" class="h-6 w-10 cursor-pointer rounded-[6px] bg-transparent" />
           </div>
         </div>
+      </div>
+    </section>
+
+    <section v-if="usesConditions()" class="space-y-1">
+      <h3 class="type-caption font-medium uppercase text-label-3">{{ t("wall.sim.title") }}</h3>
+      <div class="rounded-[10px] bg-fill-1 px-3 py-2">
+        <div class="flex items-center gap-3 py-1">
+          <span class="type-footnote w-[92px] shrink-0 text-label-2">{{ t("wall.sim.moment") }}</span>
+          <Select :model-value="simulation.moment ?? ''" :options="momentOptions" @update:model-value="simulation.moment = ($event || null) as Moment | null" />
+        </div>
+        <div class="flex items-center gap-3 py-1">
+          <span class="type-footnote w-[92px] shrink-0 text-label-2">{{ t("wall.sim.sky") }}</span>
+          <Select :model-value="simulation.sky ?? ''" :options="skyOptions" @update:model-value="simulation.sky = ($event || null) as Sky | null" />
+        </div>
+        <p class="type-caption pt-1 text-label-3">
+          {{ t("wall.sim.realNow", { moment: real.now ? t(`wall.when.m.${real.now.moment}`) : "—", sky: real.now?.sky ? t(`wall.when.s.${real.now.sky}`) : t("wall.sim.unknown") }) }}
+        </p>
       </div>
     </section>
   </div>

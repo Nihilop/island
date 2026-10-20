@@ -8,6 +8,9 @@
 //   2. la passe finale vers la fenêtre (ondulations, traînée, couleur, vignette, grain) —
 //      `composite.wgsl`.
 //
+// Vidéos de calques : un lecteur Media Foundation par fichier (`video.rs`), sur son fil ;
+// la dernière image décodée est copiée dans la texture du calque avant chaque rendu.
+//
 // Économie : pause d'un écran couvert par une fenêtre maximisée / plein écran, pause de
 // tous pendant une app plein écran (détection de l'hôte) ou un jeu (service Activité) ;
 // aucune image n'est alors calculée. La souris est LUE à chaque image (pas de hook) et
@@ -297,12 +300,75 @@ fn file_tex<'a>(textures: &'a Textures, sc: &Loaded, f: Option<&String>) -> Opti
 
 fn load_textures(gpu: &Gpu, sc: &Loaded, textures: &mut Textures) {
     let Some(dir) = &sc.dir else { return };
-    for f in sc.scene.images() {
+    for f in sc.scene.images().filter(|f| !scene::valid_video_name(f)) {
         let key = format!("{}/{f}", sc.id);
         if !textures.contains_key(&key) {
             if let Some(t) = gpu.image(&dir.join(f)) {
                 textures.insert(key, t);
             }
+        }
+    }
+}
+
+/// Vidéo d'un calque : son lecteur et la texture qu'il remplit (même clé que `Textures`).
+struct Video {
+    player: super::video::Player,
+    tex: wgpu::Texture,
+}
+
+type Videos = HashMap<String, Video>;
+
+/// Lecteurs des vidéos des scènes affichées : ceux déjà ouverts sont gardés, les autres
+/// ouverts ; leur texture rejoint `textures` (lue comme une image par les calques).
+fn load_videos(gpu: &Gpu, sc: &Loaded, old: &mut Videos, videos: &mut Videos, textures: &mut Textures) {
+    let Some(dir) = &sc.dir else { return };
+    for l in sc.scene.layers.iter().filter(|l| l.kind == "video") {
+        let Some(f) = &l.video else { continue };
+        let key = format!("{}/{f}", sc.id);
+        if videos.contains_key(&key) {
+            continue;
+        }
+        let v = match old.remove(&key) {
+            Some(v) => v,
+            None => match super::video::Player::open(&dir.join(f), &l.playback) {
+                Ok(player) => {
+                    let size = wgpu::Extent3d { width: player.width, height: player.height, depth_or_array_layers: 1 };
+                    let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("video"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        // RGB32 de Media Foundation = BGRA en mémoire.
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    Video { player, tex }
+                }
+                Err(e) => {
+                    eprintln!("[wallpaper] vidéo {f} : {e}");
+                    continue;
+                }
+            },
+        };
+        let size = (v.player.width as f32, v.player.height as f32);
+        textures.insert(key.clone(), (v.tex.create_view(&Default::default()), size));
+        videos.insert(key, v);
+    }
+}
+
+/// Copie la dernière image de chaque vidéo dans sa texture (rien si elle n'a pas changé).
+fn upload_videos(gpu: &Gpu, videos: &Videos) {
+    for v in videos.values() {
+        if let Some(frame) = v.player.take() {
+            let (w, h) = (v.player.width, v.player.height);
+            gpu.queue.write_texture(
+                wgpu::TexelCopyTextureInfo { texture: &v.tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                &frame,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            );
         }
     }
 }
@@ -346,6 +412,14 @@ struct LayerGpu {
     uniforms: wgpu::Buffer,
     bind: wgpu::BindGroup,
     tex: (f32, f32),
+    /// Masques du calque (pour refaire son groupe quand sa texture change : texte).
+    masks: [wgpu::TextureView; 3],
+}
+
+/// Texte d'un calque sur un écran : la valeur affichée et sa texture.
+struct TextGpu {
+    shown: String,
+    _tex: wgpu::Texture,
 }
 
 /// Un écran : sa scène, sa fenêtre enfant du calque, sa surface, son image intermédiaire et
@@ -362,6 +436,11 @@ struct Output {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     paused: bool,
+    /// Textes des calques texte (par indice de calque), refaits quand leur valeur change.
+    texts: HashMap<usize, TextGpu>,
+    /// Conditions « Visible quand… » : cible (visible ou non) et fondu en cours, par calque.
+    targets: Vec<bool>,
+    presence: Vec<f32>,
     _win: Win,
 }
 
@@ -373,7 +452,12 @@ impl Output {
             .layers
             .iter()
             .map(|l| {
-                let t = if l.kind == "image" { file_tex(textures, sc, l.image.as_ref()) } else { None }.unwrap_or(&gpu.blank);
+                let t = match l.kind.as_str() {
+                    "image" => file_tex(textures, sc, l.image.as_ref()),
+                    "video" => file_tex(textures, sc, l.video.as_ref()),
+                    _ => None,
+                }
+                .unwrap_or(&gpu.blank);
                 let mask = |f: Option<&String>| &file_tex(textures, sc, f).unwrap_or(&gpu.white).0;
                 let masks = [
                     mask(l.mask.as_ref()),
@@ -382,10 +466,50 @@ impl Output {
                 ];
                 let uniforms = gpu.buffer(scene::LAYER_VEC4S);
                 let bind = gpu.bind_layer(&uniforms, &t.0, masks);
-                LayerGpu { uniforms, bind, tex: t.1 }
+                LayerGpu { uniforms, bind, tex: t.1, masks: masks.map(|m| m.clone()) }
             })
             .collect();
         self.scene = sc.scene.clone();
+        self.texts.clear();
+        // Conditions : état tout de suite, sans fondu au chargement.
+        let now = super::conditions::now();
+        self.targets = self.scene.layers.iter().map(|l| l.when.as_ref().is_none_or(|w| super::conditions::visible(w, &now))).collect();
+        self.presence = self.targets.iter().map(|&t| if t { 1.0 } else { 0.0 }).collect();
+    }
+
+    /// Conditions : nouvelles cibles (si `now`), puis fondu vers elles (`dt` secondes).
+    fn update_conditions(&mut self, now: Option<&super::conditions::Now>, dt: f32) {
+        for (i, l) in self.scene.layers.iter().enumerate() {
+            let Some(w) = &l.when else { continue };
+            if let Some(n) = now {
+                self.targets[i] = super::conditions::visible(w, n);
+            }
+            let step = if w.fade <= 0.05 { 1.0 } else { dt / w.fade };
+            let p = &mut self.presence[i];
+            *p = if self.targets[i] { (*p + step).min(1.0) } else { (*p - step).max(0.0) };
+        }
+    }
+
+    /// Calques texte : valeur recalculée ; image refaite (à la hauteur de cet écran) si elle a
+    /// changé.
+    fn update_texts(&mut self, gpu: &Gpu, now: chrono::DateTime<chrono::Utc>, fr: bool) {
+        let height = self.config.height as f32;
+        for (i, l) in self.scene.layers.iter().enumerate() {
+            let Some(style) = l.text.as_ref().filter(|_| l.kind == "text" && l.visible) else { continue };
+            let shown = super::text::resolve(&style.content, now, fr);
+            if self.texts.get(&i).is_some_and(|t| t.shown == shown) {
+                continue;
+            }
+            let r = super::text::raster(style, &shown, height);
+            let Some(img) = image::RgbaImage::from_raw(r.width, r.height, r.rgba) else { continue };
+            let (view, size) = gpu.upload(&img);
+            let g = &mut self.layers[i];
+            let masks = [&g.masks[0], &g.masks[1], &g.masks[2]];
+            g.bind = gpu.bind_layer(&g.uniforms, &view, masks);
+            g.tex = size;
+            // La vue garde la texture en vie ; on la garde aussi, par clarté.
+            self.texts.insert(i, TextGpu { shown, _tex: view.texture().clone() });
+        }
     }
 }
 
@@ -441,6 +565,9 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, sc: &Loaded, textures:
         surface,
         config,
         paused: false,
+        texts: HashMap::new(),
+        targets: Vec::new(),
+        presence: Vec::new(),
         _win: win,
     };
     o.set_scene(gpu, textures, sc);
@@ -460,9 +587,12 @@ fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
         }
         _ => return,
     };
-    for (l, g) in o.scene.layers.iter().zip(&o.layers) {
-        if l.visible {
-            gpu.queue.write_buffer(&g.uniforms, 0, bytes(&scene::pack_layer(&o.scene, l, f, g.tex)));
+    // Un calque masqué par sa condition (fondu terminé) n'est ni calculé ni dessiné.
+    let shown = |i: usize, l: &scene::Layer| l.visible && o.presence.get(i).is_none_or(|p| *p > 0.001);
+    for (i, (l, g)) in o.scene.layers.iter().zip(&o.layers).enumerate() {
+        if shown(i, l) {
+            let presence = o.presence.get(i).copied().unwrap_or(1.0);
+            gpu.queue.write_buffer(&g.uniforms, 0, bytes(&scene::pack_layer(&o.scene, l, f, g.tex, presence)));
         }
     }
     gpu.queue.write_buffer(&o.comp_uniforms, 0, bytes(&scene::pack_composite(&o.scene, f)));
@@ -478,8 +608,8 @@ fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        for (l, g) in o.scene.layers.iter().zip(&o.layers) {
-            if l.visible {
+        for (i, (l, g)) in o.scene.layers.iter().zip(&o.layers).enumerate() {
+            if shown(i, l) {
                 pass.set_pipeline(&gpu.layer_pipelines[scene::blend_index(&l.blend)]);
                 pass.set_bind_group(0, &g.bind, &[]);
                 pass.draw(0..3, 0..1);
@@ -541,7 +671,10 @@ struct Live {
     all: Option<Loaded>,
     screens: BTreeMap<String, Option<Loaded>>,
     textures: Textures,
+    videos: Videos,
     outputs: Vec<Output>,
+    /// Langue d'Island (noms des jours et des mois des textes), lue à chaque affectation.
+    fr: bool,
 }
 
 impl Live {
@@ -586,9 +719,11 @@ fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
     let mut kept = 0;
     let mut layer: Option<HWND> = None;
     let mut textures = std::mem::take(&mut l.textures);
+    let mut old_videos = std::mem::take(&mut l.videos);
+    let mut videos = Videos::new();
     let mut out = Vec::new();
     let screens = displays();
-    // Textures des scènes affichées seulement (les autres sont libérées).
+    // Textures et vidéos des scènes affichées seulement (les autres sont libérées).
     let mut used = Textures::new();
     for d in &screens {
         if let Some(sc) = l.resolve(d) {
@@ -599,8 +734,10 @@ fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
                 }
             }
             load_textures(gpu, sc, &mut used);
+            load_videos(gpu, sc, &mut old_videos, &mut videos, &mut used);
         }
     }
+    l.videos = videos;
     for d in screens {
         let Some(sc) = l.resolve(&d).cloned() else { continue };
         if let Some(i) = old.iter().position(|o| o.display == d) {
@@ -640,6 +777,9 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
     let mut trail: Vec<(i32, i32, f32)> = Vec::new();
     let mut was_down = false;
     let mut all_paused = false;
+    let mut last_text = Instant::now() - Duration::from_secs(1);
+    let mut last_cond = Instant::now();
+    let mut last_frame = Instant::now();
 
     loop {
         // Commandes : bloquant sans scène, sinon on regarde sans attendre.
@@ -667,9 +807,11 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
                     }
                 }
                 let g = gpu.as_ref().unwrap();
-                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), outputs: Vec::new() });
-                // Nouvelle affectation : images rechargées (elles ont pu changer).
+                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), videos: Videos::new(), outputs: Vec::new(), fr: true });
+                // Nouvelle affectation : images et vidéos rechargées (elles ont pu changer).
                 l.textures.clear();
+                l.videos.clear();
+                l.fr = super::text::french(&app);
                 l.all = all;
                 l.screens = screens;
                 match layout(g, &mut l) {
@@ -729,6 +871,9 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
             let p = l.outputs.iter().all(|o| o.paused);
             if p != all_paused {
                 all_paused = p;
+                for v in l.videos.values() {
+                    v.player.set_paused(p);
+                }
                 set_status(&app, Status { running: true, paused: p, error: None });
             }
         }
@@ -757,6 +902,27 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
         trail.retain(|(_, _, ts)| t - ts < max_fade + 0.1);
         ripples.retain(|(_, _, ts)| t - ts < 6.0);
 
+        upload_videos(g, &l.videos);
+        // Conditions : état réel une fois par seconde, fondus à chaque image.
+        let dt = last_frame.elapsed().as_secs_f32().min(0.5);
+        last_frame = Instant::now();
+        let cond_now = if last_cond.elapsed() >= Duration::from_secs(1) {
+            last_cond = Instant::now();
+            Some(super::conditions::now())
+        } else {
+            None
+        };
+        for o in l.outputs.iter_mut() {
+            o.update_conditions(cond_now.as_ref(), dt);
+        }
+        // Textes : valeurs recalculées 4 fois par seconde (refaits seulement s'ils changent).
+        if last_text.elapsed() >= Duration::from_millis(250) {
+            last_text = Instant::now();
+            let now = chrono::Utc::now();
+            for o in l.outputs.iter_mut().filter(|o| !o.paused) {
+                o.update_texts(g, now, l.fr);
+            }
+        }
         for o in l.outputs.iter_mut().filter(|o| !o.paused) {
             let (dx, dy) = (o.display.x, o.display.y);
             let local = |v: &[(i32, i32, f32)]| v.iter().map(|(x, y, ts)| ((x - dx) as f32, (y - dy) as f32, *ts)).collect::<Vec<_>>();

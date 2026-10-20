@@ -4,6 +4,8 @@
 // joue le rôle du curseur sur le bureau : parallaxe, traînée, ondulation au clic — sauf
 // quand l'éditeur la réserve au déplacement d'un calque (`interactive = false`).
 
+import { current as currentCond, refreshReal, visibleWhen } from "./conditions";
+import { invoke } from "@tauri-apps/api/core";
 import layerShader from "../../src-tauri/src/wallpaper/layer.wgsl?raw";
 import compositeShader from "../../src-tauri/src/wallpaper/composite.wgsl?raw";
 import { blendIndex, COMPOSITE_VEC4S, LAYER_VEC4S, maskNames, packComposite, packLayer, RIPPLES, TRAIL, type Frame, type Layer, type Scene } from "./scene";
@@ -47,12 +49,20 @@ export class Preview {
   private compBind: GPU = null;
   private layerRes = new Map<string, { uniforms: GPU; bind: GPU; key: string; tex: [number, number] }>();
   private images = new Map<string, Tex | "loading">();
+  /** Textes des calques : image rendue par le Rust (même rendu que le fond), par calque. */
+  private texts = new Map<string, { key: string; tex: Tex; at: number; busy: boolean }>();
+  /** Vidéos des calques : balise <video> en boucle, copiée dans sa texture à chaque image. */
+  private videos = new Map<string, { el: HTMLVideoElement; url: string; texture: GPU | null; tex: Tex | null; start: number }>();
   private raf = 0;
   private t0 = performance.now();
   private mouse: [number, number] | null = null;
   private ripples: [number, number, number][] = [];
   private trail: [number, number, number][] = [];
   private ro: ResizeObserver;
+  /** Conditions : fondu en cours par calque, et horloge des fondus. */
+  private presence = new Map<string, number>();
+  private lastFrame = performance.now();
+  private condTimer = 0;
   private off: (() => void)[] = [];
   /** La souris simule le bureau (sinon l'éditeur s'en sert pour déplacer un calque). */
   interactive = true;
@@ -62,6 +72,7 @@ export class Preview {
     device: GPU,
     private scene: Scene,
     private loadImage: (name: string) => Promise<ImageBitmap>,
+    private loadVideo: (name: string) => Promise<string>,
   ) {
     this.device = device;
     this.ctx = canvas.getContext("webgpu");
@@ -93,13 +104,21 @@ export class Preview {
   }
 
   /** null si WebGPU est indisponible (vieux pilote, WebView2 trop ancien). */
-  static async create(canvas: HTMLCanvasElement, scene: Scene, loadImage: (name: string) => Promise<ImageBitmap>): Promise<Preview | null> {
+  static async create(
+    canvas: HTMLCanvasElement,
+    scene: Scene,
+    loadImage: (name: string) => Promise<ImageBitmap>,
+    loadVideo: (name: string) => Promise<string>,
+  ): Promise<Preview | null> {
     const gpu = (navigator as any).gpu;
     if (!gpu) return null;
     const adapter = await gpu.requestAdapter({ powerPreference: "low-power" }).catch(() => null);
     const device = await adapter?.requestDevice().catch(() => null);
     if (!device) return null;
-    const p = new Preview(canvas, device, scene, loadImage);
+    const p = new Preview(canvas, device, scene, loadImage, loadVideo);
+    // État réel des conditions (moment, ciel), relu toutes les 15 s.
+    void refreshReal();
+    p.condTimer = window.setInterval(() => void refreshReal(), 15_000);
     p.loop();
     return p;
   }
@@ -108,16 +127,116 @@ export class Preview {
     this.scene = s;
   }
 
-  /** Oublie les images en cache (scène rechargée, image remplacée). */
+  /** Oublie les images et vidéos en cache (scène rechargée, image remplacée). */
   resetImages() {
     this.images.clear();
     this.layerRes.clear();
+    this.texts.clear();
+    this.dropVideos();
   }
 
-  /** Taille de l'image d'un calque (1×1 tant qu'elle n'est pas chargée). */
+  private dropVideos() {
+    for (const v of this.videos.values()) {
+      v.el.pause();
+      v.el.removeAttribute("src");
+      URL.revokeObjectURL(v.url);
+      v.texture?.destroy();
+    }
+    this.videos.clear();
+  }
+
+  /** Taille de l'image (ou de la vidéo) d'un calque (1×1 tant qu'elle n'est pas chargée). */
   texSize(l: Layer): [number, number] {
+    if (l.kind === "video") return (l.video && this.videos.get(l.video)?.tex?.size) || [1, 1];
+    if (l.kind === "text") return this.texts.get(l.id)?.tex.size ?? [1, 1];
     const t = l.image ? this.images.get(l.image) : null;
     return t && t !== "loading" ? t.size : [1, 1];
+  }
+
+  /** Texture d'une vidéo de calque ; la balise est créée au premier appel. */
+  private video(l: Layer): Tex {
+    const name = l.video;
+    if (!name) return this.blank;
+    let v = this.videos.get(name);
+    if (!v) {
+      const el = document.createElement("video");
+      el.muted = true;
+      el.playsInline = true;
+      el.preload = "auto";
+      const entry = { el, url: "", texture: null as GPU | null, tex: null as Tex | null, start: l.playback.start };
+      v = entry;
+      this.videos.set(name, entry);
+      el.addEventListener("loadedmetadata", () => {
+        const [w, h] = [el.videoWidth || 1, el.videoHeight || 1];
+        entry.texture = this.device.createTexture({ size: [w, h], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT });
+        entry.tex = { view: entry.texture.createView(), size: [w, h] };
+        el.currentTime = Math.min(entry.start, el.duration || 0);
+        void el.play().catch(() => {});
+      });
+      // Boucle « à la main » : elle repart du début choisi, pas de zéro.
+      el.addEventListener("ended", () => {
+        el.currentTime = entry.start < (el.duration || 0) ? entry.start : 0;
+        void el.play().catch(() => {});
+      });
+      void this.loadVideo(name)
+        .then((url) => {
+          entry.url = url;
+          el.src = url;
+        })
+        .catch(() => this.videos.delete(name));
+    }
+    // Réglages modifiés dans l'éditeur.
+    const speed = Math.min(4, Math.max(0.25, l.playback.speed || 1));
+    if (v.el.playbackRate !== speed) v.el.playbackRate = speed;
+    if (v.start !== l.playback.start) {
+      v.start = Math.max(0, l.playback.start || 0);
+      if (v.el.readyState > 0) v.el.currentTime = Math.min(v.start, v.el.duration || 0);
+    }
+    return v.tex ?? this.blank;
+  }
+
+  /** Texture d'un texte : redemandée quand le style ou la taille changent, et chaque seconde
+   * (variables : heure, météo…). */
+  private text(l: Layer): Tex {
+    if (!l.text) return this.blank;
+    const key = `${JSON.stringify(l.text)}|${this.canvas.height}`;
+    let t = this.texts.get(l.id);
+    const now = performance.now();
+    if (!t || (!t.busy && (t.key !== key || now - t.at > 1000))) {
+      const entry = t ?? { key, tex: this.blank, at: 0, busy: false };
+      entry.busy = true;
+      entry.key = key;
+      entry.at = now;
+      this.texts.set(l.id, entry);
+      t = entry;
+      void invoke<ArrayBuffer>("wallpaper_text_raster", { style: l.text, height: this.canvas.height })
+        .then((buf) => {
+          const head = new DataView(buf, 0, 8);
+          const [w, h] = [head.getUint32(0, true), head.getUint32(4, true)];
+          const tex = this.device.createTexture({ size: [w, h], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST });
+          this.device.queue.writeTexture({ texture: tex }, new Uint8Array(buf, 8), { bytesPerRow: w * 4 }, [w, h]);
+          entry.tex = { view: tex.createView(), size: [w, h] };
+        })
+        .catch(() => {})
+        .finally(() => (entry.busy = false));
+    }
+    return t.tex;
+  }
+
+  /** Image, vidéo ou texte affiché par un calque. */
+  private layerTex(l: Layer): Tex {
+    if (l.kind === "video") return this.video(l);
+    if (l.kind === "text") return this.text(l);
+    return this.image(l.kind === "image" ? l.image : null);
+  }
+
+  /** Copie l'image courante de chaque vidéo dans sa texture. */
+  private uploadVideos() {
+    for (const v of this.videos.values()) {
+      if (v.texture && v.tex && v.el.readyState >= 2) {
+        this.device.queue.copyExternalImageToTexture({ source: v.el }, { texture: v.texture }, v.tex.size);
+      }
+    }
   }
 
   /** Taille du canvas en pixels (celle des uniformes). */
@@ -174,7 +293,7 @@ export class Preview {
 
   /** Ressources d'un calque (tampon, image, masques), recréées quand l'une change. */
   private res(l: Layer) {
-    const tex = this.image(l.kind === "image" ? l.image : null);
+    const tex = this.layerTex(l);
     const masks = maskNames(l).map((m, i) => this.overrides.get(`${l.id}:${i}`) ?? this.image(m, this.white));
     let r = this.layerRes.get(l.id);
     // Clé : les textures elles-mêmes (une image qui finit de charger change sa vue).
@@ -259,9 +378,23 @@ export class Preview {
       ripples: s.interactions.ripple ? this.ripples : [],
       trail: s.interactions.trail ? this.trail : [],
     };
-    const visible = s.layers.filter((l) => l.visible);
+    // Conditions : même règle que le fond (état réel, ou simulé dans Scène), mêmes fondus.
+    const nowMs = performance.now();
+    const dt = Math.min(0.5, (nowMs - this.lastFrame) / 1000);
+    this.lastFrame = nowMs;
+    const cond = currentCond();
+    for (const l of s.layers) {
+      if (!l.when) continue;
+      const target = visibleWhen(l.when, cond) ? 1 : 0;
+      const p = this.presence.get(l.id) ?? target;
+      const step = l.when.fade <= 0.05 ? 1 : dt / l.when.fade;
+      this.presence.set(l.id, target > p ? Math.min(1, p + step) : Math.max(0, p - step));
+    }
+    const presenceOf = (l: Layer) => (l.when ? (this.presence.get(l.id) ?? 1) : 1);
+    const visible = s.layers.filter((l) => l.visible && presenceOf(l) > 0.001);
     const res = visible.map((l) => this.res(l));
-    visible.forEach((l, i) => this.device.queue.writeBuffer(res[i].uniforms, 0, packLayer(s, l, f, res[i].tex)));
+    this.uploadVideos();
+    visible.forEach((l, i) => this.device.queue.writeBuffer(res[i].uniforms, 0, packLayer(s, l, f, res[i].tex, presenceOf(l))));
     this.device.queue.writeBuffer(this.compUniforms, 0, packComposite(s, f));
     const enc = this.device.createCommandEncoder();
     const layers = enc.beginRenderPass({ colorAttachments: [{ view: this.target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }] });
@@ -285,7 +418,9 @@ export class Preview {
    * d'animation (particules en place). Attend la fin du chargement des images.
    */
   async snapshot(width = 960, height = 540, time = 3): Promise<Blob> {
-    for (let i = 0; i < 60 && [...this.images.values()].includes("loading"); i++) await new Promise((r) => setTimeout(r, 50));
+    const pending = () => [...this.images.values()].includes("loading") || [...this.videos.values()].some((v) => !v.tex || v.el.readyState < 2);
+    for (let i = 0; i < 60 && pending(); i++) await new Promise((r) => setTimeout(r, 50));
+    this.uploadVideos();
     const d = this.device;
     const s = this.scene;
     const f: Frame = { width, height, time, mouse: null, ripples: [], trail: [] };
@@ -295,12 +430,14 @@ export class Preview {
     d.queue.writeBuffer(comp, 0, packComposite(s, f));
     const enc = d.createCommandEncoder();
     const layers = enc.beginRenderPass({ colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }] });
-    for (const l of s.layers.filter((x) => x.visible)) {
+    // Vignette : la scène telle qu'elle s'affiche maintenant (conditions comprises).
+    const presenceOf = (l: Layer) => (l.when ? (this.presence.get(l.id) ?? 1) : 1);
+    for (const l of s.layers.filter((x) => x.visible && presenceOf(x) > 0.001)) {
       // Tampon à part : l'aperçu continue d'écrire les siens à chaque image.
       const r = this.res(l);
       const buf = d.createBuffer({ size: LAYER_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
-      d.queue.writeBuffer(buf, 0, packLayer(s, l, f, r.tex));
-      const tex = this.image(l.kind === "image" ? l.image : null);
+      d.queue.writeBuffer(buf, 0, packLayer(s, l, f, r.tex, presenceOf(l)));
+      const tex = this.layerTex(l);
       const masks = maskNames(l).map((m) => this.image(m, this.white));
       layers.setPipeline(this.layerPipelines[blendIndex(l.blend)]);
       layers.setBindGroup(0, this.bind(this.layerLayout, buf, [tex, ...masks].map((v) => v.view)));
@@ -339,6 +476,8 @@ export class Preview {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    window.clearInterval(this.condTimer);
+    this.dropVideos();
     this.ro.disconnect();
     this.off.forEach((f) => f());
     this.device.destroy?.();

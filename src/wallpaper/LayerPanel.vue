@@ -1,13 +1,15 @@
 <script setup lang="ts">
 // Propriétés du calque sélectionné : apparence (opacité, fusion, profondeur), contenu selon
-// le type (image, couleur / dégradé, particules), placement, effets du calque.
-import { PhImage, PhPaintBrush, PhX } from "@phosphor-icons/vue";
+// le type (image, vidéo, texte, couleur / dégradé, particules), placement, effets du calque.
+import { PhFilmStrip, PhImage, PhPaintBrush, PhX } from "@phosphor-icons/vue";
 import IconButton from "../ui/IconButton.vue";
 import Segmented from "../ui/Segmented.vue";
 import Select from "../ui/Select.vue";
 import { Switch } from "@/sdk/ui/switch";
 import { Button } from "@/sdk/ui/button";
 import Param from "./Param.vue";
+import TextPanel from "./TextPanel.vue";
+import WhenPanel from "./WhenPanel.vue";
 import { DEFAULTS, PARTICLE_PRESETS, type Anchor, type Layer } from "./scene";
 import { t } from "../notch/i18n";
 
@@ -58,10 +60,20 @@ function toggleColor(on: boolean) {
       </label>
     </section>
 
-    <!-- Contenu : image -->
-    <section v-if="layer.kind === 'image'" class="space-y-2">
-      <h3 class="type-caption font-medium uppercase text-label-3">{{ t("wall.kind.image") }}</h3>
-      <Button class="w-full" :loading="importing" @click="emit('pickImage')"><PhImage />{{ layer.image ? t("wall.changeImage") : t("wall.pickImage") }}</Button>
+    <!-- Contenu : image ou vidéo (même placement) -->
+    <section v-if="layer.kind === 'image' || layer.kind === 'video'" class="space-y-2">
+      <h3 class="type-caption font-medium uppercase text-label-3">{{ t(`wall.kind.${layer.kind}`) }}</h3>
+      <Button v-if="layer.kind === 'image'" class="w-full" :loading="importing" @click="emit('pickImage')">
+        <PhImage />{{ layer.image ? t("wall.changeImage") : t("wall.pickImage") }}
+      </Button>
+      <template v-else>
+        <Button class="w-full" :loading="importing" @click="emit('pickImage')">
+          <PhFilmStrip />{{ layer.video ? t("wall.changeVideo") : t("wall.pickVideo") }}
+        </Button>
+        <Param v-model="layer.playback.speed" :label="t('wall.p.speed')" :min="0.25" :max="4" :step="0.05" unit="×" />
+        <Param v-model="layer.playback.start" :label="t('wall.p.loopStart')" :min="0" :max="60" :step="0.1" unit=" s" :digits="1" />
+        <p class="type-caption text-label-3">{{ t("wall.videoHint") }}</p>
+      </template>
       <Segmented
         v-model="layer.transform.fit"
         size="sm"
@@ -94,6 +106,9 @@ function toggleColor(on: boolean) {
         <p class="type-caption text-label-3">{{ t("wall.freeHint") }}</p>
       </template>
     </section>
+
+    <!-- Contenu : texte -->
+    <TextPanel v-else-if="layer.kind === 'text' && layer.text" :layer="layer" />
 
     <!-- Contenu : couleur / dégradé -->
     <section v-else-if="layer.kind === 'fill'" class="space-y-2">
@@ -201,5 +216,8 @@ function toggleColor(on: boolean) {
         </div>
       </div>
     </section>
+
+    <!-- Visible quand… (moment, heures, ciel réels) -->
+    <WhenPanel :layer="layer" />
   </div>
 </template>

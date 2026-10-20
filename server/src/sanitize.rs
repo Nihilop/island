@@ -1,7 +1,7 @@
 //! Retrait des métadonnées des images publiées, SANS recompression (l'image reste
 //! identique au pixel près) : EXIF (dont la position GPS de l'auteur), XMP, IPTC,
-//! commentaires et blocs texte. PNG, JPEG et WebP ; les autres formats sont rendus tels
-//! quels. Une image qui ne se lit pas comme attendu est aussi rendue telle quelle : elle a
+//! commentaires et blocs texte. PNG, JPEG et WebP ; vidéos MP4 (boîtes `udta`, `meta` et
+//! XMP neutralisées, cf. `mp4`) ; les autres formats sont rendus tels quels. Une image qui ne se lit pas comme attendu est aussi rendue telle quelle : elle a
 //! déjà été validée (décodée) par `island-formats`, ceci n'est qu'un nettoyage.
 
 /// Image nettoyée selon son format (reconnu par sa signature, pas par son nom).
@@ -12,10 +12,46 @@ pub fn strip(bytes: &[u8]) -> Vec<u8> {
         jpeg(bytes)
     } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
         webp(bytes)
+    } else if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        Some(mp4(bytes))
     } else {
         None
     };
     out.unwrap_or_else(|| bytes.to_vec())
+}
+
+/// MP4 : les métadonnées (titre, appareil, **position GPS** d'un téléphone…) vivent dans les
+/// boîtes `udta` et `meta` (fichier, `moov`, pistes) et dans une boîte XMP (`uuid`). Elles
+/// sont renommées `free` (place libre, ignorée par les lecteurs) SANS changer de taille : les
+/// positions des images dans le fichier restent justes, rien n'est décalé ni ré-encodé.
+fn mp4(b: &[u8]) -> Vec<u8> {
+    const XMP: [u8; 16] = [0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac];
+    fn walk(out: &mut [u8], start: usize, end: usize, depth: u8) {
+        let mut i = start;
+        while i + 8 <= end {
+            let size32 = u32::from_be_bytes([out[i], out[i + 1], out[i + 2], out[i + 3]]) as usize;
+            let (size, header) = match size32 {
+                0 => (end - i, 8),
+                1 if i + 16 <= end => (u64::from_be_bytes(out[i + 8..i + 16].try_into().unwrap()) as usize, 16),
+                n => (n, 8),
+            };
+            if size < header || i + size > end {
+                return; // boîte incohérente : on s'arrête là (le reste est rendu tel quel)
+            }
+            let kind: [u8; 4] = out[i + 4..i + 8].try_into().unwrap();
+            let xmp = &kind == b"uuid" && out.get(i + header..i + header + 16) == Some(&XMP[..]);
+            if &kind == b"udta" || &kind == b"meta" || xmp {
+                out[i + 4..i + 8].copy_from_slice(b"free");
+            } else if (&kind == b"moov" || &kind == b"trak") && depth < 2 {
+                walk(out, i + header, i + size, depth + 1);
+            }
+            i += size;
+        }
+    }
+    let mut out = b.to_vec();
+    let end = out.len();
+    walk(&mut out, 0, end, 0);
+    out
 }
 
 /// PNG : on retire les blocs `tEXt`, `zTXt`, `iTXt`, `eXIf`, `tIME`.
@@ -115,6 +151,26 @@ mod tests {
 
     fn contains(hay: &[u8], needle: &[u8]) -> bool {
         hay.windows(needle.len()).any(|w| w == needle)
+    }
+
+    fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut b = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        b.extend_from_slice(kind);
+        b.extend_from_slice(body);
+        b
+    }
+
+    #[test]
+    fn mp4_metadata_is_neutralised_in_place() {
+        let gps = mp4_box(b"udta", &mp4_box(b"\xa9xyz", b"+48.8566+002.3522/"));
+        let trak = mp4_box(b"trak", &[mp4_box(b"tkhd", &[0; 8]), mp4_box(b"meta", b"camera")].concat());
+        let moov = mp4_box(b"moov", &[mp4_box(b"mvhd", &[0; 8]), trak, gps].concat());
+        let file = [mp4_box(b"ftyp", b"isom\0\0\0\0"), moov, mp4_box(b"mdat", b"frames")].concat();
+        let clean = strip(&file);
+        assert_eq!(clean.len(), file.len(), "même taille : rien n'est décalé");
+        assert!(!clean.windows(4).any(|w| w == b"udta" || w == b"meta"));
+        assert!(clean.windows(4).any(|w| w == b"mdat") && clean.windows(4).any(|w| w == b"tkhd"));
+        assert_eq!(&clean[clean.len() - 6..], b"frames");
     }
 
     #[test]

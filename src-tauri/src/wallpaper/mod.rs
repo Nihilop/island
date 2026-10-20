@@ -13,10 +13,14 @@
 // Le fond STATIQUE n'est pas ici : c'est le service `desktop` (utilisé aussi par les
 // automatisations et les extensions).
 
+pub mod conditions;
 pub mod scene;
 pub mod share;
+pub mod text;
 #[cfg(target_os = "windows")]
 mod engine;
+#[cfg(target_os = "windows")]
+mod video;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -153,7 +157,8 @@ pub fn wallpaper_save(app: AppHandle, id: String, scene: Scene) -> Result<(), St
     let dir = scene_dir(&app, &id)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let mut s = scene;
-    s.version = scene::VERSION;
+    // La version minimale qui sait la lire (une scène sans vidéo reste lisible partout).
+    s.version = s.required_version();
     // Images qui ne servent plus (calque supprimé, image remplacée).
     let keep: std::collections::HashSet<&String> = s.images().collect();
     for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -198,10 +203,26 @@ pub fn wallpaper_import_image(app: AppHandle, id: String, path: String) -> Resul
     let ext = if ext == "jpeg" { "jpg".to_string() } else { ext };
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let name = format!("layer-{stamp}.{ext}");
-    if !scene::valid_image_name(&name) || !src.is_file() {
+    if !src.is_file() {
         return Err("invalidImage".into());
     }
-    image::image_dimensions(&src).map_err(|_| "invalidImage")?;
+    if scene::valid_video_name(&name) {
+        // Vidéo : signature du conteneur (MP4 / WebM), et une taille qui tient dans un partage.
+        let len = std::fs::metadata(&src).map_err(|e| e.to_string())?.len();
+        if len > island_formats::islandscene::MAX_ENTRY {
+            return Err("videoTooLarge".into());
+        }
+        let mut head = [0u8; 16];
+        use std::io::Read as _;
+        std::fs::File::open(&src).and_then(|mut f| f.read(&mut head)).map_err(|e| e.to_string())?;
+        if !scene::is_video(&name, &head) {
+            return Err("invalidVideo".into());
+        }
+    } else if scene::valid_image_name(&name) {
+        image::image_dimensions(&src).map_err(|_| "invalidImage")?;
+    } else {
+        return Err("invalidImage".into());
+    }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::copy(&src, dir.join(&name)).map_err(|e| e.to_string())?;
     Ok(name)
@@ -271,7 +292,7 @@ pub async fn wallpaper_thumbnail(app: AppHandle, id: String) -> Result<tauri::ip
 /// Octets d'une image ou d'un masque de la scène (aperçu, vignettes).
 #[tauri::command]
 pub fn wallpaper_image(app: AppHandle, id: String, name: String) -> Result<tauri::ipc::Response, String> {
-    if !scene::valid_image_name(&name) {
+    if !scene::valid_file_name(&name) {
         return Err("invalidImage".into());
     }
     let bytes = std::fs::read(scene_dir(&app, &id)?.join(name)).map_err(|e| e.to_string())?;

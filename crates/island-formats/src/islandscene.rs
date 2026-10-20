@@ -88,7 +88,7 @@ pub fn read<R: Read + Seek>(reader: R, len: u64) -> Result<Contents, String> {
         if is_media && media::slot(&name).is_none() {
             return Err(format!("badMedia:{name}"));
         }
-        if !known && !is_media && !scene::valid_image_name(&name) {
+        if !known && !is_media && !scene::valid_file_name(&name) {
             return Err("corrupt".into());
         }
         if e.size() > MAX_ENTRY {
@@ -122,10 +122,18 @@ pub fn read<R: Read + Seek>(reader: R, len: u64) -> Result<Contents, String> {
     }
     let scene: Scene = serde_json::from_slice(&scene_json.ok_or("corrupt")?).map_err(|_| "corrupt")?;
     scene.check()?;
-    // Tout fichier référencé doit être là, et être une vraie image ; le reste est ignoré.
+    // Tout fichier référencé doit être là, et être une vraie image (ou une vraie vidéo) ; le
+    // reste est ignoré.
     let needed: HashSet<String> = scene.images().cloned().collect();
+    let videos: HashSet<&String> = scene.videos().collect();
     for f in &needed {
         let (_, bytes) = files.iter().find(|(n, _)| n == f).ok_or_else(|| format!("missingFile:{f}"))?;
+        if videos.contains(f) {
+            if !scene::is_video(f, bytes) {
+                return Err(format!("invalidVideo:{f}"));
+            }
+            continue;
+        }
         let img = image::load_from_memory(bytes).map_err(|_| format!("invalidImage:{f}"))?;
         if img.width() > MAX_SIDE || img.height() > MAX_SIDE {
             return Err("tooLarge".into());
@@ -348,6 +356,27 @@ mod tests {
         let r = read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("a.png", &tiny_png()), ("extra.png", &tiny_png())])).unwrap();
         assert_eq!(r.scene.layers.len(), 1);
         assert_eq!(r.files.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["a.png"]);
+    }
+
+    #[test]
+    fn video_layers_carry_a_real_video_and_need_a_newer_island() {
+        let mut l = crate::scene::Layer { kind: "video".into(), video: Some("clip.mp4".into()), ..Default::default() };
+        l.playback.speed = 0.5;
+        let s = Scene { layers: vec![l], ..Default::default() };
+        assert_eq!(s.required_version(), 2);
+        assert_eq!(image_scene().required_version(), 1);
+        let json = serde_json::to_vec(&s).unwrap();
+        // En-tête MP4 minimal : taille de boîte, puis `ftyp`.
+        let mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2".to_vec();
+        let r = read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("clip.mp4", &mp4)])).unwrap();
+        assert_eq!(r.files.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["clip.mp4"]);
+        assert_eq!(r.scene.layers[0].playback.speed, 0.5);
+        // Une « vidéo » qui n'en est pas une, ou une image déguisée en vidéo.
+        assert!(read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("clip.mp4", b"pas une video")])).err().unwrap().starts_with("invalidVideo"));
+        assert!(read_bytes(&zip_of(&[("manifest.json", &manifest()), ("scene.json", &json), ("clip.mp4", &tiny_png())])).err().unwrap().starts_with("invalidVideo"));
+        // Une vidéo ne peut pas servir d'image (ni l'inverse).
+        let bad = Scene { layers: vec![crate::scene::Layer { kind: "image".into(), image: Some("clip.mp4".into()), ..Default::default() }], ..Default::default() };
+        assert_eq!(bad.check().err().unwrap(), "invalidImage");
     }
 
     #[test]
