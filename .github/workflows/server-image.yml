@@ -10,9 +10,7 @@ name: Server image
 
 on:
   push:
-    # feat/store : temporaire, tant que ce workflow n'est pas sur main (le bouton « Run
-    # workflow » n'existe que pour les workflows de la branche par défaut). Image :feat-store.
-    branches: [main, feat/store]
+    branches: [main]
     paths: ["server/**", "crates/**", ".github/workflows/server-image.yml"]
     tags: ["store-v*"]
   workflow_dispatch:
