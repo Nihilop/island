@@ -4,6 +4,7 @@
 // joue le rôle du curseur sur le bureau : parallaxe, traînée, ondulation au clic — sauf
 // quand l'éditeur la réserve au déplacement d'un calque (`interactive = false`).
 
+import { current as currentCond, refreshReal, visibleWhen } from "./conditions";
 import { invoke } from "@tauri-apps/api/core";
 import layerShader from "../../src-tauri/src/wallpaper/layer.wgsl?raw";
 import compositeShader from "../../src-tauri/src/wallpaper/composite.wgsl?raw";
@@ -58,6 +59,10 @@ export class Preview {
   private ripples: [number, number, number][] = [];
   private trail: [number, number, number][] = [];
   private ro: ResizeObserver;
+  /** Conditions : fondu en cours par calque, et horloge des fondus. */
+  private presence = new Map<string, number>();
+  private lastFrame = performance.now();
+  private condTimer = 0;
   private off: (() => void)[] = [];
   /** La souris simule le bureau (sinon l'éditeur s'en sert pour déplacer un calque). */
   interactive = true;
@@ -111,6 +116,9 @@ export class Preview {
     const device = await adapter?.requestDevice().catch(() => null);
     if (!device) return null;
     const p = new Preview(canvas, device, scene, loadImage, loadVideo);
+    // État réel des conditions (moment, ciel), relu toutes les 15 s.
+    void refreshReal();
+    p.condTimer = window.setInterval(() => void refreshReal(), 15_000);
     p.loop();
     return p;
   }
@@ -370,10 +378,23 @@ export class Preview {
       ripples: s.interactions.ripple ? this.ripples : [],
       trail: s.interactions.trail ? this.trail : [],
     };
-    const visible = s.layers.filter((l) => l.visible);
+    // Conditions : même règle que le fond (état réel, ou simulé dans Scène), mêmes fondus.
+    const nowMs = performance.now();
+    const dt = Math.min(0.5, (nowMs - this.lastFrame) / 1000);
+    this.lastFrame = nowMs;
+    const cond = currentCond();
+    for (const l of s.layers) {
+      if (!l.when) continue;
+      const target = visibleWhen(l.when, cond) ? 1 : 0;
+      const p = this.presence.get(l.id) ?? target;
+      const step = l.when.fade <= 0.05 ? 1 : dt / l.when.fade;
+      this.presence.set(l.id, target > p ? Math.min(1, p + step) : Math.max(0, p - step));
+    }
+    const presenceOf = (l: Layer) => (l.when ? (this.presence.get(l.id) ?? 1) : 1);
+    const visible = s.layers.filter((l) => l.visible && presenceOf(l) > 0.001);
     const res = visible.map((l) => this.res(l));
     this.uploadVideos();
-    visible.forEach((l, i) => this.device.queue.writeBuffer(res[i].uniforms, 0, packLayer(s, l, f, res[i].tex)));
+    visible.forEach((l, i) => this.device.queue.writeBuffer(res[i].uniforms, 0, packLayer(s, l, f, res[i].tex, presenceOf(l))));
     this.device.queue.writeBuffer(this.compUniforms, 0, packComposite(s, f));
     const enc = this.device.createCommandEncoder();
     const layers = enc.beginRenderPass({ colorAttachments: [{ view: this.target, loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }] });
@@ -409,11 +430,13 @@ export class Preview {
     d.queue.writeBuffer(comp, 0, packComposite(s, f));
     const enc = d.createCommandEncoder();
     const layers = enc.beginRenderPass({ colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }] });
-    for (const l of s.layers.filter((x) => x.visible)) {
+    // Vignette : la scène telle qu'elle s'affiche maintenant (conditions comprises).
+    const presenceOf = (l: Layer) => (l.when ? (this.presence.get(l.id) ?? 1) : 1);
+    for (const l of s.layers.filter((x) => x.visible && presenceOf(x) > 0.001)) {
       // Tampon à part : l'aperçu continue d'écrire les siens à chaque image.
       const r = this.res(l);
       const buf = d.createBuffer({ size: LAYER_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
-      d.queue.writeBuffer(buf, 0, packLayer(s, l, f, r.tex));
+      d.queue.writeBuffer(buf, 0, packLayer(s, l, f, r.tex, presenceOf(l)));
       const tex = this.layerTex(l);
       const masks = maskNames(l).map((m) => this.image(m, this.white));
       layers.setPipeline(this.layerPipelines[blendIndex(l.blend)]);
@@ -453,6 +476,7 @@ export class Preview {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    window.clearInterval(this.condTimer);
     this.dropVideos();
     this.ro.disconnect();
     this.off.forEach((f) => f());

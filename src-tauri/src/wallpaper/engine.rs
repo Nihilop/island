@@ -438,6 +438,9 @@ struct Output {
     paused: bool,
     /// Textes des calques texte (par indice de calque), refaits quand leur valeur change.
     texts: HashMap<usize, TextGpu>,
+    /// Conditions « Visible quand… » : cible (visible ou non) et fondu en cours, par calque.
+    targets: Vec<bool>,
+    presence: Vec<f32>,
     _win: Win,
 }
 
@@ -468,6 +471,23 @@ impl Output {
             .collect();
         self.scene = sc.scene.clone();
         self.texts.clear();
+        // Conditions : état tout de suite, sans fondu au chargement.
+        let now = super::conditions::now();
+        self.targets = self.scene.layers.iter().map(|l| l.when.as_ref().is_none_or(|w| super::conditions::visible(w, &now))).collect();
+        self.presence = self.targets.iter().map(|&t| if t { 1.0 } else { 0.0 }).collect();
+    }
+
+    /// Conditions : nouvelles cibles (si `now`), puis fondu vers elles (`dt` secondes).
+    fn update_conditions(&mut self, now: Option<&super::conditions::Now>, dt: f32) {
+        for (i, l) in self.scene.layers.iter().enumerate() {
+            let Some(w) = &l.when else { continue };
+            if let Some(n) = now {
+                self.targets[i] = super::conditions::visible(w, n);
+            }
+            let step = if w.fade <= 0.05 { 1.0 } else { dt / w.fade };
+            let p = &mut self.presence[i];
+            *p = if self.targets[i] { (*p + step).min(1.0) } else { (*p - step).max(0.0) };
+        }
     }
 
     /// Calques texte : valeur recalculée ; image refaite (à la hauteur de cet écran) si elle a
@@ -546,6 +566,8 @@ fn create_output(gpu: &Gpu, layer: HWND, d: &DisplayInfo, sc: &Loaded, textures:
         config,
         paused: false,
         texts: HashMap::new(),
+        targets: Vec::new(),
+        presence: Vec::new(),
         _win: win,
     };
     o.set_scene(gpu, textures, sc);
@@ -565,9 +587,12 @@ fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
         }
         _ => return,
     };
-    for (l, g) in o.scene.layers.iter().zip(&o.layers) {
-        if l.visible {
-            gpu.queue.write_buffer(&g.uniforms, 0, bytes(&scene::pack_layer(&o.scene, l, f, g.tex)));
+    // Un calque masqué par sa condition (fondu terminé) n'est ni calculé ni dessiné.
+    let shown = |i: usize, l: &scene::Layer| l.visible && o.presence.get(i).is_none_or(|p| *p > 0.001);
+    for (i, (l, g)) in o.scene.layers.iter().zip(&o.layers).enumerate() {
+        if shown(i, l) {
+            let presence = o.presence.get(i).copied().unwrap_or(1.0);
+            gpu.queue.write_buffer(&g.uniforms, 0, bytes(&scene::pack_layer(&o.scene, l, f, g.tex, presence)));
         }
     }
     gpu.queue.write_buffer(&o.comp_uniforms, 0, bytes(&scene::pack_composite(&o.scene, f)));
@@ -583,8 +608,8 @@ fn render(gpu: &Gpu, o: &mut Output, f: &Frame) {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        for (l, g) in o.scene.layers.iter().zip(&o.layers) {
-            if l.visible {
+        for (i, (l, g)) in o.scene.layers.iter().zip(&o.layers).enumerate() {
+            if shown(i, l) {
                 pass.set_pipeline(&gpu.layer_pipelines[scene::blend_index(&l.blend)]);
                 pass.set_bind_group(0, &g.bind, &[]);
                 pass.draw(0..3, 0..1);
@@ -753,6 +778,8 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
     let mut was_down = false;
     let mut all_paused = false;
     let mut last_text = Instant::now() - Duration::from_secs(1);
+    let mut last_cond = Instant::now();
+    let mut last_frame = Instant::now();
 
     loop {
         // Commandes : bloquant sans scène, sinon on regarde sans attendre.
@@ -876,6 +903,18 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
         ripples.retain(|(_, _, ts)| t - ts < 6.0);
 
         upload_videos(g, &l.videos);
+        // Conditions : état réel une fois par seconde, fondus à chaque image.
+        let dt = last_frame.elapsed().as_secs_f32().min(0.5);
+        last_frame = Instant::now();
+        let cond_now = if last_cond.elapsed() >= Duration::from_secs(1) {
+            last_cond = Instant::now();
+            Some(super::conditions::now())
+        } else {
+            None
+        };
+        for o in l.outputs.iter_mut() {
+            o.update_conditions(cond_now.as_ref(), dt);
+        }
         // Textes : valeurs recalculées 4 fois par seconde (refaits seulement s'ils changent).
         if last_text.elapsed() >= Duration::from_millis(250) {
             last_text = Instant::now();

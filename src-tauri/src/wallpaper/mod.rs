@@ -13,6 +13,7 @@
 // Le fond STATIQUE n'est pas ici : c'est le service `desktop` (utilisé aussi par les
 // automatisations et les extensions).
 
+pub mod conditions;
 pub mod scene;
 pub mod share;
 pub mod text;

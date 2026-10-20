@@ -67,6 +67,8 @@ pub struct Layer {
     pub playback: Playback,
     /// Texte (contenu avec variables `{time}`…, style) ; placé comme une image « libre ».
     pub text: Option<TextStyle>,
+    /// Visible seulement quand… (moment de la journée réel, heures, ciel) ; None = toujours.
+    pub when: Option<When>,
     pub transform: Transform,
     pub effects: LayerEffects,
 }
@@ -89,6 +91,7 @@ impl Default for Layer {
             video: None,
             playback: Playback::default(),
             text: None,
+            when: None,
             transform: Transform::default(),
             effects: LayerEffects::default(),
         }
@@ -375,6 +378,32 @@ impl Default for TextShadow {
 
 pub const MAX_TEXT: usize = 500;
 
+/// Condition d'affichage d'un calque. Tous les critères renseignés doivent être vrais ; le
+/// calque apparaît et disparaît en fondu (`fade` secondes).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct When {
+    /// "dawn" | "day" | "dusk" | "night", d'après le vrai lever / coucher du soleil (vide =
+    /// tout moment). Ignoré si `from` / `to` sont donnés.
+    pub moments: Vec<String>,
+    /// Plage horaire précise « HH:MM » (heure locale ; elle peut passer minuit).
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// "clear" | "cloudy" | "fog" | "rain" | "snow" | "storm" (météo réelle ; vide = tout ciel).
+    pub sky: Vec<String>,
+    /// Durée du fondu, en secondes.
+    pub fade: f32,
+}
+
+impl Default for When {
+    fn default() -> Self {
+        Self { moments: Vec::new(), from: None, to: None, sky: Vec::new(), fade: 3.0 }
+    }
+}
+
+pub const MOMENTS: &[&str] = &["dawn", "day", "dusk", "night"];
+pub const SKIES: &[&str] = &["clear", "cloudy", "fog", "rain", "snow", "storm"];
+
 pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm"];
 
 fn simple_name(n: &str) -> bool {
@@ -430,6 +459,13 @@ impl Scene {
             if !valid_layer_id(&l.id) || l.name.chars().count() > 80 {
                 return Err("invalidLayer".into());
             }
+            if let Some(w) = &l.when {
+                let hhmm = |v: &Option<String>| v.as_deref().is_none_or(|t| t.is_empty() || t.len() <= 5 && t.split_once(':').is_some_and(|(h, m)| h.parse::<u8>().is_ok_and(|h| h < 24) && m.parse::<u8>().is_ok_and(|m| m < 60)));
+                let known = w.moments.iter().all(|m| MOMENTS.contains(&m.as_str())) && w.sky.iter().all(|k| SKIES.contains(&k.as_str()));
+                if !known || !hhmm(&w.from) || !hhmm(&w.to) {
+                    return Err("invalidCondition".into());
+                }
+            }
             if let Some(t) = &l.text {
                 if t.content.chars().count() > MAX_TEXT || t.font.chars().count() > 80 {
                     return Err("invalidText".into());
@@ -458,7 +494,7 @@ impl Scene {
 
     /// Version minimale d'Island pour lire cette scène (cf. `VERSION`).
     pub fn required_version(&self) -> u32 {
-        if self.layers.iter().any(|l| l.kind == "video" || l.kind == "text") { 2 } else { 1 }
+        if self.layers.iter().any(|l| l.kind == "video" || l.kind == "text" || l.when.is_some()) { 2 } else { 1 }
     }
 }
 

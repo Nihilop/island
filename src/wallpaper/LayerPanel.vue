@@ -9,6 +9,7 @@ import { Switch } from "@/sdk/ui/switch";
 import { Button } from "@/sdk/ui/button";
 import Param from "./Param.vue";
 import TextPanel from "./TextPanel.vue";
+import WhenPanel from "./WhenPanel.vue";
 import { DEFAULTS, PARTICLE_PRESETS, type Anchor, type Layer } from "./scene";
 import { t } from "../notch/i18n";
 
@@ -215,5 +216,8 @@ function toggleColor(on: boolean) {
         </div>
       </div>
     </section>
+
+    <!-- Visible quand… (moment, heures, ciel réels) -->
+    <WhenPanel :layer="layer" />
   </div>
 </template>

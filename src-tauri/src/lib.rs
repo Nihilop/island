@@ -236,6 +236,7 @@ pub fn run() {
             wallpaper::share::wallpaper_import,
             wallpaper::share::wallpaper_take_imported,
             wallpaper::text::wallpaper_set_vars,
+            wallpaper::conditions::wallpaper_conditions,
             wallpaper::text::wallpaper_fonts,
             wallpaper::text::wallpaper_text_raster,
             market::market_get,

@@ -89,7 +89,8 @@ pub fn layer_box(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [f32; 4] {
     }
 }
 
-pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [[f32; 4]; LAYER_VEC4S] {
+/// `presence` : 0..1, fondu d'un calque qui apparaît ou disparaît selon sa condition.
+pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32), presence: f32) -> [[f32; 4]; LAYER_VEC4S] {
     let mut u = [[0f32; 4]; LAYER_VEC4S];
     let kind = match l.kind.as_str() {
         // Le shader dessine une vidéo comme une image : seule sa texture change à chaque image.
@@ -105,7 +106,7 @@ pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [[f32; 4]
     let placed = l.transform.fit == "free" || l.kind == "text";
     let rotation = if placed { c01(l.transform.rotation, -360.0, 360.0).to_radians() } else { 0.0 };
     u[0] = [f.width, f.height, tex.0.max(1.0), tex.1.max(1.0)];
-    u[1] = [f.time, kind, c01(l.opacity, 0.0, 1.0), edges];
+    u[1] = [f.time, kind, c01(l.opacity, 0.0, 1.0) * presence.clamp(0.0, 1.0), edges];
     u[2] = layer_box(s, l, f, tex);
     u[3] = [rotation, c01(l.fill.angle, -360.0, 360.0).to_radians(), f.height / 1080.0, 0.0];
     let (a, b) = (hex(&l.fill.colors[0]), hex(&l.fill.colors[1]));

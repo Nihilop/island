@@ -51,6 +51,14 @@ export interface TextStyle {
   outlineColor: string;
   shadow: TextShadow | null;
 }
+/** « Visible quand… » : moments réels (ou plage horaire), ciel réel, fondu (s). */
+export interface When {
+  moments: ("dawn" | "day" | "dusk" | "night")[];
+  from: string | null;
+  to: string | null;
+  sky: ("clear" | "cloudy" | "fog" | "rain" | "snow" | "storm")[];
+  fade: number;
+}
 /** Lecture d'une vidéo de calque : vitesse (0,25 à 4), début de la boucle (secondes). */
 export interface Playback { speed: number; start: number }
 export interface Ripple { radius: number; strength: number; duration: number }
@@ -74,6 +82,8 @@ export interface Layer {
   video: string | null;
   playback: Playback;
   text: TextStyle | null;
+  /** Visible seulement quand… (null = toujours). */
+  when: When | null;
   transform: Transform;
   effects: { water: Water | null; heat: Heat | null; color: ColorAdjust | null };
 }
@@ -136,6 +146,7 @@ export const DEFAULTS = {
     shadow: null,
   }),
   shadow: (): TextShadow => ({ color: "#000000", opacity: 0.6, blur: 0.08, x: 0, y: 0.04 }),
+  when: (): When => ({ moments: [], from: null, to: null, sky: [], fade: 3 }),
 };
 
 export const layerId = () => `l-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -157,6 +168,7 @@ export function newLayer(kind: LayerKind, name: string): Layer {
     video: null,
     playback: { speed: 1, start: 0 },
     text: kind === "text" ? DEFAULTS.text() : null,
+    when: null,
     // Un texte se place librement (ancre, décalage) à sa taille naturelle.
     transform: kind === "text" ? { ...DEFAULTS.transform(), fit: "free" } : DEFAULTS.transform(),
     effects: { water: null, heat: null, color: null },
@@ -178,6 +190,7 @@ export function normalize(s: Partial<Scene>): Scene {
       transform: { ...base.transform, ...l.transform },
       playback: { ...base.playback, ...l.playback },
       text: l.text ? { ...DEFAULTS.text(), ...l.text } : base.text,
+      when: l.when ? { ...DEFAULTS.when(), ...l.when } : null,
       particles: l.particles ? { ...DEFAULTS.particles(), ...l.particles } : base.particles,
       effects: {
         water: l.effects?.water ? { ...DEFAULTS.water(), ...l.effects.water } : null,
@@ -278,7 +291,8 @@ function colorAdjust(a: ColorAdjust | null): number[] {
   return a ? [c(a.hue, -180, 180), c(a.saturation, 0, 2), c(a.brightness, 0, 2), c(a.contrast, 0, 2)] : [0, 1, 1, 1];
 }
 
-export function packLayer(s: Scene, l: Layer, f: Frame, tex: [number, number]): Float32Array {
+/** `presence` : 0..1, fondu d'un calque qui apparaît ou disparaît selon sa condition. */
+export function packLayer(s: Scene, l: Layer, f: Frame, tex: [number, number], presence = 1): Float32Array {
   const u = new Float32Array(LAYER_VEC4S * 4);
   const set = (i: number, v: number[]) => u.set(v, i * 4);
   // Une vidéo se dessine comme une image (seule sa texture change à chaque image).
@@ -287,7 +301,7 @@ export function packLayer(s: Scene, l: Layer, f: Frame, tex: [number, number]): 
   const edges = l.kind !== "text" && (l.transform.fit === "cover" || l.transform.fit === "stretch") ? 1 : 0;
   const rotation = l.transform.fit === "free" || l.kind === "text" ? rad(c(l.transform.rotation, -360, 360)) : 0;
   set(0, [f.width, f.height, Math.max(tex[0], 1), Math.max(tex[1], 1)]);
-  set(1, [f.time, kind, c(l.opacity, 0, 1), edges]);
+  set(1, [f.time, kind, c(l.opacity, 0, 1) * Math.min(1, Math.max(0, presence)), edges]);
   set(2, layerBox(s, l, f, tex));
   set(3, [rotation, rad(c(l.fill.angle, -360, 360)), f.height / 1080, 0]);
   set(4, [...hex(l.fill.colors[0]), 1]);
