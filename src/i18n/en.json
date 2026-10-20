@@ -1170,7 +1170,6 @@
   "market.back": "Back to catalog",
   "market.install": "Install",
   "market.installing": "Installing…",
-  "market.installVersion": "Install v{v}",
   "market.installed": "Installed",
   "market.applied": "Applied",
   "market.installedHint": "Installed in “My scenes”: you can edit it like your own.",
@@ -1270,5 +1269,13 @@
   "ext.publishWin.notice": "The folder is packaged, then reviewed by moderators. Explain each permission in the description: it is checked.",
   "ext.publishWin.send": "Send for review",
   "ext.publishWin.sent": "v{v} sent",
-  "ext.publishWin.sentHelp": "It will be published after review. Its status shows in Settings › Extensions, developer mode."
+  "ext.publishWin.sentHelp": "It will be published after review. Its status shows in Settings › Extensions, developer mode.",
+  "ext.update.title": "Store updates",
+  "ext.update.check": "Check now",
+  "ext.update.upToDate": "Checked at startup, then daily. Everything is up to date.",
+  "ext.update.available": "{n} update(s) available: button on the extension.",
+  "ext.update.button": "Update (v{v})",
+  "market.updateTo": "Update (v{v})",
+  "market.updateBadge": "UPDATE",
+  "market.updateOverwrite": "You changed this scene since installing it: the update will replace your changes. Continue?"
 }

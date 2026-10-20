@@ -105,6 +105,45 @@ pub fn import(app: &AppHandle, path: &Path) -> Result<Imported, String> {
     Ok(Imported { id, name: s.name })
 }
 
+/// Remplace la scène `id` par le contenu d'un `.islandscene` (mise à jour du magasin) : même
+/// id, donc un fond appliqué le reste ; le nom choisi par l'utilisateur est gardé. Écrit à
+/// côté puis échange les dossiers : une mise à jour ratée laisse l'ancienne scène intacte.
+pub fn replace(app: &AppHandle, path: &Path, id: &str) -> Result<Imported, String> {
+    let format::Contents { scene: mut s, files, media, .. } = read(path)?;
+    let (old, _) = super::load(app, id)?;
+    s.name = old.name;
+    let dir = super::scene_dir(app, id)?;
+    let tmp = dir.with_extension("updating");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let write = || -> Result<(), String> {
+        for (name, bytes) in &files {
+            std::fs::write(tmp.join(name), bytes).map_err(|e| e.to_string())?;
+        }
+        if let Some(img) = media.thumbnail.as_ref().and_then(|(_, b)| image::load_from_memory(b).ok()) {
+            let p = tmp.join(super::SNAPSHOT);
+            std::fs::create_dir_all(p.parent().expect("store/")).map_err(|e| e.to_string())?;
+            img.save_with_format(&p, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(tmp.join("scene.json"), serde_json::to_vec_pretty(&s).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    };
+    if let Err(e) = write() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(e);
+    }
+    let old_dir = dir.with_extension("old");
+    let _ = std::fs::remove_dir_all(&old_dir);
+    std::fs::rename(&dir, &old_dir).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&tmp, &dir) {
+        let _ = std::fs::rename(&old_dir, &dir);
+        return Err(e.to_string());
+    }
+    let _ = std::fs::remove_dir_all(&old_dir);
+    let _ = app.emit("wallpaper://changed", ());
+    super::reload_if_used(app, id);
+    Ok(Imported { id: id.to_string(), name: s.name })
+}
+
 // --- Commandes ---------------------------------------------------------------------------
 
 #[tauri::command]

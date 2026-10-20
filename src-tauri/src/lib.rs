@@ -92,6 +92,7 @@ pub fn run() {
             vault::start(app.handle().clone());
             services::notifs::start(app.handle().clone());
             launcher::start(app.handle().clone());
+            market::start(app.handle().clone());
             // Activité (jeux & apps) : hook de premier plan + relevé des process toutes les 2 s.
             services::activity::start(app.handle().clone());
             // Fonds animés : restaure la scène active (indépendant de l'outil du dock).
@@ -249,6 +250,9 @@ pub fn run() {
             market::market_publish_extension,
             market::market_pack_extension,
             market::market_dev_info,
+            market::market_updates,
+            market::market_check_updates,
+            market::market_scene_modified,
             market::market_mine,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,

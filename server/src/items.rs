@@ -720,3 +720,51 @@ mod tests {
         assert_eq!(file_name("   "), "scene");
     }
 }
+
+// --- Mises à jour ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct Installed {
+    id: String,
+    version: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdatesBody {
+    items: Vec<Installed>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct Update {
+    id: String,
+    kind: String,
+    name: String,
+    version: String,
+    changelog: String,
+    /// Permissions de la nouvelle version (extensions) : l'app signale les nouvelles.
+    permissions: Option<serde_json::Value>,
+    size: i64,
+}
+
+/// `POST /v1/updates` (public) : `{ items: [{ id, version }] }` → éléments visibles dont la
+/// dernière version approuvée est plus récente. Les éléments inconnus du magasin (extension
+/// installée d'un fichier, préréglage…) sont simplement ignorés.
+pub async fn updates(State(st): State<AppState>, Json(b): Json<UpdatesBody>) -> ApiResult<Json<Vec<Update>>> {
+    if b.items.len() > 500 {
+        return Err(ApiError::bad("tooMany"));
+    }
+    let ids: Vec<String> = b.items.iter().map(|i| i.id.chars().take(100).collect()).collect();
+    let rows = sqlx::query_as::<_, Update>(&format!(
+        "SELECT i.id, i.kind, i.name, v.version, v.changelog, v.permissions, v.size
+         FROM items i JOIN users u ON u.id = i.owner_id
+         JOIN LATERAL (SELECT version, changelog, permissions, size FROM versions
+                       WHERE item_id = i.id AND status = 'approved' ORDER BY id DESC LIMIT 1) v ON true
+         WHERE i.id = ANY($1) AND {VISIBLE}"
+    ))
+    .bind(&ids)
+    .fetch_all(&st.db)
+    .await?;
+    let newer = |u: &Update| b.items.iter().any(|i| i.id == u.id && island_formats::package::newer(&u.version, &i.version));
+    Ok(Json(rows.into_iter().filter(newer).collect()))
+}

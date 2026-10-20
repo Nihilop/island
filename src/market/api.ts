@@ -172,3 +172,49 @@ export function cleanTags(raw: string): string[] {
   }
   return out.slice(0, 8);
 }
+
+// --- Mises à jour -------------------------------------------------------------------------
+
+export interface Update {
+  id: string;
+  kind: "scene" | "extension";
+  name: string;
+  version: string;
+  changelog: string;
+  permissions: string[] | null;
+  size: number;
+}
+
+/** Mises à jour connues (vérifiées par le Rust au démarrage puis toutes les 24 h). */
+export const updates = reactive({ list: [] as Update[], checking: false, checkedAt: 0, error: null as string | null });
+
+let followingUpdates = false;
+export function watchUpdates() {
+  if (followingUpdates) return;
+  followingUpdates = true;
+  const load = async () => {
+    updates.list = await invoke<Update[]>("market_updates").catch(() => updates.list);
+  };
+  void load();
+  void listen("market://updates", () => void load());
+}
+
+/** Vérifie tout de suite. */
+export async function checkUpdates() {
+  if (updates.checking) return;
+  updates.checking = true;
+  updates.error = null;
+  try {
+    updates.list = await invoke<Update[]>("market_check_updates");
+    updates.checkedAt = Date.now();
+  } catch (e) {
+    updates.error = marketError(e);
+  } finally {
+    updates.checking = false;
+  }
+}
+
+export const updateFor = (id: string) => updates.list.find((u) => u.id === id) ?? null;
+
+/** La scène installée a été modifiée depuis (la mettre à jour écraserait ces changements). */
+export const sceneModified = (item: string) => invoke<boolean>("market_scene_modified", { item });

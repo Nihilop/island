@@ -65,9 +65,9 @@ pub fn manifest(app: &AppHandle, id: &str) -> Option<Manifest> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Installed {
-    manifest: Manifest,
+    pub(crate) manifest: Manifest,
     /// Chargée depuis un dossier de développement.
-    dev: bool,
+    pub(crate) dev: bool,
 }
 
 /// Extensions v2 : installées, puis dossiers du mode développeur (non masqués).

@@ -149,6 +149,16 @@ async fn an_extension_waits_for_review_then_ships_signed_by_the_store(db: PgPool
     assert_eq!(status["signingKey"], store_pub);
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM audit WHERE action = 'version.approve'").fetch_one(&db).await.unwrap();
     assert_eq!(n, 1);
+
+    // Mises à jour : seulement ce qui est connu ET plus récent que la version installée.
+    let check = |items: Value| call(&r, "POST", "/v1/updates", &author, Some(json!({ "items": items })));
+    let (s, u) = check(json!([{ "id": "dev.example.meteo", "version": "0.9.0" }, { "id": "dev.inconnue.x", "version": "1.0.0" }])).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(u.as_array().unwrap().len(), 1);
+    assert_eq!((u[0]["version"].as_str(), u[0]["kind"].as_str()), (Some("1.0.0"), Some("extension")));
+    assert_eq!(u[0]["permissions"], json!(["network:api.example.com"]));
+    let (_, u) = check(json!([{ "id": "dev.example.meteo", "version": "1.0.0" }])).await;
+    assert_eq!(u, json!([]));
 }
 
 #[sqlx::test(migrations = "./migrations")]

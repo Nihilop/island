@@ -84,6 +84,9 @@ pub struct Installed {
     /// Scène locale créée par l'installation.
     pub scene: String,
     pub version: String,
+    /// Date (ms) de la scène juste après installation : plus récente = modifiée depuis.
+    #[serde(default)]
+    pub installed_at: u64,
 }
 
 fn installed_map(app: &AppHandle) -> serde_json::Map<String, serde_json::Value> {
@@ -132,13 +135,22 @@ fn install(app: &AppHandle, id: &str, version: Option<&str>) -> Result<Imported,
     };
     let tmp = std::env::temp_dir().join(format!("island-market-{id}-{}.islandscene", std::process::id()));
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    let imported = share::import(app, &tmp);
+    // Déjà installée : mise à jour SUR PLACE (même scène, donc un fond appliqué le reste).
+    let mut map = installed_map(app);
+    let existing = map.get(id).and_then(|v| v.get("scene")).and_then(|v| v.as_str()).map(String::from);
+    let imported = match &existing {
+        Some(scene) => share::replace(app, &tmp, scene),
+        None => share::import(app, &tmp),
+    };
     let _ = std::fs::remove_file(&tmp);
     let imported = imported?;
-    let mut map = installed_map(app);
-    map.insert(id.to_string(), serde_json::json!(Installed { scene: imported.id.clone(), version }));
+    let installed_at = crate::wallpaper::scene_modified(app, &imported.id);
+    map.insert(id.to_string(), serde_json::json!(Installed { scene: imported.id.clone(), version, installed_at }));
     crate::store::write_store(app, SPACE, &map);
     let _ = app.emit("market://installed", ());
+    // Cette mise à jour n'est plus en attente.
+    UPDATES.lock().unwrap_or_else(|p| p.into_inner()).retain(|u| u.get("id").and_then(|v| v.as_str()) != Some(id));
+    let _ = app.emit("market://updates", ());
     Ok(imported)
 }
 
@@ -669,4 +681,96 @@ pub async fn market_mine(app: AppHandle) -> Result<serde_json::Value, String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// --- Mises à jour ----------------------------------------------------------------------------
+//
+// Au démarrage (après 30 s) puis toutes les 24 h : les extensions installées (hors dossiers de
+// développement) et les scènes installées depuis le magasin sont envoyées à `/v1/updates`.
+// Rien ne s'installe tout seul : une extension passe par la fenêtre d'installation (nouvelles
+// permissions en orange), une scène se met à jour d'un clic. Une notification système annonce
+// les nouvelles mises à jour (une fois par version).
+
+static UPDATES: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
+static NOTIFIED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+const CHECK_EVERY: Duration = Duration::from_secs(24 * 3600);
+
+fn check_updates(app: &AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let mut items: Vec<serde_json::Value> = crate::extensions::ext2_list(app.clone())
+        .into_iter()
+        .filter(|x| !x.dev)
+        .map(|x| serde_json::json!({ "id": x.manifest.id, "version": x.manifest.version }))
+        .collect();
+    for (id, v) in installed_map(app) {
+        if let Some(version) = v.get("version").and_then(|v| v.as_str()) {
+            items.push(serde_json::json!({ "id": id, "version": version }));
+        }
+    }
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list: Vec<serde_json::Value> = agent(app, Duration::from_secs(20))
+        .post(&format!("{}/v1/updates", base_url()))
+        .send_json(serde_json::json!({ "items": items }))
+        .map_err(error)?
+        .into_json()
+        .map_err(|e| e.to_string())?;
+    *UPDATES.lock().unwrap_or_else(|p| p.into_inner()) = list.clone();
+    let _ = app.emit("market://updates", ());
+    Ok(list)
+}
+
+fn announce_updates(app: &AppHandle, list: &[serde_json::Value]) {
+    use tauri_plugin_notification::NotificationExt;
+    let key = |u: &serde_json::Value| format!("{}@{}", u.get("id").and_then(|v| v.as_str()).unwrap_or(""), u.get("version").and_then(|v| v.as_str()).unwrap_or(""));
+    let mut seen = NOTIFIED.lock().unwrap_or_else(|p| p.into_inner());
+    let fresh: Vec<&serde_json::Value> = list.iter().filter(|u| !seen.contains(&key(u))).collect();
+    if fresh.is_empty() {
+        return;
+    }
+    seen.extend(fresh.iter().map(|u| key(u)));
+    let names: Vec<&str> = fresh.iter().filter_map(|u| u.get("name").and_then(|v| v.as_str())).take(3).collect();
+    let fr = !crate::store::read_store(app, "__app__").get("lang").and_then(|v| v.as_str()).unwrap_or("fr").starts_with("en");
+    let title = match (fr, fresh.len()) {
+        (true, 1) => "Mise à jour disponible".to_string(),
+        (true, n) => format!("{n} mises à jour disponibles"),
+        (false, 1) => "Update available".to_string(),
+        (false, n) => format!("{n} updates available"),
+    };
+    let more = if fresh.len() > names.len() { "…" } else { "" };
+    let _ = app.notification().builder().title(title).body(format!("{}{more}", names.join(", "))).show();
+}
+
+/// Vérification au démarrage puis toutes les 24 h (appelé une fois, au lancement).
+pub fn start(app: AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(30));
+        loop {
+            if let Ok(list) = check_updates(&app) {
+                announce_updates(&app, &list);
+            }
+            std::thread::sleep(CHECK_EVERY);
+        }
+    });
+}
+
+/// Mises à jour connues (dernière vérification).
+#[tauri::command]
+pub fn market_updates() -> Vec<serde_json::Value> {
+    UPDATES.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// Vérifie maintenant (bouton « Rechercher les mises à jour »).
+#[tauri::command]
+pub async fn market_check_updates(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || check_updates(&app)).await.map_err(|e| e.to_string())?
+}
+
+/// La scène installée a été modifiée depuis son installation (la mise à jour l'écraserait).
+#[tauri::command]
+pub fn market_scene_modified(app: AppHandle, item: String) -> bool {
+    let map = installed_map(&app);
+    let Some(v) = map.get(&item) else { return false };
+    let (Some(scene), Some(at)) = (v.get("scene").and_then(|s| s.as_str()), v.get("installedAt").and_then(|t| t.as_u64())) else { return false };
+    at > 0 && crate::wallpaper::scene_modified(&app, scene) > at + 2000
 }

@@ -28,7 +28,8 @@ import { commandShortcut, setCommandShortcut, shortcutPrefs, shortcutStatus } fr
 import ShortcutField from "../ui/ShortcutField.vue";
 import ExtensionStore from "./ExtensionStore.vue";
 import StoreAccount from "../tools/wallpaper/StoreAccount.vue";
-import { marketError, session, storeStatus, watchAccount } from "../market/api";
+import { checkUpdates, marketError, session, storeStatus, updateFor, updates, watchAccount, watchUpdates } from "../market/api";
+import { openPackage } from "./install";
 import { listen } from "@tauri-apps/api/event";
 import {
   addDevFolder,
@@ -221,6 +222,26 @@ async function publishDev(dir: string) {
   }
 }
 
+// --- Mises à jour du magasin ----------------------------------------------------------
+
+watchUpdates();
+const updating = ref<string | null>(null);
+const updateError = ref<string | null>(null);
+/** Télécharge la nouvelle version puis ouvre la fenêtre d'installation (consentement). */
+async function update(id: string) {
+  if (updating.value) return;
+  updating.value = id;
+  updateError.value = null;
+  try {
+    await openPackage(await invoke<string>("market_download_extension", { id }));
+  } catch (e) {
+    updateError.value = marketError(e);
+  } finally {
+    updating.value = null;
+  }
+}
+const extUpdates = () => updates.list.filter((u) => u.kind === "extension" && all.value.some((x) => x.manifest.id === u.id && !x.dev));
+
 /** Publications suspendues par la modération : « Publier » désactivé, avec son message. */
 const paused = ref<string | null>(null);
 async function loadPaused() {
@@ -251,6 +272,12 @@ const errorText = (e: string) => {
       <Row :label="t('ext.install')" :help="t('ext.installHelp')">
         <Button @click="pickPackage">{{ t("ext.installAction") }}</Button>
       </Row>
+      <Row
+        :label="t('ext.update.title')"
+        :help="updates.error ?? updateError ?? (extUpdates().length ? t('ext.update.available', { n: extUpdates().length }) : t('ext.update.upToDate'))"
+      >
+        <Button :loading="updates.checking" :disabled="updates.checking" @click="checkUpdates">{{ t("ext.update.check") }}</Button>
+      </Row>
       <div v-if="!all.length" class="border-t border-separator">
         <Empty :icon="PhPuzzlePiece" :title="t('ext.none')" :text="t('ext.noneHelp')" />
       </div>
@@ -261,6 +288,17 @@ const errorText = (e: string) => {
           :style="{ maskImage: `url('${extUrl(x.manifest.id, x.manifest.icon)}')` }"
         />
         <Badge v-if="x.dev" variant="secondary">{{ t("ext.dev") }}</Badge>
+        <Button
+          v-if="!x.dev && updateFor(x.manifest.id)"
+          size="sm"
+          variant="default"
+          :loading="updating === x.manifest.id"
+          :disabled="!!updating"
+          :title="updateFor(x.manifest.id)?.changelog || undefined"
+          @click="update(x.manifest.id)"
+        >
+          {{ t("ext.update.button", { v: updateFor(x.manifest.id)?.version ?? "" }) }}
+        </Button>
         <Button v-if="x.dev" size="icon-sm" variant="ghost" :title="t('ext.reload')" :loading="busy === x.manifest.id" @click="onReload(x.manifest.id)">
           <PhArrowClockwise weight="bold" />
         </Button>

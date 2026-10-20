@@ -1170,7 +1170,6 @@
   "market.back": "Retour au catalogue",
   "market.install": "Installer",
   "market.installing": "Installation…",
-  "market.installVersion": "Installer la v{v}",
   "market.installed": "Installée",
   "market.applied": "Appliquée",
   "market.installedHint": "Installée dans « Mes scènes » : tu peux la modifier comme les tiennes.",
@@ -1270,5 +1269,13 @@
   "ext.publishWin.notice": "Le dossier est empaqueté puis relu par la modération. Explique chaque permission dans la description : c'est vérifié.",
   "ext.publishWin.send": "Envoyer pour relecture",
   "ext.publishWin.sent": "v{v} envoyée",
-  "ext.publishWin.sentHelp": "Elle sera publiée après la relecture. Son état s'affiche dans Réglages › Extensions, mode développeur."
+  "ext.publishWin.sentHelp": "Elle sera publiée après la relecture. Son état s'affiche dans Réglages › Extensions, mode développeur.",
+  "ext.update.title": "Mises à jour du magasin",
+  "ext.update.check": "Rechercher",
+  "ext.update.upToDate": "Vérifiées au démarrage puis chaque jour. Tout est à jour.",
+  "ext.update.available": "{n} mise(s) à jour disponible(s) : bouton sur l'extension concernée.",
+  "ext.update.button": "Mettre à jour (v{v})",
+  "market.updateTo": "Mettre à jour (v{v})",
+  "market.updateBadge": "MAJ",
+  "market.updateOverwrite": "Tu as modifié cette scène depuis son installation : la mise à jour remplacera tes changements. Continuer ?"
 }

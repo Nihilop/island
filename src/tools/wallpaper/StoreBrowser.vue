@@ -12,7 +12,7 @@ import Segmented from "../../ui/Segmented.vue";
 import StoreAccount from "./StoreAccount.vue";
 import { Button } from "@/sdk/ui/button";
 import { Spinner } from "@/sdk/ui/spinner";
-import { catalog, install, item, market, marketError, mediaUrl, PAGE, watchInstalled, type Card, type Detail } from "../../market/api";
+import { catalog, install, item, market, marketError, mediaUrl, PAGE, sceneModified, updateFor, watchInstalled, watchUpdates, type Card, type Detail } from "../../market/api";
 import { apply } from "../../wallpaper/api";
 import { t } from "../../notch/i18n";
 
@@ -87,6 +87,8 @@ const actionError = ref<string | null>(null);
 
 async function doInstall() {
   if (!detail.value || busy.value) return;
+  // Mise à jour d'une scène modifiée depuis son installation : elle écraserait ces changements.
+  if (outdated.value && (await sceneModified(detail.value.id).catch(() => false)) && !window.confirm(t("market.updateOverwrite"))) return;
   busy.value = "install";
   actionError.value = null;
   try {
@@ -121,6 +123,7 @@ const cover = (u: string | null | undefined) => {
 
 onMounted(() => {
   watchInstalled();
+  watchUpdates();
   void load();
 });
 </script>
@@ -150,7 +153,7 @@ onMounted(() => {
       <div class="flex shrink-0 items-center gap-1.5">
         <template v-if="installed">
           <Button v-if="outdated" size="sm" variant="secondary" :disabled="!!busy" @click="doInstall">
-            <Spinner v-if="busy === 'install'" /><PhDownloadSimple v-else />{{ t("market.installVersion", { v: detail.version ?? "" }) }}
+            <Spinner v-if="busy === 'install'" /><PhDownloadSimple v-else />{{ t("market.updateTo", { v: detail.version ?? "" }) }}
           </Button>
           <Button size="sm" :disabled="!!busy || applied" @click="doApply">
             <Spinner v-if="busy === 'apply'" /><PhCheck v-else-if="applied" />{{ applied ? t("market.applied") : t("wall.apply") }}
@@ -247,7 +250,8 @@ onMounted(() => {
       <button v-for="c in items" :key="c.id" type="button" class="group min-w-0 text-left" :disabled="!!opening" @click="open(c)">
         <div class="relative aspect-video w-full overflow-hidden rounded-[8px] bg-fill-2 ring-2 ring-transparent transition-[box-shadow] group-hover:ring-fill-3" :style="cover(c.thumbnail)">
           <span v-if="opening === c.id" class="absolute inset-0 flex items-center justify-center bg-black/30"><Spinner class="text-white" /></span>
-          <span v-if="market.installed[c.id]" class="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sys-green text-white" :title="t('market.installed')">
+          <span v-if="updateFor(c.id)" class="type-caption absolute top-1 right-1 rounded-full bg-sys-link px-1.5 font-medium text-white">{{ t("market.updateBadge") }}</span>
+          <span v-else-if="market.installed[c.id]" class="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-sys-green text-white" :title="t('market.installed')">
             <PhCheck :size="10" weight="bold" />
           </span>
         </div>

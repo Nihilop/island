@@ -299,6 +299,25 @@ impl Prefs {
     }
 }
 
+/// Scène modifiée hors de l'éditeur (mise à jour du magasin) : le moteur la recharge si elle
+/// est affichée.
+pub(crate) fn reload_if_used(app: &AppHandle, id: &str) {
+    if prefs(app).uses(id) {
+        push(app);
+    }
+}
+
+/// Date de modification de la scène (ms), 0 si inconnue.
+pub(crate) fn scene_modified(app: &AppHandle, id: &str) -> u64 {
+    scene_dir(app, id)
+        .ok()
+        .and_then(|d| std::fs::metadata(d.join("scene.json")).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Envoie l'affectation au moteur (une scène illisible = fond Windows sur cet écran).
 fn push(app: &AppHandle) {
     let p = prefs(app);
