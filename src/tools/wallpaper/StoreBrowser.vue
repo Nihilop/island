@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import IconButton from "../../ui/IconButton.vue";
 import TextField from "../../ui/TextField.vue";
 import Segmented from "../../ui/Segmented.vue";
+import StoreAccount from "./StoreAccount.vue";
 import { Button } from "@/sdk/ui/button";
 import { Spinner } from "@/sdk/ui/spinner";
 import { catalog, install, item, market, marketError, mediaUrl, PAGE, watchInstalled, type Card, type Detail } from "../../market/api";
@@ -217,6 +218,7 @@ onMounted(() => {
 
   <!-- Catalogue -->
   <div v-else class="flex flex-col">
+    <StoreAccount class="mb-2" />
     <div class="mb-2.5 flex items-center gap-2">
       <div class="min-w-0 flex-1"><TextField v-model="typed" :placeholder="t('market.search')" /></div>
       <Segmented

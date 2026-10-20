@@ -1185,5 +1185,18 @@
   "market.err.offline": "Magasin injoignable : vérifie ta connexion.",
   "market.err.notFound": "Cette scène n'est plus disponible.",
   "market.err.invalidId": "Élément invalide.",
-  "market.err.other": "Erreur du magasin : {e}"
+  "market.err.other": "Erreur du magasin : {e}",
+  "market.login.signIn": "Se connecter avec GitHub",
+  "market.login.enterCode": "Saisis ce code sur GitHub :",
+  "market.login.copy": "Copier le code",
+  "market.login.copied": "Copié",
+  "market.login.waiting": "En attente de ta validation sur GitHub…",
+  "market.login.openGithub": "Ouvrir GitHub",
+  "market.login.cancel": "Annuler",
+  "market.login.logout": "Se déconnecter du magasin",
+  "market.err.expired": "Le code a expiré : recommence la connexion.",
+  "market.err.denied": "Connexion refusée sur GitHub.",
+  "market.err.banned": "Ce compte est banni du magasin.",
+  "market.err.noLogin": "Aucune connexion en cours.",
+  "market.err.badResponse": "Réponse inattendue du magasin."
 }

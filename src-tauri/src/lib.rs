@@ -49,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -237,6 +238,11 @@ pub fn run() {
             market::market_base,
             market::market_installed,
             market::market_install,
+            market::market_login_start,
+            market::market_login_state,
+            market::market_login_cancel,
+            market::market_account,
+            market::market_logout,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,
             wallpaper::wallpaper_set_options,

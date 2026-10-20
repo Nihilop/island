@@ -71,7 +71,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/me/items", get(items::mine))
         .route("/v1/store/status", get(settings::status))
         .route("/v1/auth/device", post(login::device))
-        .route("/v1/auth/token", post(login::token))
+        .route("/v1/auth/token", post(login::token).delete(login::sign_out))
         .route("/v1/me", get(login::me))
         .route("/v1/me/tokens", get(login::tokens))
         .route("/v1/me/tokens/{id}", delete(login::revoke))

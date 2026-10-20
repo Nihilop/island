@@ -1185,5 +1185,18 @@
   "market.err.offline": "Store unreachable: check your connection.",
   "market.err.notFound": "This scene is no longer available.",
   "market.err.invalidId": "Invalid item.",
-  "market.err.other": "Store error: {e}"
+  "market.err.other": "Store error: {e}",
+  "market.login.signIn": "Sign in with GitHub",
+  "market.login.enterCode": "Enter this code on GitHub:",
+  "market.login.copy": "Copy code",
+  "market.login.copied": "Copied",
+  "market.login.waiting": "Waiting for you to confirm on GitHub…",
+  "market.login.openGithub": "Open GitHub",
+  "market.login.cancel": "Cancel",
+  "market.login.logout": "Sign out of the store",
+  "market.err.expired": "The code expired: start signing in again.",
+  "market.err.denied": "Sign-in was denied on GitHub.",
+  "market.err.banned": "This account is banned from the store.",
+  "market.err.noLogin": "No sign-in in progress.",
+  "market.err.badResponse": "Unexpected response from the store."
 }

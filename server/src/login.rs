@@ -141,6 +141,20 @@ pub async fn tokens(State(st): State<AppState>, user: User) -> ApiResult<Json<Ve
     Ok(Json(rows))
 }
 
+/// `DELETE /v1/auth/token` : révoque le jeton de la requête (déconnexion d'un appareil).
+pub async fn sign_out(State(st): State<AppState>, headers: HeaderMap) -> ApiResult<StatusCode> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(ApiError::unauthorized)?;
+    let n = sqlx::query("DELETE FROM tokens WHERE hash = $1").bind(crate::auth::hash_token(token.trim())).execute(&st.db).await?.rows_affected();
+    if n == 0 {
+        return Err(ApiError::unauthorized());
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Révoque un de SES jetons.
 pub async fn revoke(State(st): State<AppState>, user: User, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     let n = sqlx::query("DELETE FROM tokens WHERE id = $1 AND user_id = $2").bind(id).bind(user.id).execute(&st.db).await?.rows_affected();

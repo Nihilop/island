@@ -60,6 +60,20 @@ async fn device_flow_issues_an_island_token(db: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn an_app_can_sign_out_its_own_token(db: PgPool) {
+    let r = router(db, None).await;
+    let (_, a) = device_login(&r, 42).await;
+    let (_, b) = device_login(&r, 42).await;
+    let (a, b) = (a["token"].as_str().unwrap().to_string(), b["token"].as_str().unwrap().to_string());
+    let out = |t: &str| Request::delete("/v1/auth/token").header("authorization", format!("Bearer {t}")).body(Body::empty()).unwrap();
+    assert_eq!(call(&r, out(&a)).await.0, StatusCode::NO_CONTENT);
+    // Ce jeton est mort, l'autre appareil reste connecté.
+    assert_eq!(get_with(&r, "/v1/me", ("authorization", &format!("Bearer {a}"))).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(get_with(&r, "/v1/me", ("authorization", &format!("Bearer {b}"))).await.0, StatusCode::OK);
+    assert_eq!(call(&r, out(&a)).await.0, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn the_configured_github_account_is_admin_and_stays_admin(db: PgPool) {
     let r = router(db.clone(), Some(1)).await;
     // Un compte de développement a pris le même nom : il est renommé, pas écrasé.

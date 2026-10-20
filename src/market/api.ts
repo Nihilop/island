@@ -98,3 +98,45 @@ export function marketError(e: unknown): string {
   const share = shareError(code);
   return share !== code ? share : t("market.err.other", { e: code });
 }
+
+// --- Compte (connexion GitHub, device flow) ------------------------------------------------
+
+export interface Account {
+  id: number;
+  login: string;
+  avatarUrl: string | null;
+  role: "user" | "moderator" | "admin";
+}
+
+export interface LoginStart {
+  userCode: string;
+  verificationUri: string;
+  expiresIn: number;
+  interval: number;
+}
+
+export const session = reactive({ account: null as Account | null, loaded: false });
+
+export async function refreshAccount() {
+  try {
+    session.account = await invoke<Account | null>("market_account");
+  } finally {
+    session.loaded = true;
+  }
+}
+
+let followingAccount = false;
+/** Charge le compte et suit les connexions / déconnexions (autre fenêtre). */
+export function watchAccount() {
+  if (followingAccount) return;
+  followingAccount = true;
+  void refreshAccount().catch(() => {});
+  void listen("market://account", () => void refreshAccount().catch(() => {}));
+}
+
+/** Démarre la connexion ; le Rust copie le code, le notifie et attend la validation. */
+export const loginStart = (lang: string) => invoke<LoginStart>("market_login_start", { lang });
+/** Connexion en cours (retrouvée quand le panneau se rouvre), sinon null. */
+export const loginState = () => invoke<LoginStart | null>("market_login_state");
+export const loginCancel = () => invoke("market_login_cancel");
+export const logout = () => invoke("market_logout");
