@@ -50,6 +50,35 @@ et les secrets de l'extension sont conservés.
 Réglages › Extensions › corbeille (deux clics). Island supprime le dossier, les permissions,
 le stockage et les secrets de l'extension.
 
+## Publier au magasin
+
+Le même outil publie sur le magasin d'Island. Pour l'instant, le magasin accepte les
+**scènes de fond animé** (`.islandscene`, exportées depuis l'éditeur avec « Partager »).
+Les extensions arrivent ensuite.
+
+```bash
+node packages/sdk/bin/island.mjs login      # connexion GitHub : un code à saisir sur github.com
+node packages/sdk/bin/island.mjs whoami
+node packages/sdk/bin/island.mjs publish aurore.islandscene --summary "Aube boréale" --tags nuit,ciel
+node packages/sdk/bin/island.mjs publish aurore.islandscene --changelog "Étoiles plus fines"
+node packages/sdk/bin/island.mjs logout
+```
+
+- La première publication crée un élément. Republier **le même fichier** envoie une
+  **nouvelle version** de cet élément ; `--new` crée un autre élément, et `--item <id>`
+  vise un élément précis.
+- Le résumé, les étiquettes et les liens peuvent aussi venir du paquet (manifeste et
+  `README`). Les options de la commande passent devant.
+- Le jeton du magasin est rangé dans `~/.island/credentials.json`, lisible par vous seul.
+  `logout` le révoque côté magasin.
+- `--store <url>` (ou la variable `ISLAND_STORE_URL`) vise un autre magasin, par exemple un
+  serveur de développement : `--store http://127.0.0.1:8080`.
+- Si les publications sont suspendues par la modération, la commande le dit et n'envoie
+  rien. Réessayez plus tard.
+
+Depuis l'app, le bouton **Publier** de l'éditeur de fonds fait la même chose, sans passer
+par un fichier.
+
 ## Limites
 
 - 2 000 fichiers et 64 Mo décompressés au plus.
