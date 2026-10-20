@@ -100,7 +100,7 @@ fn load(app: &AppHandle, id: &str) -> Result<(Scene, Option<PathBuf>), String> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
-    id: String,
+    pub(crate) id: String,
     preset: bool,
     /// Rendu enregistré par l'éditeur (`wallpaper_thumbnail`) ; sinon, vignette approchée.
     thumbnail: bool,

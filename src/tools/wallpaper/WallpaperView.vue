@@ -2,11 +2,14 @@
 // Outil « Fonds animés » : en haut, les écrans à l'échelle (repliable, ouvert par défaut) —
 // « Tous les écrans » ou un écran choisi ; dessous, la grille des scènes (5 × 3 par page,
 // recherche au-delà d'une page). Un clic applique la scène à la cible, un second la retire.
-// Masquer l'outil du dock n'arrête pas le fond.
+// Masquer l'outil du dock n'arrête pas le fond. Onglet « Magasin » : les scènes publiées
+// (StoreBrowser), installées puis appliquées à la même cible.
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { PhCaretDown, PhCaretLeft, PhCaretRight, PhDownloadSimple, PhMonitor, PhPause, PhPencilSimple, PhPlus, PhShareNetwork, PhStop, PhTrash, PhWarning } from "@phosphor-icons/vue";
 import IconButton from "../../ui/IconButton.vue";
 import TextField from "../../ui/TextField.vue";
+import Segmented from "../../ui/Segmented.vue";
+import StoreBrowser from "./StoreBrowser.vue";
 import { Spinner } from "@/sdk/ui/spinner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/sdk/ui/collapsible";
 import { apply, deleteScene, displays as listDisplays, exportScene, fillCss, imageUrl, openEditor, pickAndImport, sceneOn, shareError, thumbLayer, thumbnailUrl, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
@@ -14,6 +17,21 @@ import type { SceneEntry } from "../../wallpaper/scene";
 import { t } from "../../notch/i18n";
 
 const PAGE = 15;
+
+const TAB_KEY = "island.wallpaper.tab";
+const tab = ref<"mine" | "store">("mine");
+try {
+  if (localStorage.getItem(TAB_KEY) === "store") tab.value = "store";
+} catch {
+  /* stockage indisponible */
+}
+watch(tab, (v) => {
+  try {
+    localStorage.setItem(TAB_KEY, v);
+  } catch {
+    /* rien */
+  }
+});
 
 const thumbs = reactive<Record<string, string>>({});
 const busy = ref<string | null>(null);
@@ -177,9 +195,22 @@ onMounted(async () => {
     <Teleport defer to="#notch-header-actions">
       <span v-if="anyActive && wallpaper.state.paused" class="type-caption mr-1 flex items-center gap-1 text-label-3"><PhPause :size="11" weight="fill" />{{ t("wall.paused") }}</span>
       <IconButton v-if="anyActive" :icon="PhStop" :label="t('wall.stop')" :disabled="busy === 'stop'" @click="stop" />
-      <IconButton :icon="PhDownloadSimple" :label="t('wall.share.import')" :disabled="busy === 'import'" @click="importFiles" />
-      <IconButton :icon="PhPlus" :label="t('wall.new')" @click="edit()" />
+      <template v-if="tab === 'mine'">
+        <IconButton :icon="PhDownloadSimple" :label="t('wall.share.import')" :disabled="busy === 'import'" @click="importFiles" />
+        <IconButton :icon="PhPlus" :label="t('wall.new')" @click="edit()" />
+      </template>
     </Teleport>
+
+    <div class="mb-3 flex">
+      <Segmented
+        v-model="tab"
+        size="sm"
+        :options="[
+          { value: 'mine', label: t('market.tabMine') },
+          { value: 'store', label: t('market.tabStore') },
+        ]"
+      />
+    </div>
 
     <!-- Écrans -->
     <Collapsible v-model:open="open" class="mb-3 rounded-[12px] bg-fill-1">
@@ -221,6 +252,9 @@ onMounted(async () => {
       </CollapsibleContent>
     </Collapsible>
 
+    <StoreBrowser v-if="tab === 'store'" :target="target" :current="current" />
+
+    <template v-else>
     <div v-if="error || wallpaper.state.error" class="type-caption mb-2 flex items-center gap-1.5 rounded-[8px] bg-sys-red/10 px-2 py-1 text-sys-red">
       <PhWarning :size="12" weight="bold" />{{ t("wall.error", { e: error ?? wallpaper.state.error ?? "" }) }}
     </div>
@@ -257,5 +291,6 @@ onMounted(async () => {
       <span class="type-caption tabular-nums text-label-3">{{ page + 1 }} / {{ pages }}</span>
       <IconButton :icon="PhCaretRight" :label="t('wall.next')" :disabled="page >= pages - 1" @click="page++" />
     </div>
+    </template>
   </div>
 </template>

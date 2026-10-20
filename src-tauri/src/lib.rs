@@ -19,6 +19,7 @@ mod backup;
 mod extensions;
 mod host;
 mod launcher;
+mod market;
 mod overlay;
 mod services;
 mod store;
@@ -232,6 +233,10 @@ pub fn run() {
             wallpaper::share::wallpaper_export,
             wallpaper::share::wallpaper_import,
             wallpaper::share::wallpaper_take_imported,
+            market::market_get,
+            market::market_base,
+            market::market_installed,
+            market::market_install,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,
             wallpaper::wallpaper_set_options,
