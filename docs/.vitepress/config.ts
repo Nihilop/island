@@ -40,7 +40,10 @@ export default defineConfig({
           },
           {
             text: "Island",
-            items: [{ text: "Mises à jour & releases", link: "/reference/updates" }],
+            items: [
+              { text: "Mises à jour & releases", link: "/reference/updates" },
+              { text: "Le magasin", link: "/reference/magasin" },
+            ],
           },
         ],
         docFooter: { prev: "Précédent", next: "Suivant" },
@@ -74,7 +77,10 @@ export default defineConfig({
           },
           {
             text: "Island",
-            items: [{ text: "Updates & releases", link: "/en/reference/updates" }],
+            items: [
+              { text: "Updates & releases", link: "/en/reference/updates" },
+              { text: "The store", link: "/en/reference/magasin" },
+            ],
           },
         ],
         docFooter: { prev: "Previous", next: "Next" },

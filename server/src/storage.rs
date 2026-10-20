@@ -220,14 +220,14 @@ mod tests {
 
     #[test]
     fn folders_and_urls_follow_the_environment() {
-        let dev = Storage::r2("e7149cb0b926dddf52a0f4d30c11ea45", "k", "s", "island-store", "island-packages", "https://cdn.streemkit.com/", true).unwrap();
+        let dev = Storage::r2("0123456789abcdef0123456789abcdef", "k", "s", "island-store", "island-packages", "https://cdn.streemkit.com/", true).unwrap();
         assert_eq!(dev.media_key("sc_a/thumbnail-1.jpg"), "media-dev/sc_a/thumbnail-1.jpg");
         assert_eq!(dev.package_key("sc_a/1.islandscene"), "packages-dev/sc_a/1.islandscene");
         assert_eq!(dev.public_url("media-dev/sc_a/t.jpg").as_deref(), Some("https://cdn.streemkit.com/media-dev/sc_a/t.jpg"));
         // Jamais d'URL publique pour un paquet : seulement un lien signé.
         assert_eq!(dev.public_url("packages-dev/sc_a/1.islandscene"), None);
         let link = dev.signed_download("packages-dev/sc_a/1.islandscene", "attachment; filename=\"Aurore.islandscene\"").unwrap();
-        assert!(link.starts_with("https://e7149cb0b926dddf52a0f4d30c11ea45.r2.cloudflarestorage.com/island-packages/packages-dev/sc_a/1.islandscene?"));
+        assert!(link.starts_with("https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com/island-packages/packages-dev/sc_a/1.islandscene?"));
         assert!(Storage::r2("a", "k", "s", "island-store", "island-store", "https://x", false).is_err());
         assert!(link.contains("X-Amz-Signature=") && link.contains("X-Amz-Expires=300"));
         let prod = Storage::local(PathBuf::from("x"), false);

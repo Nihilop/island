@@ -9,3 +9,9 @@
 crates/island-formats/target
 server/admin/node_modules
 server/admin/dist
+# Jamais de secrets dans l'image, même ajoutés par erreur dans un dossier autorisé.
+**/.env
+**/.env.*
+**/*.pem
+**/*signing-key*
+**/secrets
