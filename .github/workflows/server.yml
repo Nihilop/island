@@ -1,0 +1,75 @@
+name: Server
+
+# Tests du magasin (server/) et des formats partagés (crates/island-formats), contre un vrai
+# Postgres. Indépendant de la release de l'app (tags v*).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - "crates/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "crates/**"
+      - ".github/workflows/server.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: island
+          POSTGRES_PASSWORD: island
+          POSTGRES_DB: island_store
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U island"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://island:island@localhost:5432/island_store
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/island-formats
+            server
+      - name: Formats partagés
+        working-directory: crates/island-formats
+        run: cargo test
+      - name: Serveur
+        working-directory: server
+        run: cargo test
+
+  admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          # Le package.json de la racine (l'app) fixe une autre version de pnpm : celui du
+          # panneau, qui n'en fixe aucune, évite le conflit.
+          package_json_file: server/admin/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: server/admin/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Types et construction du panneau
+        run: pnpm build

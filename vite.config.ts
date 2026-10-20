@@ -43,14 +43,16 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri` (et les extensions d'exemple, qui se
-      //    construisent à part : leurs `dist/` changent à chaque build) — SAUF les shaders
+      // 3. tell Vite to ignore watching `src-tauri` (et les extensions d'exemple, le serveur
+      //    du magasin, les formats partagés, qui se construisent à part) — SAUF les shaders
       //    des fonds animés (`src-tauri/src/wallpaper/*.wgsl`), importés par l'aperçu de
       //    l'éditeur : sans ça, Vite sert la première version lue, à jamais. Les seuls
       //    dossiers parcourus sont le chemin jusqu'à eux (jamais `target/`).
       ignored: (file: string) => {
         const p = file.replace(/\\/g, "/");
-        if (p.includes("/examples/")) return true;
+        // Ni les extensions d'exemple, ni le serveur du magasin et ses formats (leurs `target/`
+        // Rust et le `node_modules` du panneau d'administration : des milliers de fichiers).
+        if (p.includes("/examples/") || p.includes("/server/") || p.includes("/crates/")) return true;
         const i = p.indexOf("/src-tauri");
         if (i < 0) return false;
         const rest = p.slice(i);

@@ -92,6 +92,29 @@ export async function imageUrl(id: string, name: string): Promise<string> {
   return url;
 }
 
+/** Enregistre le rendu de la scène (vignette du magasin et de l'outil). */
+export async function saveThumbnail(id: string, png: Blob) {
+  const data = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(png);
+  });
+  await invoke("wallpaper_save_thumbnail", { id, data });
+}
+
+const thumbs = new Map<string, string>();
+/** URL du rendu enregistré d'une scène (`key` change à chaque enregistrement). */
+export async function thumbnailUrl(id: string, key: string | number): Promise<string> {
+  const k = `${id}:${key}`;
+  const hit = thumbs.get(k);
+  if (hit) return hit;
+  const buf = await invoke<ArrayBuffer>("wallpaper_thumbnail", { id });
+  const url = URL.createObjectURL(new Blob([buf], { type: "image/png" }));
+  thumbs.set(k, url);
+  return url;
+}
+
 export async function imageBitmap(id: string, name: string): Promise<ImageBitmap> {
   const buf = await invoke<ArrayBuffer>("wallpaper_image", { id, name });
   return createImageBitmap(new Blob([buf]));

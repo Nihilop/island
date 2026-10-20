@@ -50,6 +50,39 @@ secrets are kept.
 Settings › Extensions › trash can (two clicks). Island removes the extension's folder,
 permissions, storage and secrets.
 
+## Publish to the store
+
+The same tool publishes to the Island store. It accepts **live-wallpaper scenes**
+(`.islandscene`, exported from the editor with “Share”) and **extensions** (`.island`).
+
+```bash
+node packages/sdk/bin/island.mjs login      # GitHub sign-in: enter a code on github.com
+node packages/sdk/bin/island.mjs whoami
+node packages/sdk/bin/island.mjs publish aurora.islandscene --summary "Northern dawn" --tags night,sky
+node packages/sdk/bin/island.mjs publish aurora.islandscene --changelog "Finer stars"
+node packages/sdk/bin/island.mjs logout
+```
+
+- The first publish creates an item. Publishing **the same file** again sends a **new
+  version** of that item; `--new` creates another item, and `--item <id>` targets a given
+  item.
+- The summary, tags and links can also come from the package (manifest and `README`).
+  Command options take precedence: `--summary`, `--description`, `--tags`, `--homepage`,
+  `--repository`, `--license`, `--changelog`.
+- An **extension** (`.island`) goes to **review**: moderators read its code and
+  permissions, then publish it signed by the store. Its id is the manifest's, and its
+  version must increase. In developer mode, Settings › Extensions also offers “Package”
+  and “Publish” (with a window for the listing).
+- The store token is kept in `~/.island/credentials.json`, readable only by you. `logout`
+  revokes it on the store.
+- `--store <url>` (or the `ISLAND_STORE_URL` variable) targets another store, for example
+  a development server: `--store http://127.0.0.1:8080`.
+- If moderators have paused publishing, the command says so and sends nothing. Try again
+  later.
+
+In the app, the wallpaper editor's **Publish** button does the same without going through
+a file.
+
 ## Limits
 
 - At most 2,000 files and 64 MB uncompressed.

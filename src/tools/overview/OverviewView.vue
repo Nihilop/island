@@ -15,7 +15,8 @@ import {
 } from "@phosphor-icons/vue";
 import Equalizer from "../../ui/Equalizer.vue";
 import IconButton from "../../ui/IconButton.vue";
-import { PhDiscordLogo, PhEye, PhEyeSlash, PhGameController } from "@phosphor-icons/vue";
+import { PhDiscordLogo, PhEye, PhEyeSlash, PhGameController, PhStorefront } from "@phosphor-icons/vue";
+import { openStore } from "../../store/open";
 import { duration as playDuration, playing } from "../activity/store";
 import { presentation, setPresentation } from "../../notch/presentation";
 import TrackBar from "../../ui/TrackBar.vue";
@@ -103,6 +104,7 @@ const sky = computed(() => (weather.current ? wmo(weather.current.code, weather.
 <template>
   <div class="flex h-full flex-col gap-2.5 px-4 pb-1">
     <Teleport defer to="#notch-header-actions">
+      <IconButton :icon="PhStorefront" :label="t('store.open')" @click="openStore()" />
       <IconButton
         :icon="presentation ? PhEyeSlash : PhEye"
         :active="presentation"

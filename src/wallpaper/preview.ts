@@ -14,7 +14,7 @@ type GPU = any;
 // Drapeaux WebGPU : ceux des tampons et ceux des textures n'ont PAS les mêmes valeurs
 // (COPY_DST vaut 0x8 pour un tampon, 0x2 pour une texture).
 const BUFFER = { COPY_DST: 0x8, UNIFORM: 0x40 };
-const TEXTURE = { COPY_DST: 0x2, TEXTURE_BINDING: 0x4, RENDER_ATTACHMENT: 0x10 };
+const TEXTURE = { COPY_SRC: 0x1, COPY_DST: 0x2, TEXTURE_BINDING: 0x4, RENDER_ATTACHMENT: 0x10 };
 const FORMAT = "rgba8unorm";
 const CANVAS_FORMAT = "bgra8unorm";
 
@@ -278,6 +278,64 @@ export class Preview {
     comp.end();
     this.device.queue.submit([enc.finish()]);
   };
+
+  /**
+   * Rendu de la scène en PNG (vignette du magasin et de l'outil) : mêmes passes que
+   * l'aperçu, dans des textures à part, sans souris ni interactions, à `time` secondes
+   * d'animation (particules en place). Attend la fin du chargement des images.
+   */
+  async snapshot(width = 960, height = 540, time = 3): Promise<Blob> {
+    for (let i = 0; i < 60 && [...this.images.values()].includes("loading"); i++) await new Promise((r) => setTimeout(r, 50));
+    const d = this.device;
+    const s = this.scene;
+    const f: Frame = { width, height, time, mouse: null, ripples: [], trail: [] };
+    const target = d.createTexture({ size: [width, height], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.RENDER_ATTACHMENT });
+    const out = d.createTexture({ size: [width, height], format: CANVAS_FORMAT, usage: TEXTURE.RENDER_ATTACHMENT | TEXTURE.COPY_SRC });
+    const comp = d.createBuffer({ size: COMPOSITE_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+    d.queue.writeBuffer(comp, 0, packComposite(s, f));
+    const enc = d.createCommandEncoder();
+    const layers = enc.beginRenderPass({ colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }] });
+    for (const l of s.layers.filter((x) => x.visible)) {
+      // Tampon à part : l'aperçu continue d'écrire les siens à chaque image.
+      const r = this.res(l);
+      const buf = d.createBuffer({ size: LAYER_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
+      d.queue.writeBuffer(buf, 0, packLayer(s, l, f, r.tex));
+      const tex = this.image(l.kind === "image" ? l.image : null);
+      const masks = maskNames(l).map((m) => this.image(m, this.white));
+      layers.setPipeline(this.layerPipelines[blendIndex(l.blend)]);
+      layers.setBindGroup(0, this.bind(this.layerLayout, buf, [tex, ...masks].map((v) => v.view)));
+      layers.draw(3);
+    }
+    layers.end();
+    const final = enc.beginRenderPass({ colorAttachments: [{ view: out.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 1] }] });
+    final.setPipeline(this.compositePipeline);
+    final.setBindGroup(0, this.bind(this.compositeLayout, comp, [target.createView()]));
+    final.draw(3);
+    final.end();
+    // Relecture : lignes alignées sur 256 octets (exigence de WebGPU).
+    const row = Math.ceil((width * 4) / 256) * 256;
+    const read = d.createBuffer({ size: row * height, usage: BUFFER.COPY_DST | 0x1 }); // MAP_READ
+    enc.copyTextureToBuffer({ texture: out }, { buffer: read, bytesPerRow: row }, [width, height]);
+    d.queue.submit([enc.finish()]);
+    await read.mapAsync(0x1); // GPUMapMode.READ
+    const src = new Uint8Array(read.getMappedRange());
+    const img = new ImageData(width, height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = y * row + x * 4;
+        const o = (y * width + x) * 4;
+        img.data[o] = src[i + 2]; // BGRA → RGBA
+        img.data[o + 1] = src[i + 1];
+        img.data[o + 2] = src[i];
+        img.data[o + 3] = 255;
+      }
+    }
+    read.unmap();
+    [target, out, comp, read].forEach((x) => x.destroy());
+    const canvas = new OffscreenCanvas(width, height);
+    canvas.getContext("2d")!.putImageData(img, 0, 0);
+    return canvas.convertToBlob({ type: "image/png" });
+  }
 
   destroy() {
     cancelAnimationFrame(this.raf);

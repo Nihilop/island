@@ -16,9 +16,10 @@ import Outliner from "./Outliner.vue";
 import LayerPanel from "./LayerPanel.vue";
 import ScenePanel from "./ScenePanel.vue";
 import MaskPainter from "./MaskPainter.vue";
+import PublishPopover from "./PublishPopover.vue";
 import { Preview } from "./preview";
 import { DEFAULTS, layerBox, layerId, maskNames, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
-import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, shareError } from "./api";
+import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, saveThumbnail, shareError } from "./api";
 import { t } from "../notch/i18n";
 
 const win = getCurrentWindow();
@@ -297,6 +298,9 @@ async function save(): Promise<boolean> {
     const s = JSON.parse(JSON.stringify(toRaw(scene.value))) as Scene;
     s.name = s.name.trim() || t("wall.untitled");
     await saveScene(id.value, s);
+    // Vignette : un vrai rendu de la scène (outil du notch, partage, magasin). Un échec ne
+    // fait pas échouer l'enregistrement (l'ancienne vignette approchée reste).
+    if (preview) await preview.snapshot().then((png) => saveThumbnail(id.value, png)).catch((e) => console.warn("vignette :", e));
     scene.value.name = s.name;
     baseline.value = JSON.stringify(scene.value);
     isNew.value = false;
@@ -323,12 +327,13 @@ async function saveAndApply() {
 }
 
 const sharing = ref(false);
-/** Partager : enregistre la scène (si besoin) puis l'écrit dans un `.islandscene`. */
+/** Partager : enregistre la scène (rendu de la vignette compris) puis l'écrit dans un
+ * `.islandscene`. */
 async function share() {
   if (sharing.value) return;
   sharing.value = true;
   try {
-    if ((dirty.value || isNew.value) && !(await save())) return;
+    if (!(await save())) return;
     await exportScene(id.value, scene.value.name);
   } catch (e) {
     error.value = shareError(e);
@@ -336,6 +341,11 @@ async function share() {
     sharing.value = false;
   }
 }
+
+/** Avant la publication au magasin : enregistrée, avec un rendu à jour de la scène (la
+ * vignette). Toujours, même sans modification : une scène enregistrée avant l'arrivée des
+ * vignettes n'en a pas, et le magasin retomberait sur une vignette approchée. */
+const prepareForStore = () => save();
 
 async function close() {
   if (dirty.value && !window.confirm(t("wall.discard"))) return;
@@ -397,6 +407,7 @@ onBeforeUnmount(() => {
       <div class="flex-1 self-stretch" data-tauri-drag-region />
       <Button size="sm" :loading="saving" :disabled="!dirty && !isNew" @click="save">{{ t("common.save") }}</Button>
       <Button size="sm" :loading="sharing" @click="share"><PhShareNetwork />{{ t("wall.share.export") }}</Button>
+      <PublishPopover :scene="id" :prepare="prepareForStore" />
       <Button size="sm" variant="default" :loading="applying" @click="saveAndApply"><PhMonitor />{{ t("wall.apply") }}</Button>
       <div class="mx-1 h-4 w-px bg-separator" />
       <IconButton :icon="PhMinus" :label="t('notes.minimize')" @click="win.minimize()" />

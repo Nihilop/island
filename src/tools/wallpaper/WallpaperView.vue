@@ -2,18 +2,22 @@
 // Outil « Fonds animés » : en haut, les écrans à l'échelle (repliable, ouvert par défaut) —
 // « Tous les écrans » ou un écran choisi ; dessous, la grille des scènes (5 × 3 par page,
 // recherche au-delà d'une page). Un clic applique la scène à la cible, un second la retire.
-// Masquer l'outil du dock n'arrête pas le fond.
+// Masquer l'outil du dock n'arrête pas le fond. Le bouton magasin ouvre la fenêtre Magasin
+// sur les fonds animés.
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { PhCaretDown, PhCaretLeft, PhCaretRight, PhDownloadSimple, PhMonitor, PhPause, PhPencilSimple, PhPlus, PhShareNetwork, PhStop, PhTrash, PhWarning } from "@phosphor-icons/vue";
+import { PhCaretDown, PhCaretLeft, PhCaretRight, PhDownloadSimple, PhMonitor, PhPause, PhPencilSimple, PhPlus, PhShareNetwork, PhStop, PhStorefront, PhTrash, PhWarning } from "@phosphor-icons/vue";
 import IconButton from "../../ui/IconButton.vue";
 import TextField from "../../ui/TextField.vue";
+import { openStore } from "../../store/open";
 import { Spinner } from "@/sdk/ui/spinner";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/sdk/ui/collapsible";
-import { apply, deleteScene, displays as listDisplays, exportScene, fillCss, imageUrl, openEditor, pickAndImport, sceneOn, shareError, thumbLayer, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
+import { apply, deleteScene, displays as listDisplays, exportScene, fillCss, imageUrl, openEditor, pickAndImport, sceneOn, shareError, thumbLayer, thumbnailUrl, wallpaper, watchWallpaper, type Display } from "../../wallpaper/api";
 import type { SceneEntry } from "../../wallpaper/scene";
 import { t } from "../../notch/i18n";
 
 const PAGE = 15;
+
+
 
 const thumbs = reactive<Record<string, string>>({});
 const busy = ref<string | null>(null);
@@ -26,7 +30,7 @@ const screens = ref<Display[]>([]);
 const target = ref<string | null>(null);
 
 const COLLAPSE_KEY = "island.wallpaper.screensOpen";
-const open = ref(true);
+const open = ref(false);
 try {
   open.value = localStorage.getItem(COLLAPSE_KEY) !== "0";
 } catch {
@@ -91,8 +95,19 @@ async function thumb(id: string, img: string) {
   if (!thumbs[id + img]) thumbs[id + img] = await imageUrl(id, img).catch(() => "");
 }
 
-/** Vignette : le calque de fond de la scène (image ou couleur / dégradé). */
+const cover = (url: string | undefined) =>
+  url ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" } : { background: "var(--color-fill-2)" };
+
+/** Vignette : le rendu enregistré par l'éditeur ; à défaut, le calque de fond de la scène. */
 function style(e: SceneEntry | undefined) {
+  if (e?.thumbnail) {
+    const k = `snap:${e.id}:${e.updated}`;
+    if (!(k in thumbs)) {
+      thumbs[k] = "";
+      void thumbnailUrl(e.id, e.updated).then((u) => (thumbs[k] = u)).catch(() => {});
+    }
+    return cover(thumbs[k]);
+  }
   const l = e && thumbLayer(e.scene);
   if (!e || !l) return { background: "var(--color-fill-2)" };
   if (l.kind === "image" && l.image) {
@@ -166,6 +181,7 @@ onMounted(async () => {
     <Teleport defer to="#notch-header-actions">
       <span v-if="anyActive && wallpaper.state.paused" class="type-caption mr-1 flex items-center gap-1 text-label-3"><PhPause :size="11" weight="fill" />{{ t("wall.paused") }}</span>
       <IconButton v-if="anyActive" :icon="PhStop" :label="t('wall.stop')" :disabled="busy === 'stop'" @click="stop" />
+      <IconButton :icon="PhStorefront" :label="t('store.open')" @click="openStore({ section: 'scenes' })" />
       <IconButton :icon="PhDownloadSimple" :label="t('wall.share.import')" :disabled="busy === 'import'" @click="importFiles" />
       <IconButton :icon="PhPlus" :label="t('wall.new')" @click="edit()" />
     </Teleport>

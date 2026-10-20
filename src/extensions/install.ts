@@ -1,22 +1,22 @@
-// Installation et gestion des extensions v2, côté front : fiche de consentement (paquet
-// glissé sur le notch, double-cliqué ou choisi), activation, désinstallation, mode
-// développeur. La vérification (signature, manifeste, chemins) est faite par Rust, deux
+// Installation et gestion des extensions v2, côté front : fenêtre d'installation (paquet
+// glissé sur le notch, double-cliqué, choisi ou téléchargé du magasin), activation,
+// désinstallation, mode développeur. La vérification (signature, manifeste, chemins) est faite par Rust, deux
 // fois : à l'examen et à l'installation.
 
-import { reactive, watch } from "vue";
+import { watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { settings } from "../notch/settings";
 import { interceptDrop } from "../notch/drop";
-import { openSettings } from "../tools/settings/nav";
-import { hold, open } from "../notch/state";
+import { t } from "../notch/i18n";
 import { initExtensions, reload, type Manifest } from "./runtime";
 import { forgetExtensionTools, registerExtensionTools } from "./tools";
 import { registerExtensionSlots } from "./slots";
 import "./settings";
 
-export type Signature = "official" | "untrusted" | "unsigned" | "invalid";
+/** `store` : relue puis signée par le magasin d'Island. */
+export type Signature = "official" | "store" | "untrusted" | "unsigned" | "invalid";
 
 export interface Inspect {
   manifest: Manifest;
@@ -26,26 +26,19 @@ export interface Inspect {
   update: { fromVersion: string; newPermissions: string[] } | null;
 }
 
-/** Paquet en attente de consentement. */
-export const pending = reactive({
-  path: null as string | null,
-  info: null as Inspect | null,
-  error: null as string | null,
-  busy: false,
-});
-
-/** Examine un paquet et ouvre la fiche (Réglages › Extensions). */
+/**
+ * Ouvre la fenêtre d'installation sur un paquet (choisi, glissé sur l'île, double-cliqué ou
+ * téléchargé du magasin) : la fiche de consentement s'y lit en grand (InstallWindow.vue).
+ */
 export async function openPackage(path: string) {
-  Object.assign(pending, { path, info: null, error: null, busy: true });
-  openSettings("extensions");
-  open({ tool: "settings", focus: true });
-  try {
-    pending.info = await invoke<Inspect>("ext2_inspect", { path });
-  } catch (e) {
-    pending.error = String(e);
-  } finally {
-    pending.busy = false;
-  }
+  await invoke("window_open", {
+    kind: "install",
+    key: "extension",
+    title: t("ext.consent.title"),
+    size: [560, 660],
+    minSize: [440, 480],
+    args: { path, devMode: settings.extensions.devMode },
+  });
 }
 
 /** Bouton « Installer… » : choix d'un fichier `.island`. */
@@ -54,24 +47,10 @@ export async function pickPackage() {
   if (typeof path === "string") await openPackage(path);
 }
 
-export function cancelInstall() {
-  Object.assign(pending, { path: null, info: null, error: null, busy: false });
-}
-
-/** Installe après consentement. `allowUntrusted` : paquet non officiel (mode dév.). */
-export async function confirmInstall(allowUntrusted: boolean) {
-  if (!pending.path || pending.busy) return;
-  pending.busy = true;
-  pending.error = null;
-  try {
-    const m = await invoke<Manifest>("ext2_install", { path: pending.path, allowUntrusted });
-    settings.extensions.disabled = settings.extensions.disabled.filter((x) => x !== m.id);
-    await reload([m.id]);
-    cancelInstall();
-  } catch (e) {
-    pending.error = String(e);
-    pending.busy = false;
-  }
+/** Après l'installation (fenêtre d'installation) : l'extension est activée et chargée. */
+async function installed(id: string) {
+  settings.extensions.disabled = settings.extensions.disabled.filter((x) => x !== id);
+  await reload([id]);
 }
 
 export async function uninstall(id: string) {
@@ -113,19 +92,6 @@ async function pushDev() {
   await invoke("ext2_set_dev", { enabled: settings.extensions.devMode, folders: settings.extensions.devFolders }).catch(() => {});
 }
 
-/** La fiche de consentement tient le notch ouvert jusqu'à la réponse. */
-let pendingHold: (() => void) | null = null;
-watch(
-  () => pending.path,
-  (path) => {
-    if (path && !pendingHold) pendingHold = hold();
-    else if (!path) {
-      pendingHold?.();
-      pendingHold = null;
-    }
-  },
-);
-
 export async function initExtensionsHost() {
   await pushDev();
   await initExtensions({ disabled: (id) => settings.extensions.disabled.includes(id) }, registerExtensionTools, registerExtensionSlots);
@@ -136,6 +102,7 @@ export async function initExtensionsHost() {
       await reload();
     },
   );
+  listen<string>("ext2://installed", (e) => void installed(e.payload));
   // Paquet double-cliqué (argv) ou glissé sur le notch.
   listen<string>("ext2://install", (e) => void openPackage(e.payload));
   const startup = await invoke<string | null>("ext2_take_pending").catch(() => null);

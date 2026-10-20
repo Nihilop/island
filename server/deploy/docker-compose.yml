@@ -1,0 +1,72 @@
+# Island store — production stack (API + admin panel). Files go to Cloudflare R2.
+#
+# Quick start (see server/INSTALL.md, "Deploy with Docker Compose"):
+#   cp .env.example .env            # fill it in
+#   mkdir secrets && node ../../packages/sdk/bin/island.mjs keygen secrets/store-signing-key.json
+#   docker compose up -d
+#   docker compose logs -f store
+#
+# Optional services, enabled with COMPOSE_PROFILES in .env (comma-separated):
+#   tunnel     Cloudflare Tunnel: public HTTPS without opening a port (TUNNEL_TOKEN)
+#   antivirus  ClamAV scan of uploads (about 1.5 GB of RAM; set CLAMAV_URL=clamav:3310)
+#   local-db   Postgres in this stack, instead of a hosted one such as Neon
+#
+# Updates: `docker compose pull && docker compose up -d`. The `store` container carries
+# the Watchtower label, so a Watchtower already running on the host updates it on its own.
+
+name: island-store
+
+services:
+  store:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/island-store:${STORE_TAG:-latest}
+    # Build from source instead of pulling the image:
+    # build: { context: ../.., dockerfile: server/Dockerfile }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BIND: 0.0.0.0:8080
+      # The key file is mounted read-only from ./secrets (never in the image, never in git).
+      STORE_SIGNING_KEY: /run/secrets/store-signing-key.json
+    volumes:
+      - ./secrets:/run/secrets:ro
+    # Reachable from this machine only: the tunnel (or your reverse proxy) is the way in.
+    ports:
+      - "127.0.0.1:${STORE_PORT:-8080}:8080"
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+
+  clamav:
+    image: clamav/clamav:stable
+    profiles: [antivirus]
+    restart: unless-stopped
+    volumes:
+      - clamav:/var/lib/clamav
+
+  postgres:
+    image: postgres:17-alpine
+    profiles: [local-db]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: island
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: island_store
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    # The store waits up to a minute for the database at startup.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U island -d island_store"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  clamav:
+  postgres:

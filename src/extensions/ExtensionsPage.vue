@@ -1,16 +1,18 @@
 <script setup lang="ts">
-// Réglages › Extensions : fiche de consentement (paquet en attente), extensions installées
-// (activation, désinstallation, réglages générés depuis le manifeste), mode développeur.
-import { computed, onMounted, reactive, ref } from "vue";
+// Réglages › Extensions : compte du magasin, extensions installées (activation,
+// désinstallation, réglages générés depuis le manifeste ; le catalogue est dans la fenêtre
+// Magasin), mode
+// développeur (dossiers ; « Empaqueter » un .island, « Publier » au magasin pour relecture).
+// L'installation elle-même se fait dans sa fenêtre (InstallWindow.vue).
+import { onMounted, reactive, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import {
   PhArrowClockwise,
-  PhCheckCircle,
   PhFolderPlus,
   PhPuzzlePiece,
-  PhSealWarning,
-  PhShieldCheck,
+  PhStorefront,
+  PhPackage,
   PhTrash,
-  PhWarningOctagon,
   PhX,
 } from "@phosphor-icons/vue";
 import Group from "../ui/Group.vue";
@@ -25,11 +27,13 @@ import { all, extUrl, installed, type Manifest, type SettingDecl } from "./runti
 import { readSetting, writeSetting } from "./settings";
 import { commandShortcut, setCommandShortcut, shortcutPrefs, shortcutStatus } from "./slots";
 import ShortcutField from "../ui/ShortcutField.vue";
+import { openStore } from "../store/open";
+import StoreAccount from "../tools/wallpaper/StoreAccount.vue";
+import { checkUpdates, marketError, session, storeStatus, updateFor, updates, watchAccount, watchUpdates } from "../market/api";
+import { openPackage } from "./install";
+import { listen } from "@tauri-apps/api/event";
 import {
   addDevFolder,
-  cancelInstall,
-  confirmInstall,
-  pending,
   pickPackage,
   reloadExtension,
   removeDevFolder,
@@ -138,23 +142,118 @@ async function onAddDev() {
   devError.value = await addDevFolder();
 }
 
-// --- Fiche de consentement ---------------------------------------------------------------
+// --- Mode développeur : publier au magasin ----------------------------------------------
 
-const info = computed(() => pending.info);
-/** Paquet non officiel : installable seulement en mode développeur, après avertissement. */
-const untrusted = computed(() => info.value && info.value.signature !== "official");
-const canInstall = computed(() => !!info.value && info.value.signature !== "invalid" && (!untrusted.value || settings.extensions.devMode));
-const contributions = computed(() => {
-  const c = info.value?.manifest.contributes;
-  if (!c) return [];
-  return [
-    ...c.tools.map((x) => t("ext.adds.tool", { name: x.title })),
-    ...(c.live.length ? [t("ext.adds.live")] : []),
-    ...c.launcher.map((x) => (x.prefix ? t("ext.adds.launcherPrefix", { prefix: x.prefix }) : t("ext.adds.launcher"))),
-    ...c.commands.map((x) => t("ext.adds.command", { name: x.title })),
-    ...(c.settings.length ? [t("ext.adds.settings")] : []),
-  ];
+interface MineItem {
+  id: string;
+  lastVersion: string | null;
+  lastStatus: string | null;
+  rejectReason: string | null;
+}
+/** Dossier → id du manifeste (pour retrouver l'état au magasin). */
+const devIds = reactive(new Map<string, string>());
+const mine = ref<Map<string, MineItem>>(new Map());
+const publishing = ref<string | null>(null);
+const publishMsg = reactive(new Map<string, { ok: boolean; text: string }>());
+
+async function loadDevIds() {
+  for (const dir of settings.extensions.devFolders) {
+    if (devIds.has(dir)) continue;
+    const m = await invoke<Manifest>("ext2_dev_inspect", { folder: dir }).catch(() => null);
+    if (m) devIds.set(dir, m.id);
+  }
+}
+async function loadMine() {
+  if (!session.account) return;
+  const list = await invoke<MineItem[]>("market_mine").catch(() => []);
+  mine.value = new Map(list.map((x) => [x.id, x]));
+}
+watch(
+  () => [settings.extensions.devMode, settings.extensions.devFolders.length, session.account?.id] as const,
+  ([dev]) => {
+    if (!dev) return;
+    watchAccount();
+    void loadDevIds();
+    void loadMine();
+    void loadPaused();
+  },
+  { immediate: true },
+);
+
+/** État au magasin d'un dossier en développement. */
+function storeState(dir: string): string | null {
+  const x = mine.value.get(devIds.get(dir) ?? "");
+  if (!x?.lastVersion) return null;
+  if (x.lastStatus === "pending") return t("ext.publish.pending", { v: x.lastVersion });
+  if (x.lastStatus === "approved") return t("ext.publish.approved", { v: x.lastVersion });
+  if (x.lastStatus === "rejected") return x.rejectReason === "superseded" ? null : t("ext.publish.rejected", { v: x.lastVersion, why: x.rejectReason ?? "" });
+  return null;
+}
+
+const packing = ref<string | null>(null);
+/** Empaquette le dossier dans un `.island` choisi (comme `island pack`, sans signature). */
+async function packDev(dir: string) {
+  if (packing.value) return;
+  const id = devIds.get(dir) ?? dir.split(/[\\/]/).pop() ?? "extension";
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const dest = await save({ defaultPath: `${id}.island`, filters: [{ name: "Island", extensions: ["island"] }] }).catch(() => null);
+  if (!dest) return;
+  packing.value = dir;
+  publishMsg.delete(dir);
+  try {
+    const r = await invoke<{ files: number; size: number }>("market_pack_extension", { folder: dir, path: dest });
+    publishMsg.set(dir, { ok: true, text: t("ext.pack.done", { n: r.files, kb: (r.size / 1024).toFixed(1) }) });
+  } catch (e) {
+    const code = String(e);
+    publishMsg.set(dir, { ok: false, text: code.startsWith("fileType:") ? t("ext.publish.fileType", { f: code.slice(9) }) : marketError(e) });
+  } finally {
+    packing.value = null;
+  }
+}
+
+/** « Publier » : la fenêtre de publication (fiche, médias, état au magasin). */
+async function publishDev(dir: string) {
+  if (publishing.value) return;
+  publishing.value = dir;
+  publishMsg.delete(dir);
+  try {
+    await invoke("window_open", { kind: "publish", key: "extension", title: t("ext.publishWin.title"), size: [640, 760], minSize: [480, 520], args: { folder: dir } });
+  } finally {
+    publishing.value = null;
+  }
+}
+
+// --- Mises à jour du magasin ----------------------------------------------------------
+
+watchUpdates();
+const updating = ref<string | null>(null);
+const updateError = ref<string | null>(null);
+/** Télécharge la nouvelle version puis ouvre la fenêtre d'installation (consentement). */
+async function update(id: string) {
+  if (updating.value) return;
+  updating.value = id;
+  updateError.value = null;
+  try {
+    await openPackage(await invoke<string>("market_download_extension", { id }));
+  } catch (e) {
+    updateError.value = marketError(e);
+  } finally {
+    updating.value = null;
+  }
+}
+const extUpdates = () => updates.list.filter((u) => u.kind === "extension" && all.value.some((x) => x.manifest.id === u.id && !x.dev));
+
+/** Publications suspendues par la modération : « Publier » désactivé, avec son message. */
+const paused = ref<string | null>(null);
+async function loadPaused() {
+  const s = await storeStatus().catch(() => null);
+  paused.value = s && !s.publishing.open ? s.publishing.message || t("market.publish.pausedDefault") : null;
+}
+void listen("market://published", () => {
+  void loadMine();
+  void loadPaused();
 });
+
 const errorText = (e: string) => {
   const key = `ext.err.${e.split(":")[0]}`;
   const s = t(key);
@@ -164,51 +263,24 @@ const errorText = (e: string) => {
 
 <template>
   <div>
-    <!-- Fiche de consentement -->
-    <Group v-if="pending.path" :title="info?.update ? t('ext.consent.update') : t('ext.consent.title')">
-      <div v-if="pending.busy && !info" class="type-footnote px-3 py-3 text-label-3">{{ t("ext.consent.reading") }}</div>
-      <template v-else-if="info">
-        <Row :label="`${info.manifest.name} ${info.manifest.version}`" :help="info.manifest.author ?? info.manifest.id">
-          <Badge v-if="info.signature === 'official'" variant="secondary" class="gap-1 text-sys-green"><PhShieldCheck weight="fill" />{{ t("ext.sig.official") }}</Badge>
-          <Badge v-else-if="info.signature === 'invalid'" variant="secondary" class="gap-1 text-sys-red"><PhWarningOctagon weight="fill" />{{ t("ext.sig.invalid") }}</Badge>
-          <Badge v-else variant="secondary" class="gap-1 text-sys-orange"><PhSealWarning weight="fill" />{{ t(`ext.sig.${info.signature}`) }}</Badge>
-        </Row>
-        <div v-if="info.manifest.description" class="type-footnote border-t border-separator px-3 py-2 text-label-2">{{ info.manifest.description }}</div>
-        <Row v-if="info.update" :label="t('ext.consent.fromVersion', { v: info.update.fromVersion })">
-          <span class="type-caption text-label-3">{{ info.update.newPermissions.length ? t("ext.consent.newPerms") : t("ext.consent.noNewPerms") }}</span>
-        </Row>
-        <Row :label="t('ext.permissions')" :help="info.manifest.permissions.length ? undefined : t('ext.consent.noPerms')">
-          <div class="flex max-w-[300px] flex-wrap justify-end gap-1">
-            <Badge
-              v-for="p in info.manifest.permissions"
-              :key="p"
-              variant="secondary"
-              :class="p === 'capture' || p === 'activity' ? 'text-sys-red' : info.update?.newPermissions.includes(p) ? 'text-sys-orange' : ''"
-            >{{ permLabel(p) }}</Badge>
-          </div>
-        </Row>
-        <Row v-if="contributions.length" :label="t('ext.consent.adds')">
-          <div class="type-caption flex max-w-[300px] flex-col items-end text-label-2">
-            <span v-for="c in contributions" :key="c">{{ c }}</span>
-          </div>
-        </Row>
-        <div v-if="untrusted && info.signature !== 'invalid'" class="type-footnote border-t border-separator px-3 py-2 text-sys-orange">
-          {{ settings.extensions.devMode ? t("ext.consent.untrustedDev") : t("ext.consent.untrustedOff") }}
-        </div>
-      </template>
-      <div v-if="pending.error" class="type-footnote border-t border-separator px-3 py-2 text-sys-red">{{ errorText(pending.error) }}</div>
-      <div class="flex justify-end gap-2 border-t border-separator px-3 py-2">
-        <Button :disabled="pending.busy && !!info" @click="cancelInstall"><PhX weight="bold" />{{ t("ext.consent.cancel") }}</Button>
-        <Button v-if="info" variant="default" :disabled="!canInstall" :loading="pending.busy" @click="confirmInstall(!!untrusted)">
-          <PhCheckCircle weight="fill" />{{ info.update ? t("ext.consent.doUpdate") : t("ext.consent.install") }}
-        </Button>
-      </div>
+    <!-- Compte du magasin : installer, publier depuis Island -->
+    <Group :title="t('ext.account.title')" :note="session.account ? undefined : t('ext.account.note')">
+      <div class="px-3 py-2.5"><StoreAccount /></div>
     </Group>
 
     <!-- Extensions installées -->
     <Group :title="t('ext.installed')" section="extensions">
+      <Row :label="t('store.title')" :help="t('ext.storeHelp')">
+        <Button variant="default" @click="openStore({ section: 'extensions' })"><PhStorefront weight="bold" />{{ t("store.open") }}</Button>
+      </Row>
       <Row :label="t('ext.install')" :help="t('ext.installHelp')">
         <Button @click="pickPackage">{{ t("ext.installAction") }}</Button>
+      </Row>
+      <Row
+        :label="t('ext.update.title')"
+        :help="updates.error ?? updateError ?? (extUpdates().length ? t('ext.update.available', { n: extUpdates().length }) : t('ext.update.upToDate'))"
+      >
+        <Button :loading="updates.checking" :disabled="updates.checking" @click="checkUpdates">{{ t("ext.update.check") }}</Button>
       </Row>
       <div v-if="!all.length" class="border-t border-separator">
         <Empty :icon="PhPuzzlePiece" :title="t('ext.none')" :text="t('ext.noneHelp')" />
@@ -220,6 +292,17 @@ const errorText = (e: string) => {
           :style="{ maskImage: `url('${extUrl(x.manifest.id, x.manifest.icon)}')` }"
         />
         <Badge v-if="x.dev" variant="secondary">{{ t("ext.dev") }}</Badge>
+        <Button
+          v-if="!x.dev && updateFor(x.manifest.id)"
+          size="sm"
+          variant="default"
+          :loading="updating === x.manifest.id"
+          :disabled="!!updating"
+          :title="updateFor(x.manifest.id)?.changelog || undefined"
+          @click="update(x.manifest.id)"
+        >
+          {{ t("ext.update.button", { v: updateFor(x.manifest.id)?.version ?? "" }) }}
+        </Button>
         <Button v-if="x.dev" size="icon-sm" variant="ghost" :title="t('ext.reload')" :loading="busy === x.manifest.id" @click="onReload(x.manifest.id)">
           <PhArrowClockwise weight="bold" />
         </Button>
@@ -319,9 +402,28 @@ const errorText = (e: string) => {
         <Switch v-model="settings.extensions.devMode" />
       </Row>
       <template v-if="settings.extensions.devMode">
-        <Row v-for="dir in settings.extensions.devFolders" :key="dir" :label="dir.split(/[\\/]/).pop() ?? dir" :help="dir">
+        <Row
+          v-for="dir in settings.extensions.devFolders"
+          :key="dir"
+          :label="dir.split(/[\\/]/).pop() ?? dir"
+          :help="publishMsg.get(dir)?.text ?? storeState(dir) ?? dir"
+          :class="publishMsg.get(dir)?.ok === false ? '[&_.type-caption]:text-sys-red' : ''"
+        >
+          <Button size="sm" :loading="packing === dir" :disabled="!!packing" :title="t('ext.pack.help')" @click="packDev(dir)">
+            <PhPackage weight="bold" />{{ t("ext.pack.button") }}
+          </Button>
+          <Button
+            size="sm"
+            :loading="publishing === dir"
+            :disabled="!!publishing || !session.account || !!paused"
+            :title="paused ? `${t('market.publish.paused')} ${paused}` : session.account ? t('ext.publish.help') : t('ext.publish.signIn')"
+            @click="publishDev(dir)"
+          >
+            <PhStorefront weight="bold" />{{ t("ext.publish.button") }}
+          </Button>
           <Button size="icon-sm" variant="ghost" :title="t('ext.devRemove')" @click="removeDevFolder(dir)"><PhX weight="bold" /></Button>
         </Row>
+
         <Row :label="t('ext.devAdd')" :help="devError ? errorText(devError) : t('ext.devAddHelp')">
           <Button @click="onAddDev"><PhFolderPlus weight="bold" />{{ t("ext.devChoose") }}</Button>
         </Row>

@@ -59,6 +59,10 @@ fn save_prefs(app: &AppHandle, p: &Prefs) {
     let _ = app.emit("wallpaper://changed", ());
 }
 
+/// Vignette d'une scène : un vrai rendu, fait par l'éditeur à chaque enregistrement
+/// (convention `store/` du magasin, cf. `island_formats::media`).
+pub const SNAPSHOT: &str = "store/thumbnail.png";
+
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 48 && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
@@ -96,8 +100,10 @@ fn load(app: &AppHandle, id: &str) -> Result<(Scene, Option<PathBuf>), String> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
-    id: String,
+    pub(crate) id: String,
     preset: bool,
+    /// Vignette disponible (`wallpaper_thumbnail` : rendu de l'éditeur, sinon calques composés).
+    thumbnail: bool,
     scene: Scene,
     /// Modification (ms) ; 0 pour un préréglage.
     updated: u64,
@@ -105,7 +111,7 @@ pub struct Entry {
 
 #[tauri::command]
 pub fn wallpaper_list(app: AppHandle) -> Result<Vec<Entry>, String> {
-    let mut out: Vec<Entry> = scene::presets().into_iter().map(|(id, scene)| Entry { id: id.into(), preset: true, scene, updated: 0 }).collect();
+    let mut out: Vec<Entry> = scene::presets().into_iter().map(|(id, scene)| Entry { id: id.into(), preset: true, thumbnail: true, scene, updated: 0 }).collect();
     let dir = scenes_dir(&app)?;
     let mut mine = Vec::new();
     for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -118,7 +124,7 @@ pub fn wallpaper_list(app: AppHandle) -> Result<Vec<Entry>, String> {
             Ok(m) => {
                 if let Ok((scene, _)) = load(&app, &id) {
                     let updated = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-                    mine.push(Entry { id, preset: false, scene, updated });
+                    mine.push(Entry { id, preset: false, thumbnail: true, scene, updated });
                 }
             }
             // Brouillon jamais enregistré (image importée puis éditeur fermé) : ménage après 1 jour.
@@ -224,6 +230,44 @@ pub fn wallpaper_save_mask(app: AppHandle, id: String, data: String) -> Result<S
     Ok(name)
 }
 
+/// Enregistre le rendu de la scène fait par l'éditeur (PNG en base64), 1920 px au plus.
+#[tauri::command]
+pub fn wallpaper_save_thumbnail(app: AppHandle, id: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let dir = scene_dir(&app, &id)?;
+    if data.len() > 16 * 1024 * 1024 {
+        return Err("tooLarge".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).map_err(|_| "invalidImage")?;
+    let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).map_err(|_| "invalidImage")?;
+    if img.width() > 1920 || img.height() > 1920 {
+        return Err("tooLarge".into());
+    }
+    let path = dir.join(SNAPSHOT);
+    std::fs::create_dir_all(path.parent().expect("store/")).map_err(|e| e.to_string())?;
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let _ = app.emit("wallpaper://changed", ());
+    Ok(())
+}
+
+/// Vignette de la scène (cartes de l'outil, écrans) : le rendu enregistré par l'éditeur ;
+/// à défaut (préréglage, scène ancienne), les calques composés (`islandscene::thumbnail`).
+#[tauri::command]
+pub async fn wallpaper_thumbnail(app: AppHandle, id: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !is_preset(&id) {
+            if let Ok(bytes) = std::fs::read(scene_dir(&app, &id)?.join(SNAPSHOT)) {
+                return Ok(tauri::ipc::Response::new(bytes));
+            }
+        }
+        let (s, dir) = load(&app, &id)?;
+        let thumb = island_formats::islandscene::thumbnail(&s, |f| dir.as_ref().and_then(|d| image::open(d.join(f)).ok()));
+        Ok(tauri::ipc::Response::new(island_formats::islandscene::png(&thumb)?))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Octets d'une image ou d'un masque de la scène (aperçu, vignettes).
 #[tauri::command]
 pub fn wallpaper_image(app: AppHandle, id: String, name: String) -> Result<tauri::ipc::Response, String> {
@@ -253,6 +297,25 @@ impl Prefs {
     fn any(&self) -> bool {
         self.all.is_some() || self.screens.values().any(|v| !v.is_empty())
     }
+}
+
+/// Scène modifiée hors de l'éditeur (mise à jour du magasin) : le moteur la recharge si elle
+/// est affichée.
+pub(crate) fn reload_if_used(app: &AppHandle, id: &str) {
+    if prefs(app).uses(id) {
+        push(app);
+    }
+}
+
+/// Date de modification de la scène (ms), 0 si inconnue.
+pub(crate) fn scene_modified(app: &AppHandle, id: &str) -> u64 {
+    scene_dir(app, id)
+        .ok()
+        .and_then(|d| std::fs::metadata(d.join("scene.json")).ok())
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Envoie l'affectation au moteur (une scène illisible = fond Windows sur cet écran).

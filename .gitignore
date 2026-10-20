@@ -40,3 +40,9 @@ docs/internal/
 
 # Extension privée (hors dépôt)
 examples/extensions/aniplex/
+
+# Notes de mise en production du magasin — local uniquement
+/internal-install.md
+
+# Réglages de compilation de l'app (magasin) — cf. .env.example
+/.env

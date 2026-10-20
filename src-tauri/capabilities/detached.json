@@ -5,7 +5,10 @@
   "windows": [
     "note-*",
     "ext-*",
-    "wallpaper-*"
+    "wallpaper-*",
+    "install-*",
+    "publish-*",
+    "store-*"
   ],
   "permissions": [
     "core:default",

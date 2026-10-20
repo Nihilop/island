@@ -197,6 +197,20 @@
   app-region: drag;
 }
 
+/* Dans une barre de titre (zone de déplacement), les éléments interactifs restent
+   utilisables : un champ s'y sélectionne et s'y édite à la souris, un bouton s'y clique. */
+*[data-tauri-drag-region] :is(input, textarea, select, button, a, label, [contenteditable], [role="button"]) {
+  app-region: no-drag;
+}
+
+/* Les champs de saisie gardent la sélection de texte, même dans une zone `select-none`. */
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Scrollbar unifiée PARTOUT (host + extensions, même DOM). On utilise les
    propriétés STANDARD : elles sont HÉRITÉES → posées sur html, elles s'appliquent
    à tous les conteneurs scrollables imbriqués (≠ `body > *` qui ne visait que les

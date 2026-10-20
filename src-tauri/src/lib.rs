@@ -19,6 +19,7 @@ mod backup;
 mod extensions;
 mod host;
 mod launcher;
+mod market;
 mod overlay;
 mod services;
 mod store;
@@ -48,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -90,6 +92,7 @@ pub fn run() {
             vault::start(app.handle().clone());
             services::notifs::start(app.handle().clone());
             launcher::start(app.handle().clone());
+            market::start(app.handle().clone());
             // Activité (jeux & apps) : hook de premier plan + relevé des process toutes les 2 s.
             services::activity::start(app.handle().clone());
             // Fonds animés : restaure la scène active (indépendant de l'outil du dock).
@@ -227,9 +230,30 @@ pub fn run() {
             wallpaper::wallpaper_import_image,
             wallpaper::wallpaper_image,
             wallpaper::wallpaper_save_mask,
+            wallpaper::wallpaper_save_thumbnail,
+            wallpaper::wallpaper_thumbnail,
             wallpaper::share::wallpaper_export,
             wallpaper::share::wallpaper_import,
             wallpaper::share::wallpaper_take_imported,
+            market::market_get,
+            market::market_base,
+            market::market_installed,
+            market::market_install,
+            market::market_login_start,
+            market::market_login_state,
+            market::market_login_cancel,
+            market::market_account,
+            market::market_logout,
+            market::market_published,
+            market::market_publish,
+            market::market_download_extension,
+            market::market_publish_extension,
+            market::market_pack_extension,
+            market::market_dev_info,
+            market::market_updates,
+            market::market_check_updates,
+            market::market_scene_modified,
+            market::market_mine,
             wallpaper::wallpaper_state,
             wallpaper::wallpaper_apply,
             wallpaper::wallpaper_set_options,
