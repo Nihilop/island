@@ -8,6 +8,9 @@
 //   2. la passe finale vers la fenêtre (ondulations, traînée, couleur, vignette, grain) —
 //      `composite.wgsl`.
 //
+// Vidéos de calques : un lecteur Media Foundation par fichier (`video.rs`), sur son fil ;
+// la dernière image décodée est copiée dans la texture du calque avant chaque rendu.
+//
 // Économie : pause d'un écran couvert par une fenêtre maximisée / plein écran, pause de
 // tous pendant une app plein écran (détection de l'hôte) ou un jeu (service Activité) ;
 // aucune image n'est alors calculée. La souris est LUE à chaque image (pas de hook) et
@@ -297,12 +300,75 @@ fn file_tex<'a>(textures: &'a Textures, sc: &Loaded, f: Option<&String>) -> Opti
 
 fn load_textures(gpu: &Gpu, sc: &Loaded, textures: &mut Textures) {
     let Some(dir) = &sc.dir else { return };
-    for f in sc.scene.images() {
+    for f in sc.scene.images().filter(|f| !scene::valid_video_name(f)) {
         let key = format!("{}/{f}", sc.id);
         if !textures.contains_key(&key) {
             if let Some(t) = gpu.image(&dir.join(f)) {
                 textures.insert(key, t);
             }
+        }
+    }
+}
+
+/// Vidéo d'un calque : son lecteur et la texture qu'il remplit (même clé que `Textures`).
+struct Video {
+    player: super::video::Player,
+    tex: wgpu::Texture,
+}
+
+type Videos = HashMap<String, Video>;
+
+/// Lecteurs des vidéos des scènes affichées : ceux déjà ouverts sont gardés, les autres
+/// ouverts ; leur texture rejoint `textures` (lue comme une image par les calques).
+fn load_videos(gpu: &Gpu, sc: &Loaded, old: &mut Videos, videos: &mut Videos, textures: &mut Textures) {
+    let Some(dir) = &sc.dir else { return };
+    for l in sc.scene.layers.iter().filter(|l| l.kind == "video") {
+        let Some(f) = &l.video else { continue };
+        let key = format!("{}/{f}", sc.id);
+        if videos.contains_key(&key) {
+            continue;
+        }
+        let v = match old.remove(&key) {
+            Some(v) => v,
+            None => match super::video::Player::open(&dir.join(f), &l.playback) {
+                Ok(player) => {
+                    let size = wgpu::Extent3d { width: player.width, height: player.height, depth_or_array_layers: 1 };
+                    let tex = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("video"),
+                        size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        // RGB32 de Media Foundation = BGRA en mémoire.
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    Video { player, tex }
+                }
+                Err(e) => {
+                    eprintln!("[wallpaper] vidéo {f} : {e}");
+                    continue;
+                }
+            },
+        };
+        let size = (v.player.width as f32, v.player.height as f32);
+        textures.insert(key.clone(), (v.tex.create_view(&Default::default()), size));
+        videos.insert(key, v);
+    }
+}
+
+/// Copie la dernière image de chaque vidéo dans sa texture (rien si elle n'a pas changé).
+fn upload_videos(gpu: &Gpu, videos: &Videos) {
+    for v in videos.values() {
+        if let Some(frame) = v.player.take() {
+            let (w, h) = (v.player.width, v.player.height);
+            gpu.queue.write_texture(
+                wgpu::TexelCopyTextureInfo { texture: &v.tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                &frame,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            );
         }
     }
 }
@@ -373,7 +439,12 @@ impl Output {
             .layers
             .iter()
             .map(|l| {
-                let t = if l.kind == "image" { file_tex(textures, sc, l.image.as_ref()) } else { None }.unwrap_or(&gpu.blank);
+                let t = match l.kind.as_str() {
+                    "image" => file_tex(textures, sc, l.image.as_ref()),
+                    "video" => file_tex(textures, sc, l.video.as_ref()),
+                    _ => None,
+                }
+                .unwrap_or(&gpu.blank);
                 let mask = |f: Option<&String>| &file_tex(textures, sc, f).unwrap_or(&gpu.white).0;
                 let masks = [
                     mask(l.mask.as_ref()),
@@ -541,6 +612,7 @@ struct Live {
     all: Option<Loaded>,
     screens: BTreeMap<String, Option<Loaded>>,
     textures: Textures,
+    videos: Videos,
     outputs: Vec<Output>,
 }
 
@@ -586,9 +658,11 @@ fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
     let mut kept = 0;
     let mut layer: Option<HWND> = None;
     let mut textures = std::mem::take(&mut l.textures);
+    let mut old_videos = std::mem::take(&mut l.videos);
+    let mut videos = Videos::new();
     let mut out = Vec::new();
     let screens = displays();
-    // Textures des scènes affichées seulement (les autres sont libérées).
+    // Textures et vidéos des scènes affichées seulement (les autres sont libérées).
     let mut used = Textures::new();
     for d in &screens {
         if let Some(sc) = l.resolve(d) {
@@ -599,8 +673,10 @@ fn layout(gpu: &Gpu, l: &mut Live) -> Result<(), String> {
                 }
             }
             load_textures(gpu, sc, &mut used);
+            load_videos(gpu, sc, &mut old_videos, &mut videos, &mut used);
         }
     }
+    l.videos = videos;
     for d in screens {
         let Some(sc) = l.resolve(&d).cloned() else { continue };
         if let Some(i) = old.iter().position(|o| o.display == d) {
@@ -667,9 +743,10 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
                     }
                 }
                 let g = gpu.as_ref().unwrap();
-                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), outputs: Vec::new() });
-                // Nouvelle affectation : images rechargées (elles ont pu changer).
+                let mut l = live.take().unwrap_or(Live { all: None, screens: BTreeMap::new(), textures: Textures::new(), videos: Videos::new(), outputs: Vec::new() });
+                // Nouvelle affectation : images et vidéos rechargées (elles ont pu changer).
                 l.textures.clear();
+                l.videos.clear();
                 l.all = all;
                 l.screens = screens;
                 match layout(g, &mut l) {
@@ -729,6 +806,9 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
             let p = l.outputs.iter().all(|o| o.paused);
             if p != all_paused {
                 all_paused = p;
+                for v in l.videos.values() {
+                    v.player.set_paused(p);
+                }
                 set_status(&app, Status { running: true, paused: p, error: None });
             }
         }
@@ -757,6 +837,7 @@ fn run(app: AppHandle, rx: Receiver<Cmd>) {
         trail.retain(|(_, _, ts)| t - ts < max_fade + 0.1);
         ripples.retain(|(_, _, ts)| t - ts < 6.0);
 
+        upload_videos(g, &l.videos);
         for o in l.outputs.iter_mut().filter(|o| !o.paused) {
             let (dx, dy) = (o.display.x, o.display.y);
             let local = |v: &[(i32, i32, f32)]| v.iter().map(|(x, y, ts)| ((x - dx) as f32, (y - dy) as f32, *ts)).collect::<Vec<_>>();

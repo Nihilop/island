@@ -47,6 +47,8 @@ export class Preview {
   private compBind: GPU = null;
   private layerRes = new Map<string, { uniforms: GPU; bind: GPU; key: string; tex: [number, number] }>();
   private images = new Map<string, Tex | "loading">();
+  /** Vidéos des calques : balise <video> en boucle, copiée dans sa texture à chaque image. */
+  private videos = new Map<string, { el: HTMLVideoElement; url: string; texture: GPU | null; tex: Tex | null; start: number }>();
   private raf = 0;
   private t0 = performance.now();
   private mouse: [number, number] | null = null;
@@ -62,6 +64,7 @@ export class Preview {
     device: GPU,
     private scene: Scene,
     private loadImage: (name: string) => Promise<ImageBitmap>,
+    private loadVideo: (name: string) => Promise<string>,
   ) {
     this.device = device;
     this.ctx = canvas.getContext("webgpu");
@@ -93,13 +96,18 @@ export class Preview {
   }
 
   /** null si WebGPU est indisponible (vieux pilote, WebView2 trop ancien). */
-  static async create(canvas: HTMLCanvasElement, scene: Scene, loadImage: (name: string) => Promise<ImageBitmap>): Promise<Preview | null> {
+  static async create(
+    canvas: HTMLCanvasElement,
+    scene: Scene,
+    loadImage: (name: string) => Promise<ImageBitmap>,
+    loadVideo: (name: string) => Promise<string>,
+  ): Promise<Preview | null> {
     const gpu = (navigator as any).gpu;
     if (!gpu) return null;
     const adapter = await gpu.requestAdapter({ powerPreference: "low-power" }).catch(() => null);
     const device = await adapter?.requestDevice().catch(() => null);
     if (!device) return null;
-    const p = new Preview(canvas, device, scene, loadImage);
+    const p = new Preview(canvas, device, scene, loadImage, loadVideo);
     p.loop();
     return p;
   }
@@ -108,16 +116,85 @@ export class Preview {
     this.scene = s;
   }
 
-  /** Oublie les images en cache (scène rechargée, image remplacée). */
+  /** Oublie les images et vidéos en cache (scène rechargée, image remplacée). */
   resetImages() {
     this.images.clear();
     this.layerRes.clear();
+    this.dropVideos();
   }
 
-  /** Taille de l'image d'un calque (1×1 tant qu'elle n'est pas chargée). */
+  private dropVideos() {
+    for (const v of this.videos.values()) {
+      v.el.pause();
+      v.el.removeAttribute("src");
+      URL.revokeObjectURL(v.url);
+      v.texture?.destroy();
+    }
+    this.videos.clear();
+  }
+
+  /** Taille de l'image (ou de la vidéo) d'un calque (1×1 tant qu'elle n'est pas chargée). */
   texSize(l: Layer): [number, number] {
+    if (l.kind === "video") return (l.video && this.videos.get(l.video)?.tex?.size) || [1, 1];
     const t = l.image ? this.images.get(l.image) : null;
     return t && t !== "loading" ? t.size : [1, 1];
+  }
+
+  /** Texture d'une vidéo de calque ; la balise est créée au premier appel. */
+  private video(l: Layer): Tex {
+    const name = l.video;
+    if (!name) return this.blank;
+    let v = this.videos.get(name);
+    if (!v) {
+      const el = document.createElement("video");
+      el.muted = true;
+      el.playsInline = true;
+      el.preload = "auto";
+      const entry = { el, url: "", texture: null as GPU | null, tex: null as Tex | null, start: l.playback.start };
+      v = entry;
+      this.videos.set(name, entry);
+      el.addEventListener("loadedmetadata", () => {
+        const [w, h] = [el.videoWidth || 1, el.videoHeight || 1];
+        entry.texture = this.device.createTexture({ size: [w, h], format: FORMAT, usage: TEXTURE.TEXTURE_BINDING | TEXTURE.COPY_DST | TEXTURE.RENDER_ATTACHMENT });
+        entry.tex = { view: entry.texture.createView(), size: [w, h] };
+        el.currentTime = Math.min(entry.start, el.duration || 0);
+        void el.play().catch(() => {});
+      });
+      // Boucle « à la main » : elle repart du début choisi, pas de zéro.
+      el.addEventListener("ended", () => {
+        el.currentTime = entry.start < (el.duration || 0) ? entry.start : 0;
+        void el.play().catch(() => {});
+      });
+      void this.loadVideo(name)
+        .then((url) => {
+          entry.url = url;
+          el.src = url;
+        })
+        .catch(() => this.videos.delete(name));
+    }
+    // Réglages modifiés dans l'éditeur.
+    const speed = Math.min(4, Math.max(0.25, l.playback.speed || 1));
+    if (v.el.playbackRate !== speed) v.el.playbackRate = speed;
+    if (v.start !== l.playback.start) {
+      v.start = Math.max(0, l.playback.start || 0);
+      if (v.el.readyState > 0) v.el.currentTime = Math.min(v.start, v.el.duration || 0);
+    }
+    return v.tex ?? this.blank;
+  }
+
+  /** Image ou vidéo affichée par un calque. */
+  private layerTex(l: Layer): Tex {
+    if (l.kind === "video") return this.video(l);
+    return this.image(l.kind === "image" ? l.image : null);
+  }
+
+  /** Copie l'image courante de chaque vidéo dans sa texture. */
+  private uploadVideos() {
+    for (const v of this.videos.values()) {
+      if (v.texture && v.tex && v.el.readyState >= 2) {
+        this.device.queue.copyExternalImageToTexture({ source: v.el }, { texture: v.texture }, v.tex.size);
+      }
+    }
   }
 
   /** Taille du canvas en pixels (celle des uniformes). */
@@ -174,7 +251,7 @@ export class Preview {
 
   /** Ressources d'un calque (tampon, image, masques), recréées quand l'une change. */
   private res(l: Layer) {
-    const tex = this.image(l.kind === "image" ? l.image : null);
+    const tex = this.layerTex(l);
     const masks = maskNames(l).map((m, i) => this.overrides.get(`${l.id}:${i}`) ?? this.image(m, this.white));
     let r = this.layerRes.get(l.id);
     // Clé : les textures elles-mêmes (une image qui finit de charger change sa vue).
@@ -261,6 +338,7 @@ export class Preview {
     };
     const visible = s.layers.filter((l) => l.visible);
     const res = visible.map((l) => this.res(l));
+    this.uploadVideos();
     visible.forEach((l, i) => this.device.queue.writeBuffer(res[i].uniforms, 0, packLayer(s, l, f, res[i].tex)));
     this.device.queue.writeBuffer(this.compUniforms, 0, packComposite(s, f));
     const enc = this.device.createCommandEncoder();
@@ -285,7 +363,9 @@ export class Preview {
    * d'animation (particules en place). Attend la fin du chargement des images.
    */
   async snapshot(width = 960, height = 540, time = 3): Promise<Blob> {
-    for (let i = 0; i < 60 && [...this.images.values()].includes("loading"); i++) await new Promise((r) => setTimeout(r, 50));
+    const pending = () => [...this.images.values()].includes("loading") || [...this.videos.values()].some((v) => !v.tex || v.el.readyState < 2);
+    for (let i = 0; i < 60 && pending(); i++) await new Promise((r) => setTimeout(r, 50));
+    this.uploadVideos();
     const d = this.device;
     const s = this.scene;
     const f: Frame = { width, height, time, mouse: null, ripples: [], trail: [] };
@@ -300,7 +380,7 @@ export class Preview {
       const r = this.res(l);
       const buf = d.createBuffer({ size: LAYER_VEC4S * 16, usage: BUFFER.UNIFORM | BUFFER.COPY_DST });
       d.queue.writeBuffer(buf, 0, packLayer(s, l, f, r.tex));
-      const tex = this.image(l.kind === "image" ? l.image : null);
+      const tex = this.layerTex(l);
       const masks = maskNames(l).map((m) => this.image(m, this.white));
       layers.setPipeline(this.layerPipelines[blendIndex(l.blend)]);
       layers.setBindGroup(0, this.bind(this.layerLayout, buf, [tex, ...masks].map((v) => v.view)));
@@ -339,6 +419,7 @@ export class Preview {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    this.dropVideos();
     this.ro.disconnect();
     this.off.forEach((f) => f());
     this.device.destroy?.();

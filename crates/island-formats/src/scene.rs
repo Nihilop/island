@@ -10,7 +10,10 @@
 use serde::{Deserialize, Serialize};
 
 
-pub const VERSION: u32 = 1;
+/// Version la plus récente que cette build sait lire. Une scène porte la version minimale
+/// qu'il faut pour la lire (`Scene::required_version`) : 2 dès qu'elle contient une vidéo,
+/// sinon 1 — une scène sans vidéo reste lisible par les versions plus anciennes d'Island.
+pub const VERSION: u32 = 2;
 pub const MAX_LAYERS: usize = 16;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -41,7 +44,7 @@ pub struct Layer {
     /// Identifiant dans la scène (`[a-z0-9-]`).
     pub id: String,
     pub name: String,
-    /// "image" | "fill" | "particles".
+    /// "image" | "video" | "fill" | "particles".
     pub kind: String,
     pub visible: bool,
     /// Verrouillé dans l'éditeur (ni sélection sur l'aperçu, ni déplacement).
@@ -59,6 +62,9 @@ pub struct Layer {
     pub mask: Option<String>,
     pub fill: Fill,
     pub particles: Option<Particles>,
+    /// Vidéo en boucle (MP4 / WebM, sans le son ; nom simple dans le dossier de la scène).
+    pub video: Option<String>,
+    pub playback: Playback,
     pub transform: Transform,
     pub effects: LayerEffects,
 }
@@ -78,6 +84,8 @@ impl Default for Layer {
             mask: None,
             fill: Fill::default(),
             particles: None,
+            video: None,
+            playback: Playback::default(),
             transform: Transform::default(),
             effects: LayerEffects::default(),
         }
@@ -279,6 +287,53 @@ impl Default for Trail {
 // --- Validation --------------------------------------------------------------------------
 
 /// Nom de fichier simple (pas de chemin) avec une extension d'image.
+/// Lecture d'un calque vidéo : vitesse, et début de la boucle (les secondes avant sont
+/// sautées, à chaque tour).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Playback {
+    /// 0.25..4
+    pub speed: f32,
+    /// Secondes, ≥ 0.
+    pub start: f32,
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self { speed: 1.0, start: 0.0 }
+    }
+}
+
+pub const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm"];
+
+fn simple_name(n: &str) -> bool {
+    !n.is_empty() && n.len() <= 80 && !n.contains(['/', '\\', ':']) && !n.starts_with('.')
+}
+
+fn extension(n: &str) -> String {
+    n.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default()
+}
+
+/// Nom d'une vidéo de calque.
+pub fn valid_video_name(n: &str) -> bool {
+    simple_name(n) && VIDEO_EXTENSIONS.contains(&extension(n).as_str())
+}
+
+/// Nom d'un fichier de scène : image, masque ou vidéo.
+pub fn valid_file_name(n: &str) -> bool {
+    valid_image_name(n) || valid_video_name(n)
+}
+
+/// Le contenu est bien une vidéo du format annoncé par son nom (signature du conteneur) :
+/// MP4 (`ftyp` à l'octet 4) ou WebM (en-tête EBML).
+pub fn is_video(name: &str, bytes: &[u8]) -> bool {
+    match extension(name).as_str() {
+        "mp4" => bytes.len() > 12 && &bytes[4..8] == b"ftyp",
+        "webm" => bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        _ => false,
+    }
+}
+
 pub fn valid_image_name(n: &str) -> bool {
     let ext = n.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     !n.is_empty() && n.len() <= 80 && !n.contains(['/', '\\', ':']) && !n.starts_with('.') && ["png", "jpg", "jpeg", "webp", "bmp", "gif"].contains(&ext.as_str())
@@ -305,7 +360,9 @@ impl Scene {
                 return Err("invalidLayer".into());
             }
             for f in l.files() {
-                if !valid_image_name(f) {
+                // La vidéo d'un calque est une vidéo, tout le reste (image, masques) une image.
+                let ok = if Some(f) == l.video.as_ref() { valid_video_name(f) } else { valid_image_name(f) };
+                if !ok {
                     return Err("invalidImage".into());
                 }
             }
@@ -313,17 +370,28 @@ impl Scene {
         Ok(())
     }
 
-    /// Fichiers référencés par les calques (images et masques).
+    /// Fichiers référencés par les calques (images, masques et vidéos).
     pub fn images(&self) -> impl Iterator<Item = &String> {
         self.layers.iter().flat_map(|l| l.files())
+    }
+
+    /// Vidéos des calques.
+    pub fn videos(&self) -> impl Iterator<Item = &String> {
+        self.layers.iter().filter_map(|l| l.video.as_ref())
+    }
+
+    /// Version minimale d'Island pour lire cette scène (cf. `VERSION`).
+    pub fn required_version(&self) -> u32 {
+        if self.layers.iter().any(|l| l.kind == "video") { 2 } else { 1 }
     }
 }
 
 impl Layer {
-    /// Image, masque du calque, masques des effets.
+    /// Image, vidéo, masque du calque, masques des effets.
     pub fn files(&self) -> impl Iterator<Item = &String> {
         [
             self.image.as_ref(),
+            self.video.as_ref(),
             self.mask.as_ref(),
             self.effects.water.as_ref().and_then(|w| w.mask.as_ref()),
             self.effects.heat.as_ref().and_then(|h| h.mask.as_ref()),

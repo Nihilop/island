@@ -1288,5 +1288,13 @@
   "store.library.updates": "{n} mise(s) à jour disponible(s), en tête de liste.",
   "store.library.upToDate": "Tout est à jour. Vérifié au démarrage, puis chaque jour.",
   "store.library.empty": "Rien d'installé depuis le magasin pour l'instant.",
-  "ext.storeHelp": "Découvrir et installer des extensions et des fonds animés."
+  "ext.storeHelp": "Découvrir et installer des extensions et des fonds animés.",
+  "wall.kind.video": "Vidéo",
+  "wall.videos": "Vidéos",
+  "wall.pickVideo": "Choisir une vidéo",
+  "wall.changeVideo": "Changer de vidéo",
+  "wall.p.loopStart": "Début de boucle",
+  "wall.videoHint": "MP4 ou WebM, en boucle et sans le son. Une vidéo courte et légère (moins de 100 Mo) se partage et se publie sans souci.",
+  "wall.videoTooLarge": "Vidéo trop lourde (96 Mo au plus).",
+  "wall.invalidVideo": "Ce fichier n'est pas une vidéo MP4 ou WebM lisible."
 }

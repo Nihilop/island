@@ -3,7 +3,7 @@
 // ordre, mêmes bornes, mêmes calculs) : l'aperçu de l'éditeur et le fond natif partagent
 // les mêmes shaders (`layer.wgsl`, `composite.wgsl`).
 
-export type LayerKind = "image" | "fill" | "particles";
+export type LayerKind = "image" | "video" | "fill" | "particles";
 export type Blend = "normal" | "add" | "screen" | "multiply";
 export type Fit = "cover" | "contain" | "stretch" | "free";
 export type Anchor = "tl" | "t" | "tr" | "l" | "c" | "r" | "bl" | "b" | "br";
@@ -29,6 +29,8 @@ export interface Particles {
   turbulence: number;
   flicker: number;
 }
+/** Lecture d'une vidéo de calque : vitesse (0,25 à 4), début de la boucle (secondes). */
+export interface Playback { speed: number; start: number }
 export interface Ripple { radius: number; strength: number; duration: number }
 export interface Trail { width: number; fade: number; color: string; intensity: number }
 
@@ -46,6 +48,9 @@ export interface Layer {
   mask: string | null;
   fill: Fill;
   particles: Particles | null;
+  /** Vidéo en boucle (MP4 / WebM, sans le son). */
+  video: string | null;
+  playback: Playback;
   transform: Transform;
   effects: { water: Water | null; heat: Heat | null; color: ColorAdjust | null };
 }
@@ -110,6 +115,8 @@ export function newLayer(kind: LayerKind, name: string): Layer {
     mask: null,
     fill: DEFAULTS.fill(),
     particles: kind === "particles" ? DEFAULTS.particles() : null,
+    video: null,
+    playback: { speed: 1, start: 0 },
     transform: DEFAULTS.transform(),
     effects: { water: null, heat: null, color: null },
   };
@@ -128,6 +135,7 @@ export function normalize(s: Partial<Scene>): Scene {
       ...l,
       fill: { ...base.fill, ...l.fill },
       transform: { ...base.transform, ...l.transform },
+      playback: { ...base.playback, ...l.playback },
       particles: l.particles ? { ...DEFAULTS.particles(), ...l.particles } : base.particles,
       effects: {
         water: l.effects?.water ? { ...DEFAULTS.water(), ...l.effects.water } : null,
@@ -200,11 +208,12 @@ export function layerBox(s: Scene, l: Layer, f: Frame, tex: [number, number]): [
   const iw = Math.max(tex[0], 1);
   const ih = Math.max(tex[1], 1);
   const t = l.transform;
-  if (l.kind === "image" && (t.fit === "cover" || t.fit === "contain")) {
+  const media = l.kind === "image" || l.kind === "video";
+  if (media && (t.fit === "cover" || t.fit === "contain")) {
     const k = (t.fit === "cover" ? Math.max(w / iw, h / ih) : Math.min(w / iw, h / ih)) * zoom;
     return [w * 0.5 + ox, h * 0.5 + oy, iw * k * 0.5, ih * k * 0.5];
   }
-  if (l.kind === "image" && t.fit === "free") {
+  if (media && t.fit === "free") {
     const hw = c(t.width, 0.01, 4) * w * 0.5 * zoom;
     const hh = (hw * ih) / iw;
     const [ax, ay] = anchor(t.anchor);
@@ -222,7 +231,9 @@ function colorAdjust(a: ColorAdjust | null): number[] {
 export function packLayer(s: Scene, l: Layer, f: Frame, tex: [number, number]): Float32Array {
   const u = new Float32Array(LAYER_VEC4S * 4);
   const set = (i: number, v: number[]) => u.set(v, i * 4);
-  const kind = l.kind === "image" && l.image ? 0 : l.kind === "particles" && l.particles ? 3 : l.kind === "fill" && l.fill.mode === "solid" ? 1 : 2;
+  // Une vidéo se dessine comme une image (seule sa texture change à chaque image).
+  const media = (l.kind === "image" && l.image) || (l.kind === "video" && l.video);
+  const kind = media ? 0 : l.kind === "particles" && l.particles ? 3 : l.kind === "fill" && l.fill.mode === "solid" ? 1 : 2;
   const edges = l.transform.fit === "cover" || l.transform.fit === "stretch" ? 1 : 0;
   const rotation = l.transform.fit === "free" ? rad(c(l.transform.rotation, -360, 360)) : 0;
   set(0, [f.width, f.height, Math.max(tex[0], 1), Math.max(tex[1], 1)]);

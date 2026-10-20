@@ -19,7 +19,7 @@ import MaskPainter from "./MaskPainter.vue";
 import PublishPopover from "./PublishPopover.vue";
 import { Preview } from "./preview";
 import { DEFAULTS, layerBox, layerId, maskNames, MAX_LAYERS, newLayer, newScene, type Layer, type LayerKind, type Scene } from "./scene";
-import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, saveThumbnail, shareError } from "./api";
+import { apply, exportScene, getScene, imageBitmap, importImage, newId, saveScene, saveThumbnail, shareError, videoUrl } from "./api";
 import { t } from "../notch/i18n";
 
 const win = getCurrentWindow();
@@ -55,6 +55,7 @@ function applyTheme(v: "dark" | "light") {
 // --- Chargement -----------------------------------------------------------------------------
 
 const loadImage = (name: string) => imageBitmap(id.value, name);
+const loadVideo = (name: string) => videoUrl(id.value, name);
 
 async function open(args: { id?: string | null } | null) {
   error.value = null;
@@ -107,9 +108,34 @@ async function pickFile(): Promise<{ name: string; file: string; size: [number, 
   }
 }
 
+/** Choix d'une vidéo (MP4 / WebM), copiée dans le dossier de la scène. */
+async function pickVideo(): Promise<{ name: string; file: string } | null> {
+  const path = await openDialog({ multiple: false, filters: [{ name: t("wall.videos"), extensions: ["mp4", "webm"] }] });
+  if (typeof path !== "string") return null;
+  importing.value = true;
+  try {
+    const name = await importImage(id.value, path);
+    return { name, file: (path.split(/[\\/]/).pop() ?? "").replace(/\.[^.]+$/, "") };
+  } catch (e) {
+    const code = String(e);
+    error.value = code === "videoTooLarge" ? t("wall.videoTooLarge") : code === "invalidVideo" ? t("wall.invalidVideo") : code;
+    return null;
+  } finally {
+    importing.value = false;
+  }
+}
+
 async function addLayer(kind: LayerKind) {
   if (scene.value.layers.length >= MAX_LAYERS) return;
   const l = newLayer(kind, t(`wall.kind.${kind}`));
+  if (kind === "video") {
+    const f = await pickVideo();
+    if (!f) return;
+    l.video = f.name;
+    l.name = f.file.slice(0, 80) || l.name;
+    // Une boucle vidéo sert presque toujours de fond : plein écran.
+    l.transform.fit = "cover";
+  }
   if (kind === "image") {
     const f = await pickFile();
     if (!f) return;
@@ -129,6 +155,11 @@ async function addLayer(kind: LayerKind) {
 async function changeImage() {
   const l = layer.value;
   if (!l) return;
+  if (l.kind === "video") {
+    const f = await pickVideo();
+    if (f) l.video = f.name;
+    return;
+  }
   const f = await pickFile();
   if (f) l.image = f.name;
 }
@@ -156,7 +187,7 @@ const tick = ref(0);
 let tickTimer: number | undefined;
 
 /** Un calque placé à la main : image en mode « libre ». */
-const movable = (l: Layer) => l.kind === "image" && l.transform.fit === "free" && l.visible && !l.locked && !!l.image;
+const movable = (l: Layer) => (l.kind === "image" ? !!l.image : l.kind === "video" && !!l.video) && l.transform.fit === "free" && l.visible && !l.locked;
 
 interface Box {
   x: number;
@@ -376,7 +407,7 @@ onMounted(async () => {
       void open(e.payload);
     }),
   );
-  if (canvas.value) preview = await Preview.create(canvas.value, scene.value, loadImage);
+  if (canvas.value) preview = await Preview.create(canvas.value, scene.value, loadImage, loadVideo);
   noGpu.value = !preview;
   tickTimer = window.setInterval(() => tick.value++, 250);
   await open(await invoke<{ id?: string } | null>("window_args").catch(() => null));

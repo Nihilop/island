@@ -1288,5 +1288,13 @@
   "store.library.updates": "{n} update(s) available, at the top.",
   "store.library.upToDate": "Everything is up to date. Checked at startup, then daily.",
   "store.library.empty": "Nothing installed from the store yet.",
-  "ext.storeHelp": "Discover and install extensions and live wallpapers."
+  "ext.storeHelp": "Discover and install extensions and live wallpapers.",
+  "wall.kind.video": "Video",
+  "wall.videos": "Videos",
+  "wall.pickVideo": "Choose a video",
+  "wall.changeVideo": "Change video",
+  "wall.p.loopStart": "Loop start",
+  "wall.videoHint": "MP4 or WebM, looped and muted. A short, light video (under 100 MB) shares and publishes easily.",
+  "wall.videoTooLarge": "Video too large (96 MB at most).",
+  "wall.invalidVideo": "This file is not a readable MP4 or WebM video."
 }

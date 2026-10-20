@@ -72,6 +72,9 @@ windows = { version = "0.61", features = [
   "Win32_System_SystemInformation",
   "Win32_Networking_WinInet",
   "Win32_Media_Audio",
+  "Win32_Media_MediaFoundation", # vidéos des fonds animés (décodage matériel)
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
   "Win32_Media_Audio_Endpoints",
   "Win32_UI_WindowsAndMessaging",
   "Win32_UI_Input_KeyboardAndMouse",

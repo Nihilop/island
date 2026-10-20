@@ -61,12 +61,14 @@ pub fn layer_box(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [f32; 4] {
     }
     let (iw, ih) = (tex.0.max(1.0), tex.1.max(1.0));
     let t = &l.transform;
+    // Une vidéo se place comme une image.
+    let media = l.kind == "image" || l.kind == "video";
     match t.fit.as_str() {
-        "contain" | "cover" if l.kind == "image" => {
+        "contain" | "cover" if media => {
             let k = if t.fit == "cover" { (w / iw).max(h / ih) } else { (w / iw).min(h / ih) } * zoom;
             [w * 0.5 + ox, h * 0.5 + oy, iw * k * 0.5, ih * k * 0.5]
         }
-        "free" if l.kind == "image" => {
+        "free" if media => {
             let hw = c01(t.width, 0.01, 4.0) * w * 0.5 * zoom;
             let hh = hw * ih / iw;
             let (ax, ay) = anchor(&t.anchor);
@@ -82,7 +84,9 @@ pub fn layer_box(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [f32; 4] {
 pub fn pack_layer(s: &Scene, l: &Layer, f: &Frame, tex: (f32, f32)) -> [[f32; 4]; LAYER_VEC4S] {
     let mut u = [[0f32; 4]; LAYER_VEC4S];
     let kind = match l.kind.as_str() {
+        // Le shader dessine une vidéo comme une image : seule sa texture change à chaque image.
         "image" if l.image.is_some() => 0.0,
+        "video" if l.video.is_some() => 0.0,
         "particles" if l.particles.is_some() => 3.0,
         "fill" if l.fill.mode == "solid" => 1.0,
         _ => 2.0,

@@ -115,6 +115,13 @@ export async function thumbnailUrl(id: string, key: string | number): Promise<st
   return url;
 }
 
+/** Vidéo d'un calque, en URL locale (`blob:`) pour une balise <video> de l'aperçu. */
+export async function videoUrl(id: string, name: string): Promise<string> {
+  const buf = await invoke<ArrayBuffer>("wallpaper_image", { id, name });
+  const type = name.toLowerCase().endsWith(".webm") ? "video/webm" : "video/mp4";
+  return URL.createObjectURL(new Blob([buf], { type }));
+}
+
 export async function imageBitmap(id: string, name: string): Promise<ImageBitmap> {
   const buf = await invoke<ArrayBuffer>("wallpaper_image", { id, name });
   return createImageBitmap(new Blob([buf]));
