@@ -69,6 +69,7 @@ settings › Change visibility*), or log the host in with `docker login ghcr.io`
 cp .env.example .env                      # fill it in (sections 3 to 6)
 mkdir secrets
 node packages/sdk/bin/island.mjs keygen secrets/store-signing-key.json   # from a repo checkout
+sudo chown 10001:10001 secrets/store-signing-key.json   # the container runs as uid 10001
 docker compose up -d
 docker compose logs -f store              # prints the store public key at startup
 ```

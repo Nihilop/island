@@ -3,6 +3,7 @@
 # Quick start (see server/INSTALL.md, "Deploy with Docker Compose"):
 #   cp .env.example .env            # fill it in
 #   mkdir secrets && node ../../packages/sdk/bin/island.mjs keygen secrets/store-signing-key.json
+#   sudo chown 10001:10001 secrets/store-signing-key.json   # the container runs as uid 10001
 #   docker compose up -d
 #   docker compose logs -f store
 #
