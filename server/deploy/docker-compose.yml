@@ -3,12 +3,13 @@
 # Quick start (see server/INSTALL.md, "Deploy with Docker Compose"):
 #   cp .env.example .env            # fill it in
 #   mkdir secrets && node ../../packages/sdk/bin/island.mjs keygen secrets/store-signing-key.json
-#   sudo chown 10001:10001 secrets/store-signing-key.json   # the container runs as uid 10001
+#   (the server runs as STORE_UID:STORE_GID, default 10001: it must be able to read secrets/)
 #   docker compose up -d
 #   docker compose logs -f store
 #
 # Optional services, enabled with COMPOSE_PROFILES in .env (comma-separated):
-#   tunnel     Cloudflare Tunnel: public HTTPS without opening a port (TUNNEL_TOKEN)
+#   tunnel     Cloudflare Tunnel: public HTTPS without opening a port (TUNNEL_TOKEN). Already
+#              have a tunnel on this host? Skip it: see docker-compose.override.example.yml.
 #   antivirus  ClamAV scan of uploads (about 1.5 GB of RAM; set CLAMAV_URL=clamav:3310)
 #   local-db   Postgres in this stack, instead of a hosted one such as Neon
 #
@@ -23,6 +24,9 @@ services:
     # Build from source instead of pulling the image:
     # build: { context: ../.., dockerfile: server/Dockerfile }
     restart: unless-stopped
+    # User the server runs as: it must be able to read secrets/. On a NAS, set STORE_UID /
+    # STORE_GID to the owner of this folder (`id -u`, `id -g`), like PUID/PGID elsewhere.
+    user: "${STORE_UID:-10001}:${STORE_GID:-10001}"
     env_file: .env
     environment:
       BIND: 0.0.0.0:8080

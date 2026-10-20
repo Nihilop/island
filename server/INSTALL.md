@@ -69,7 +69,7 @@ settings › Change visibility*), or log the host in with `docker login ghcr.io`
 cp .env.example .env                      # fill it in (sections 3 to 6)
 mkdir secrets
 node packages/sdk/bin/island.mjs keygen secrets/store-signing-key.json   # from a repo checkout
-sudo chown 10001:10001 secrets/store-signing-key.json   # the container runs as uid 10001
+# the server runs as STORE_UID:STORE_GID (default 10001), which must be able to read secrets/
 docker compose up -d
 docker compose logs -f store              # prints the store public key at startup
 ```
@@ -79,6 +79,9 @@ docker compose logs -f store              # prints the store public key at start
 - The port is bound to `127.0.0.1` only: the way in is a tunnel or a reverse proxy.
 - Optional services, enabled with `COMPOSE_PROFILES` in `.env`:
   - `tunnel`: a Cloudflare Tunnel with `TUNNEL_TOKEN`; public HTTPS without opening a port.
+    A tunnel already runs on the host for another project? Leave the profile out and copy
+    `docker-compose.override.example.yml` to `docker-compose.override.yml`: it joins that
+    project's network, and its tunnel targets `store:8080`.
   - `antivirus`: ClamAV, with `CLAMAV_URL=clamav:3310` (about 1.5 GB of RAM).
   - `local-db`: Postgres in the stack, instead of a hosted one.
 - The `store` container carries the Watchtower label: if a Watchtower runs on the host, it

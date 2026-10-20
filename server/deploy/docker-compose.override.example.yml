@@ -1,0 +1,18 @@
+# Reuse a Cloudflare Tunnel that already runs on this host (another project's stack),
+# instead of the `tunnel` profile. Copy to docker-compose.override.yml (loaded
+# automatically by `docker compose`), and set the network name:
+#
+#   docker network ls        # the other project's network, e.g. myproject_default
+#
+# Then, in that tunnel's settings (Cloudflare Zero Trust › Tunnels › Public hostname):
+#   store.example.com  →  HTTP  →  store:8080
+# Its cloudflared container reaches this one by the service name `store`.
+
+services:
+  store:
+    networks: [default, tunnel]
+
+networks:
+  tunnel:
+    external: true
+    name: myproject_default

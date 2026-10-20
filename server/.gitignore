@@ -3,3 +3,4 @@
 .env
 /deploy/.env
 /deploy/secrets
+/deploy/docker-compose.override.yml
