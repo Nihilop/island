@@ -211,6 +211,7 @@ pub fn ext2_terminal_run(app: AppHandle, id: String, spec: RunSpec) -> Result<()
 pub fn ext2_terminal_launch(app: AppHandle, id: String, spec: RunSpec) -> Result<(), String> {
     let cwd = checked(&app, &id, &spec, false)?;
     let mut cmd = std::process::Command::new("cmd");
+    fresh_env(&mut cmd);
     cmd.current_dir(&cwd);
     #[cfg(windows)]
     {
@@ -380,6 +381,7 @@ fn run_visible(cwd: &Path, command: &str, title: &str, shell: &str) -> Result<()
         None => wt_default().map(|(n, s)| (Some(n), s)).unwrap_or((None, Shell::Cmd)),
     };
     let mut wt = std::process::Command::new("wt.exe");
+    fresh_env(&mut wt);
     wt.args(["-w", "0", "new-tab", "--title", title, "-d", &dir]);
     if let Some(p) = profile.filter(|p| !p.is_empty()) {
         wt.args(["-p", &p]);
@@ -394,7 +396,9 @@ fn run_visible(cwd: &Path, command: &str, title: &str, shell: &str) -> Result<()
         return Ok(());
     }
     let (program, args) = chosen.line(command);
-    std::process::Command::new(program)
+    let mut console = std::process::Command::new(program);
+    fresh_env(&mut console);
+    console
         .current_dir(cwd)
         .raw_arg(args)
         .creation_flags(0x0000_0010) // CREATE_NEW_CONSOLE
@@ -402,6 +406,54 @@ fn run_visible(cwd: &Path, command: &str, title: &str, shell: &str) -> Result<()
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
+
+/// Environnement d'un programme ouvert depuis l'Explorateur, relu dans le registre
+/// (`CreateEnvironmentBlock`) : celui d'Island peut dater de son lancement (PATH modifié
+/// depuis, installation de pnpm…) ou venir d'un parent qui n'avait pas le PATH utilisateur.
+/// Windows Terminal donne l'environnement de l'appelant au nouvel onglet. À défaut, on
+/// garde celui d'Island.
+#[cfg(windows)]
+fn fresh_env(cmd: &mut std::process::Command) {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Security::{TOKEN_DUPLICATE, TOKEN_QUERY};
+    use windows::Win32::System::Environment::{CreateEnvironmentBlock, DestroyEnvironmentBlock};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    let vars = unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE, &mut token).is_err() {
+            return;
+        }
+        let mut block = std::ptr::null_mut();
+        let made = CreateEnvironmentBlock(&mut block, Some(token), false);
+        let _ = CloseHandle(token);
+        if made.is_err() || block.is_null() {
+            return;
+        }
+        // Bloc UTF-16 : `NOM=valeur\0` … `\0`.
+        let mut vars = Vec::new();
+        let mut p = block as *const u16;
+        loop {
+            let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+            if len == 0 {
+                break;
+            }
+            let entry = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+            // Les entrées `=C:=C:\…` (dossier courant par lecteur) commencent par `=`.
+            if let Some((k, v)) = entry.get(1..).and_then(|rest| rest.split_once('=')).map(|(k, v)| (format!("{}{k}", &entry[..1]), v.to_string())) {
+                vars.push((k, v));
+            }
+            p = p.add(len + 1);
+        }
+        let _ = DestroyEnvironmentBlock(block);
+        vars
+    };
+    if vars.iter().any(|(k, _)| k.eq_ignore_ascii_case("path")) {
+        cmd.env_clear().envs(vars);
+    }
+}
+
+#[cfg(not(windows))]
+fn fresh_env(_cmd: &mut std::process::Command) {}
 
 /// Shell non nommé : le profil par défaut de Windows Terminal.
 fn profile_only(shell: &str) -> bool {
@@ -548,6 +600,18 @@ mod tests {
         assert_eq!(git.line("pnpm run dev").1, r#"-l -i -c "pnpm run dev; exec bash -l -i""#);
         let v: serde_json::Value = serde_json::from_str(&strip_jsonc("{ // x\n \"a\": \"http://b\" /* c */ }")).unwrap();
         assert_eq!(v["a"], "http://b");
+    }
+
+    /// Environnement frais : PATH utilisateur présent même si ce processus ne l'a pas.
+    #[cfg(windows)]
+    #[test]
+    fn fresh_env_has_user_path() {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.env("PATH", r"C:\Windows\System32");
+        fresh_env(&mut cmd);
+        let path = cmd.get_envs().find(|(k, _)| k.eq_ignore_ascii_case("path")).and_then(|(_, v)| v).unwrap().to_string_lossy().to_lowercase();
+        let user = std::env::var("USERPROFILE").unwrap().to_lowercase();
+        assert!(path.contains(&user), "{path}");
     }
 
     /// Profil par défaut réel de ce poste : `cargo test wt_default -- --ignored --nocapture`.

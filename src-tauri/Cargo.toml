@@ -1,6 +1,6 @@
 [package]
 name = "island"
-version = "2.8.0"
+version = "2.8.1"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -93,6 +93,7 @@ windows = { version = "0.61", features = [
   "Win32_NetworkManagement_IpHelper",
   "Win32_Networking_WinSock",
   "Win32_System_Registry",
+  "Win32_System_Environment", # environnement frais des terminaux lancés par les extensions (CreateEnvironmentBlock)
   "Win32_System_Pipes",
   "Win32_System_Diagnostics_Etw",
   "Win32_System_Time",
