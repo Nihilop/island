@@ -1,0 +1,9 @@
+{
+  "name": "island-extension-projects",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "pack": "node ../../../packages/sdk/bin/island.mjs pack ."
+  }
+}

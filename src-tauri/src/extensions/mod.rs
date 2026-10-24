@@ -12,6 +12,7 @@
 pub mod install;
 pub mod protocol;
 pub mod services;
+pub mod system;
 
 // Format des paquets (identifiants, chemins, manifeste) : partagé avec le serveur du magasin.
 pub use island_formats::package::{valid_host_pattern, valid_id, valid_rel, Manifest};

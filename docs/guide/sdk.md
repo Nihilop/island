@@ -118,6 +118,37 @@ await island.wallpaper.setImage(body, { display: screens[0].id, fit: "fill" });
 `span`) est un réglage global de Windows : il s'applique à tous les écrans. Les fonds
 **animés** ne sont pas exposés aux extensions : c'est l'outil « Fonds animés » d'Island.
 
+## Fichiers, terminal, Docker
+
+Permission `files`. L'extension ne voit **que** les dossiers que l'utilisateur lui donne
+(`pick` ouvre la boîte de dialogue d'Island) ; tout autre chemin est refusé (`forbidden`).
+
+```ts
+const dir = await island.files.pick("Dossier de projets"); // null si annulé
+const roots = await island.files.folders();
+const entries = await island.files.list(roots[0], { depth: 2, skip: ["node_modules", ".git"] });
+const pkg = JSON.parse(await island.files.readText(`${dir}/package.json`));
+await island.files.open(`${dir}/Jeu.uproject`); // app associée ; un .exe demande `terminal`
+```
+
+Permission `terminal` (confiance maximale), dans un dossier donné :
+
+```ts
+await island.terminal.run({ cwd: dir, command: "pnpm run dev", title: "site · dev" }); // onglet Windows Terminal, profil par défaut
+await island.terminal.run({ cwd: dir, command: "", shell: "gitbash" }); // shell choisi : cmd, powershell, pwsh, gitbash, wsl
+await island.terminal.launch({ cwd: dir, command: "code ." }); // sans console
+```
+
+Permission `docker` : l'API [Docker Engine](https://docs.docker.com/reference/api/engine/)
+locale (Docker Desktop). `dockerUnavailable` si Docker est arrêté.
+
+```ts
+const list = await island.docker.json<any[]>("/containers/json?all=1");
+await island.docker.request({ method: "POST", path: `/containers/${list[0].Id}/restart` });
+```
+
+Exemple complet : `examples/extensions/projects` (lanceur `p:`).
+
 ## Dans l'île
 
 | | Permission |
@@ -126,6 +157,7 @@ await island.wallpaper.setImage(body, { display: screens[0].id, fit: "fill" });
 | `island.launcher.provide(id, recherche)` | aucune — [résultats du launcher](./emplacements#launcher) |
 | `island.launcher.onRun(id, action)` | aucune — résultat choisi |
 | `island.commands.on(id, action)` | aucune — [commande](./emplacements#commandes) déclenchée |
+| `island.tools.open(id)` | aucune — ouvre le notch sur un de ses outils |
 | `island.notify({ title, body?, banner? })` | `notifications` |
 | `island.openUrl(url)` | aucune — http(s) seulement, navigateur par défaut |
 | `island.clipboard.readText()` / `writeText(texte)` | `clipboard` |

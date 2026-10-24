@@ -74,7 +74,10 @@ export function setExternalResults(key: string, items: ExternalItem[]) {
 function prefixed(q: string): { source: LauncherSource; rest: string } | null {
   const low = q.toLowerCase();
   for (const s of sources.values()) {
-    if (s.prefix && (low === s.prefix || low.startsWith(`${s.prefix.toLowerCase()} `))) return { source: s, rest: q.slice(s.prefix.length).trim() };
+    if (!s.prefix) continue;
+    const pre = s.prefix.toLowerCase();
+    // « gh … » (espace obligatoire), ou « p:… » (un préfixe en `:` se colle à la recherche).
+    if (low === pre || low.startsWith(pre.endsWith(":") ? pre : `${pre} `)) return { source: s, rest: q.slice(s.prefix.length).trim() };
   }
   return null;
 }

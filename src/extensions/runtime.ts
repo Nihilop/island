@@ -102,6 +102,8 @@ const toReq = (req: any) => ({
   timeout: typeof req?.timeout === "number" ? Math.round(req.timeout) : null,
 });
 
+const toRun = (spec: any) => ({ cwd: String(spec?.cwd ?? ""), command: String(spec?.command ?? ""), title: spec?.title == null ? null : String(spec.title), shell: spec?.shell == null ? null : String(spec.shell) });
+
 // --- RPC ------------------------------------------------------------------------------
 
 type Handler = (ext: Manifest, ...args: any[]) => unknown;
@@ -200,6 +202,39 @@ const methods: Record<string, Handler> = {
     const msg = { name: String(name), data: data === undefined ? null : JSON.parse(JSON.stringify(data)) };
     emitTo(ext.id, "msg", msg);
     void emit("ext2://msg", { ext: ext.id, from: here, ...msg });
+  },
+  // Dossiers donnés par l'utilisateur (permission `files`) : l'extension ne voit que ceux
+  // choisis dans la boîte de dialogue d'Island. Revérifié côté Rust (cf. extensions/system.rs).
+  "files.pick": (ext, title: unknown) => (need(ext, "files"), invoke("ext2_files_pick", { id: ext.id, title: title == null ? null : String(title) })),
+  "files.folders": (ext) => (need(ext, "files"), invoke("ext2_files_folders", { id: ext.id })),
+  "files.forget": (ext, path: unknown) => (need(ext, "files"), invoke("ext2_files_forget", { id: ext.id, path: String(path) })),
+  "files.list": (ext, path: unknown, opts: any) =>
+    (need(ext, "files"),
+    invoke("ext2_files_list", {
+      id: ext.id,
+      path: String(path),
+      depth: typeof opts?.depth === "number" ? Math.round(opts.depth) : null,
+      skip: Array.isArray(opts?.skip) ? opts.skip.map(String) : null,
+    })),
+  "files.readText": (ext, path: unknown) => (need(ext, "files"), invoke("ext2_files_read", { id: ext.id, path: String(path) })),
+  "files.open": (ext, path: unknown) => (need(ext, "files"), invoke("ext2_files_open", { id: ext.id, path: String(path) })),
+  "files.reveal": (ext, path: unknown) => (need(ext, "files"), invoke("ext2_files_reveal", { id: ext.id, path: String(path) })),
+  // Commandes (permission `terminal`, confiance maximale) : Windows Terminal ou lancement
+  // discret, dans un dossier donné.
+  "terminal.run": (ext, spec: any) => (need(ext, "terminal"), invoke("ext2_terminal_run", { id: ext.id, spec: toRun(spec) })),
+  "terminal.launch": (ext, spec: any) => (need(ext, "terminal"), invoke("ext2_terminal_launch", { id: ext.id, spec: toRun(spec) })),
+  // Moteur Docker local (permission `docker`, à haut risque).
+  "docker.request": (ext, req: any) =>
+    (need(ext, "docker"),
+    invoke("ext2_docker", {
+      id: ext.id,
+      req: { method: String(req?.method ?? "GET"), path: String(req?.path ?? ""), body: req?.body == null ? null : typeof req.body === "string" ? req.body : JSON.stringify(req.body) },
+    })),
+  // Ouvre le notch sur un outil de l'extension.
+  "tools.open": (ext, toolId: unknown) => {
+    const tool = ext.contributes.tools.find((x) => x.id === String(toolId));
+    if (!tool) throw new Error(`unknownTool:${String(toolId)}`);
+    return emit("notch://open", `ext:${ext.id}:${tool.id}`);
   },
   "clipboard.readText": (ext) => invoke("ext2_clipboard_read", { id: ext.id }),
   "clipboard.writeText": (ext, text: unknown) => invoke("ext2_clipboard_write", { id: ext.id, text: String(text) }),

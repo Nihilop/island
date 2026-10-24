@@ -64,7 +64,8 @@ island.launcher.onRun("repos", (id) => island.openUrl(id));
 
 - Without a prefix: the query is sent from 2 characters onwards; at most 5 results, below
   Island's own.
-- With a prefix (`gh island`): only this provider answers, up to 40 results.
+- With a prefix (`gh island`): only this provider answers, up to 40 results. A prefix
+  ending in `:` sticks to the query, like Island's own (`p:game`).
 - Stale responses (the user kept typing) are ignored by Island.
 
 ## Notifications

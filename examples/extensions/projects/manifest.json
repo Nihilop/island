@@ -1,0 +1,47 @@
+{
+  "id": "dev.island.projects",
+  "name": "Projets",
+  "version": "0.1.0",
+  "author": "Island",
+  "description": "Tes projets Unreal, Node et Docker Compose : ouvrir, lancer les scripts, piloter les conteneurs. Recherche avec p: dans le lanceur.",
+  "icon": "icons/projects.svg",
+  "main": "dist/main.js",
+  "permissions": ["files", "terminal", "docker"],
+  "contributes": {
+    "tools": [{ "id": "projects", "title": "Projets", "icon": "icons/projects.svg", "view": "dist/projects.html", "size": [640, 400] }],
+    "launcher": [{ "id": "projects", "prefix": "p:", "title": "Projets" }],
+    "settings": [
+      {
+        "key": "terminal",
+        "type": "select",
+        "label": "Terminal",
+        "default": "default",
+        "help": "Shell des onglets Windows Terminal (scripts, compose, « Terminal ici »)",
+        "options": [
+          { "value": "default", "label": "Profil par défaut de Windows Terminal" },
+          { "value": "gitbash", "label": "Git Bash" },
+          { "value": "pwsh", "label": "PowerShell 7" },
+          { "value": "powershell", "label": "Windows PowerShell" },
+          { "value": "cmd", "label": "Invite de commandes" },
+          { "value": "wsl", "label": "WSL" }
+        ]
+      },
+      { "key": "editor", "type": "text", "label": "Éditeur de code", "default": "code", "help": "Commande qui ouvre un dossier : code, cursor, webstorm…" },
+      {
+        "key": "packageManager",
+        "type": "select",
+        "label": "Gestionnaire de paquets",
+        "default": "auto",
+        "help": "Pour les scripts npm. Auto : d'après le fichier de verrouillage du projet",
+        "options": [
+          { "value": "auto", "label": "Auto" },
+          { "value": "npm", "label": "npm" },
+          { "value": "pnpm", "label": "pnpm" },
+          { "value": "yarn", "label": "yarn" },
+          { "value": "bun", "label": "bun" }
+        ]
+      }
+    ]
+  },
+  "locales": { "fr": "locales/fr.json", "en": "locales/en.json" }
+}
