@@ -64,7 +64,8 @@ island.launcher.onRun("repos", (id) => island.openUrl(id));
 
 - Sans préfixe : la recherche est envoyée à partir de 2 caractères ; 5 résultats maximum
   sous ceux d'Island.
-- Avec préfixe (`gh island`) : seul ce fournisseur répond, jusqu'à 40 résultats.
+- Avec préfixe (`gh island`) : seul ce fournisseur répond, jusqu'à 40 résultats. Un préfixe
+  qui finit par `:` se colle à la recherche, comme ceux d'Island (`p:jeu`).
 - Les réponses périmées (l'utilisateur a continué à taper) sont ignorées par Island.
 
 ## Notifications

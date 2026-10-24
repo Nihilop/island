@@ -51,6 +51,9 @@ pub struct State {
     /// Clés de secrets créées (pour les effacer à la désinstallation).
     #[serde(default)]
     pub secrets: BTreeSet<String>,
+    /// Dossiers donnés par l'utilisateur (permission `files`).
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 
 fn state_path(app: &AppHandle, id: &str) -> PathBuf {

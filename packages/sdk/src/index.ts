@@ -104,6 +104,35 @@ export interface ActivityDay {
   apps: { key: string; name: string; seconds: number }[];
 }
 
+/** Entrée d'un dossier (permission `files`). */
+export interface FileEntry {
+  path: string;
+  name: string;
+  dir: boolean;
+  size: number;
+  /** Dernière modification (ms depuis 1970). */
+  modified: number;
+}
+
+/** Commande lancée dans un dossier donné (permission `terminal`). */
+export interface RunSpec {
+  cwd: string;
+  /** `terminal.run` : vide = ouvrir seulement le shell. */
+  command: string;
+  /** Titre de l'onglet de Windows Terminal. */
+  title?: string;
+  /** `terminal.run` : shell de l'onglet. `default` (défaut) = profil par défaut de Windows
+   *  Terminal (Git Bash, PowerShell… : les scripts y tournent aussi). */
+  shell?: "default" | "cmd" | "powershell" | "pwsh" | "gitbash" | "wsl";
+}
+
+export interface DockerRequest {
+  method?: "GET" | "POST" | "PUT" | "DELETE" | "HEAD";
+  /** Chemin de l'API Docker Engine (`/containers/json?all=1`…). Flux sans fin refusés. */
+  path: string;
+  body?: unknown;
+}
+
 export interface LiveSpec {
   /** Chemin d'une icône de l'extension (SVG monochrome, teinté par `color`). */
   icon?: string;
@@ -200,6 +229,38 @@ export interface Island {
     /** Temps par jour (AAAA-MM-JJ, bornes incluses). */
     stats(from: string, to: string): Promise<ActivityDay[]>;
     onChange(cb: (state: ActivityState) => void): void;
+  };
+  /** Permission `files` : seulement les dossiers que l'utilisateur a donnés (`pick`). */
+  files: {
+    /** Boîte de dialogue d'Island : le dossier choisi devient accessible ; null si annulé. */
+    pick(title?: string): Promise<string | null>;
+    /** Dossiers accessibles. */
+    folders(): Promise<string[]>;
+    forget(path: string): Promise<void>;
+    /** Contenu sur `depth` niveaux (1 à 4, 5000 entrées) ; pas de descente dans `skip`. */
+    list(path: string, opts?: { depth?: number; skip?: string[] }): Promise<FileEntry[]>;
+    /** Fichier texte (2 Mo au plus). */
+    readText(path: string): Promise<string>;
+    /** Ouvre avec l'app associée (.uproject, .sln…). Un exécutable demande `terminal`. */
+    open(path: string): Promise<void>;
+    reveal(path: string): Promise<void>;
+  };
+  /** Permission `terminal` (confiance maximale) : `cwd` doit être dans un dossier donné. */
+  terminal: {
+    /** Nouvel onglet de Windows Terminal, laissé ouvert. */
+    run(spec: RunSpec): Promise<void>;
+    /** Sans console (ex. `code .`). */
+    launch(spec: RunSpec): Promise<void>;
+  };
+  /** Permission `docker` : moteur Docker local. Erreur `dockerUnavailable` s'il est arrêté. */
+  docker: {
+    request(req: DockerRequest): Promise<{ status: number; body: string }>;
+    /** Requête JSON ; lève `HttpError` si le statut est ≥ 400. */
+    json<T = unknown>(path: string, init?: Omit<DockerRequest, "path">): Promise<T>;
+  };
+  tools: {
+    /** Ouvre le notch sur un outil de l'extension. */
+    open(id: string): Promise<void>;
   };
   /** Événements entre les pages de l'extension (notch, fenêtres, logique). */
   events: {
@@ -361,6 +422,25 @@ async function create(port: MessagePort, info: { id: string; locale: string; the
       onRecording: (cb) => on("capture.recording", cb),
       reveal: (path) => call("capture.reveal", path),
     },
+    files: {
+      pick: (title) => call("files.pick", title ?? null),
+      folders: () => call("files.folders"),
+      forget: (path) => call("files.forget", path),
+      list: (path, opts) => call("files.list", path, opts ?? {}),
+      readText: (path) => call("files.readText", path),
+      open: (path) => call("files.open", path),
+      reveal: (path) => call("files.reveal", path),
+    },
+    terminal: { run: (spec) => call("terminal.run", spec), launch: (spec) => call("terminal.launch", spec) },
+    docker: {
+      request: (req) => call("docker.request", req),
+      async json<T>(path: string, init?: Omit<DockerRequest, "path">) {
+        const r = await call<{ status: number; body: string }>("docker.request", { ...init, path });
+        if (r.status >= 400) throw new HttpError(r.status, r.body);
+        return (r.body ? JSON.parse(r.body) : null) as T;
+      },
+    },
+    tools: { open: (id) => call("tools.open", id) },
     events: {
       // Copie JSON : un objet réactif (proxy Vue…) ne passerait pas `postMessage`.
       emit: (name, data) => call("events.emit", name, data === undefined ? null : JSON.parse(JSON.stringify(data))),

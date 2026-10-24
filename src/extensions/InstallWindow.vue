@@ -74,7 +74,7 @@ function permLabel(p: string): string {
   const s = t(key);
   return s === key ? p : s;
 }
-const sensitive = (p: string) => p === "capture" || p === "activity" || p === "terminal";
+const sensitive = (p: string) => ["capture", "activity", "terminal", "docker"].includes(p);
 const errorText = (e: string) => {
   const key = `ext.err.${e.split(":")[0]}`;
   const s = t(key);

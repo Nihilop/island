@@ -118,6 +118,37 @@ No `display`: all screens. `fit` (`fill`, `fit`, `stretch`, `center`, `tile`, `s
 global Windows setting: it applies to every screen. **Live** wallpapers aren't exposed to
 extensions: they're Island's own “Live wallpapers” tool.
 
+## Files, terminal, Docker
+
+Permission `files`. The extension sees **only** the folders the user gives it (`pick`
+opens Island's dialog); any other path is refused (`forbidden`).
+
+```ts
+const dir = await island.files.pick("Projects folder"); // null if cancelled
+const roots = await island.files.folders();
+const entries = await island.files.list(roots[0], { depth: 2, skip: ["node_modules", ".git"] });
+const pkg = JSON.parse(await island.files.readText(`${dir}/package.json`));
+await island.files.open(`${dir}/Game.uproject`); // associated app; an .exe needs `terminal`
+```
+
+Permission `terminal` (full trust), in a given folder:
+
+```ts
+await island.terminal.run({ cwd: dir, command: "pnpm run dev", title: "site · dev" }); // Windows Terminal tab, default profile
+await island.terminal.run({ cwd: dir, command: "", shell: "gitbash" }); // pick a shell: cmd, powershell, pwsh, gitbash, wsl
+await island.terminal.launch({ cwd: dir, command: "code ." }); // no console
+```
+
+Permission `docker`: the local [Docker Engine](https://docs.docker.com/reference/api/engine/)
+API (Docker Desktop). `dockerUnavailable` when Docker is stopped.
+
+```ts
+const list = await island.docker.json<any[]>("/containers/json?all=1");
+await island.docker.request({ method: "POST", path: `/containers/${list[0].Id}/restart` });
+```
+
+Full example: `examples/extensions/projects` (launcher `p:`).
+
 ## In the island
 
 | | Permission |
@@ -126,6 +157,7 @@ extensions: they're Island's own “Live wallpapers” tool.
 | `island.launcher.provide(id, search)` | none — [launcher results](./emplacements#launcher) |
 | `island.launcher.onRun(id, action)` | none — result picked |
 | `island.commands.on(id, action)` | none — [command](./emplacements#commands) triggered |
+| `island.tools.open(id)` | none — opens the notch on one of its tools |
 | `island.notify({ title, body?, banner? })` | `notifications` |
 | `island.openUrl(url)` | none — http(s) only, default browser |
 | `island.clipboard.readText()` / `writeText(text)` | `clipboard` |

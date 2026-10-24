@@ -13,6 +13,9 @@
 | `windows` | `island.windows.open`: its own windows (`contributes.windows`) |
 | `capture` | **high risk** (shown in red at install): `island.capture`, see and record the screen and sound |
 | `wallpaper` | `island.wallpaper`: set a **static** wallpaper (the image is passed as data, never a path) |
+| `files` | `island.files`: **only** the folders the user gives in Island's dialog (list, read, open with the associated app) |
+| `terminal` | **full trust** (in red): `island.terminal`, run commands (Windows Terminal) in a given folder; also lets `files.open` open an executable |
+| `docker` | **high risk** (in red): `island.docker`, the local Docker Engine API (start, stop containers…) |
 | `images:<domain>` | show HTTPS images from that domain (`<img>`, CSS) without `island.http` |
 
 Ask for the minimum: the user sees the list in plain language before installing, and an

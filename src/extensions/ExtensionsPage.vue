@@ -332,7 +332,7 @@ const errorText = (e: string) => {
       >
         <Row v-if="x.manifest.permissions.length" :label="t('ext.permissions')">
           <div class="flex max-w-[300px] flex-wrap justify-end gap-1">
-            <Badge v-for="p in x.manifest.permissions" :key="p" variant="secondary" :class="p === 'capture' || p === 'activity' ? 'text-sys-red' : ''">{{ permLabel(p) }}</Badge>
+            <Badge v-for="p in x.manifest.permissions" :key="p" variant="secondary" :class="['capture', 'activity', 'terminal', 'docker'].includes(p) ? 'text-sys-red' : ''">{{ permLabel(p) }}</Badge>
           </div>
         </Row>
         <!-- Raccourcis des commandes (modifiables ; défaut = manifeste). -->

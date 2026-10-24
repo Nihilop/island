@@ -24,7 +24,7 @@ function permLabel(p: string): string {
   const s = t(key);
   return s === key ? p : s;
 }
-const sensitive = (p: string) => p === "capture" || p === "activity" || p === "terminal";
+const sensitive = (p: string) => ["capture", "activity", "terminal", "docker"].includes(p);
 const size = (b: number) => (b < 1 << 20 ? `${Math.max(1, Math.round(b / 1024))} Ko` : `${(b / (1 << 20)).toFixed(1)} Mo`);
 const date = (iso: string) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(iso));
 const openLink = (url: string) => void invoke("open_url", { url });

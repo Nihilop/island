@@ -13,6 +13,9 @@
 | `windows` | `island.windows.open` : ses propres fenêtres (`contributes.windows`) |
 | `capture` | **à haut risque** (en rouge à l'installation) : `island.capture`, voir et enregistrer l'écran et le son |
 | `wallpaper` | `island.wallpaper` : poser un fond d'écran **statique** (l'image est fournie en données, jamais un chemin) |
+| `files` | `island.files` : **seulement** les dossiers que l'utilisateur donne dans la boîte de dialogue d'Island (lister, lire, ouvrir avec l'app associée) |
+| `terminal` | **confiance maximale** (en rouge) : `island.terminal`, lancer des commandes (Windows Terminal) dans un dossier donné ; permet aussi à `files.open` d'ouvrir un exécutable |
+| `docker` | **à haut risque** (en rouge) : `island.docker`, l'API du moteur Docker local (démarrer, arrêter les conteneurs…) |
 | `images:<domaine>` | afficher des images HTTPS de ce domaine (`<img>`, CSS) sans passer par `island.http` |
 
 Demandez le minimum : l'utilisateur voit la liste en clair avant d'installer, et une mise à
@@ -40,7 +43,9 @@ réglages d'Island, les autres extensions.
 - **Contrôles côté Rust** là où une donnée externe entre :
   - réseau : domaine autorisé relu dans le manifeste installé, HTTPS, aucune redirection,
     adresses privées et locales refusées au moment même de la connexion ;
-  - fichiers : chemins canonicalisés et confinés au dossier de l'extension.
+  - fichiers : chemins canonicalisés et confinés au dossier de l'extension ; avec `files`,
+    aux dossiers donnés par l'utilisateur (liens résolus, jonctions jamais suivies) ;
+  - Docker : flux sans fin refusés (`attach`, `events`, `logs?follow`, `stats` en continu).
 
 ## Permissions consenties
 
