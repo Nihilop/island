@@ -1,0 +1,299 @@
+/* Vue « Projets » : deux colonnes, couleurs du kit (ui.css). */
+#app {
+  height: 100%;
+}
+.shell {
+  display: flex;
+  height: 100%;
+  gap: 10px;
+  padding: 10px;
+}
+aside {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+main {
+  flex: 1;
+  min-width: 0;
+}
+.scroll {
+  overflow-y: auto;
+  min-height: 0;
+}
+aside .list {
+  flex: 1;
+  gap: 2px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.spacer {
+  flex: 1;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--fill-2);
+  color: var(--label-3);
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  user-select: text;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.row:hover {
+  background: var(--fill-1);
+}
+.row.on {
+  background: var(--fill-2);
+}
+.row .name {
+  font-weight: 500;
+}
+.kind {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: var(--fill-2);
+  color: var(--label-2);
+}
+.kind.unreal {
+  color: var(--purple);
+}
+.kind.node {
+  color: var(--green);
+}
+.kind.compose {
+  color: var(--blue);
+}
+.kind.sln {
+  color: var(--orange);
+}
+footer {
+  display: flex;
+  gap: 4px;
+}
+footer .primary {
+  flex: 1;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--fill-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--fill-3);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.btn.icon {
+  padding: 0 7px;
+}
+.btn.small {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+}
+.btn.primary {
+  background: var(--blue);
+  color: #fff;
+}
+.link {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.detail header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--label-3);
+}
+h3 .caption {
+  text-transform: none;
+  font-weight: 400;
+}
+p {
+  margin: 0;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill-1);
+  text-align: left;
+  cursor: pointer;
+}
+.tile:hover:not(:disabled) {
+  background: var(--fill-2);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fill-2);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.chip:hover:not(:disabled) {
+  background: var(--fill-3);
+}
+.chip svg {
+  color: var(--green);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--label-3);
+}
+.dot.running {
+  background: var(--green);
+}
+.dot.restarting,
+.dot.paused {
+  background: var(--orange);
+}
+.dot.dead {
+  background: var(--red);
+}
+.files {
+  margin-top: 4px;
+}
+.roots h3 {
+  margin-bottom: 2px;
+}
+.roots .caption {
+  margin-bottom: 8px;
+}
+.roots .item {
+  margin-bottom: 4px;
+}
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red);
+}
+.empty {
+  padding: 16px 8px;
+  text-align: center;
+}
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--label-2);
+  text-align: center;
+}
+.spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.tile.launch svg {
+  color: var(--green);
+}
