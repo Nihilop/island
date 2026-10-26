@@ -1,11 +1,13 @@
 <script setup lang="ts">
-// Fiche d'un projet : ouvrir (éditeur, explorateur, terminal), Unreal (.uproject, .sln),
-// scripts npm, conteneurs Docker Compose (suivis toutes les 3 s tant que la fiche est
-// affichée).
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
+// Fiche d'un projet : ouvrir (éditeur, explorateur, terminal), commandes perso épinglées,
+// Unreal (.uproject, .sln), scripts npm, Rust, conteneurs Docker Compose (suivis toutes les
+// 3 s tant que la fiche est affichée). Maj+clic sur une commande : la compléter avant de
+// la lancer.
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from "vue";
 import type { Island } from "@island/sdk";
 import Icon from "./Icon.vue";
-import { CARGO, cargo, compose, fileName, launchUnreal, openEditor, openTerminal, packageManager, runScript, runnables, type Project } from "../projects";
+import { customOf, loadCustom, runCommand, setPinned, suggestions } from "../custom";
+import { CARGO, cargo, compose, composeCommand, fileName, launchUnreal, openEditor, openTerminal, packageManager, runScript, runnables, type Project } from "../projects";
 import { act, containers, type Container } from "../docker";
 
 const props = defineProps<{ island: Island; project: Project }>();
@@ -37,6 +39,40 @@ const explain = (e: unknown) => {
 
 const pm = ref("npm");
 onMounted(async () => (pm.value = await packageManager(island, p.value)));
+
+// --- Commandes perso ----------------------------------------------------------------------
+
+const pinned = ref<string[]>([]);
+const suggested = ref<string[]>([]);
+onMounted(async () => {
+  pinned.value = customOf(await loadCustom(island), p.value);
+  suggested.value = await suggestions(island, p.value).catch(() => []);
+});
+
+const prompt = reactive({ open: false, value: "", pin: true });
+const input = ref<HTMLInputElement | null>(null);
+/** Ouvre le champ (« + » : vide et épinglé ; Maj+clic : prérempli, non épinglé). */
+async function openPrompt(command = "", pin = true) {
+  Object.assign(prompt, { open: true, value: command ? `${command} ` : "", pin });
+  await nextTick();
+  input.value?.focus();
+}
+/** Maj+clic : compléter la commande ; clic : la lancer. */
+const click = (e: MouseEvent, command: string, key: string, fn: () => Promise<unknown>) => (e.shiftKey ? openPrompt(command, false) : run(key, fn));
+
+function submit() {
+  const command = prompt.value.trim();
+  if (!command) return;
+  void run(`p:${command}`, async () => {
+    if (prompt.pin && !pinned.value.includes(command)) pinned.value = await setPinned(island, p.value, command, true);
+    prompt.open = false;
+    await runCommand(island, p.value, command);
+  });
+}
+const unpin = (command: string) =>
+  run(`u:${command}`, async () => {
+    pinned.value = await setPinned(island, p.value, command, false);
+  });
 
 // --- Docker ---------------------------------------------------------------------------------
 
@@ -84,6 +120,38 @@ const running = computed(() => list.value.filter((c) => c.state === "running").l
       </button>
     </header>
 
+    <section>
+      <h3>{{ t("custom.title") }} <span class="caption">{{ t("custom.shift") }}</span></h3>
+      <div class="chips">
+        <span v-for="c in pinned" :key="c" class="pinned">
+          <button class="chip" :disabled="busy.has(`k:${c}`)" :title="c" @click="click($event, c, `k:${c}`, () => runCommand(island, p, c))">
+            <span v-if="busy.has(`k:${c}`)" class="spinner" /><Icon v-else name="play" :size="10" />{{ c }}
+          </button>
+          <button class="unpin" :title="t('custom.unpin')" :disabled="busy.has(`u:${c}`)" @click="unpin(c)"><Icon name="x" :size="9" /></button>
+        </span>
+        <button v-if="!prompt.open" class="chip plain" :title="t('custom.add')" @click="openPrompt()">
+          <Icon name="plus" :size="10" />{{ pinned.length ? "" : t("custom.add") }}
+        </button>
+      </div>
+      <form v-if="prompt.open" class="prompt" @submit.prevent="submit">
+        <input
+          ref="input"
+          v-model="prompt.value"
+          data-own-keys
+          list="project-commands"
+          spellcheck="false"
+          :placeholder="t('custom.placeholder')"
+          @keydown.esc.stop="prompt.open = false"
+        />
+        <datalist id="project-commands"><option v-for="x in suggested" :key="x" :value="x" /></datalist>
+        <label class="caption pin"><input v-model="prompt.pin" type="checkbox" />{{ t("custom.pin") }}</label>
+        <button class="btn small primary" type="submit" :disabled="!prompt.value.trim() || busy.has(`p:${prompt.value.trim()}`)">
+          <span v-if="busy.has(`p:${prompt.value.trim()}`)" class="spinner" /><Icon v-else name="play" :size="10" />{{ t("custom.run") }}
+        </button>
+        <button class="btn small icon" type="button" :title="t('custom.cancel')" @click="prompt.open = false"><Icon name="x" :size="10" /></button>
+      </form>
+    </section>
+
     <section v-if="p.uprojects.length || p.solutions.length">
       <h3>{{ p.uprojects.length ? t("kind.unreal") : t("kind.sln") }}</h3>
       <div class="grid">
@@ -107,7 +175,7 @@ const running = computed(() => list.value.filter((c) => c.state === "running").l
     <section v-if="p.kinds.includes('node')">
       <h3>{{ t("scripts") }} <span class="caption">{{ pm }}</span></h3>
       <div v-if="p.scripts.length" class="chips">
-        <button v-for="s in p.scripts" :key="s" class="chip" :disabled="busy.has(`s:${s}`)" :title="`${pm} run ${s}`" @click="run(`s:${s}`, () => runScript(island, p, s))">
+        <button v-for="s in p.scripts" :key="s" class="chip" :disabled="busy.has(`s:${s}`)" :title="`${pm} run ${s}`" @click="click($event, `${pm} run ${s}`, `s:${s}`, () => runScript(island, p, s))">
           <span v-if="busy.has(`s:${s}`)" class="spinner" /><Icon v-else name="play" :size="10" />{{ s }}
         </button>
       </div>
@@ -123,11 +191,11 @@ const running = computed(() => list.value.filter((c) => c.state === "running").l
           class="chip"
           :disabled="busy.has(`r:${r.command}`)"
           :title="r.command"
-          @click="run(`r:${r.command}`, () => cargo(island, p, r.command, `run ${r.label}`))"
+          @click="click($event, r.command, `r:${r.command}`, () => cargo(island, p, r.command, `run ${r.label}`))"
         >
           <span v-if="busy.has(`r:${r.command}`)" class="spinner" /><Icon v-else name="play" :size="10" />run {{ r.label }}
         </button>
-        <button v-for="c in CARGO" :key="c" class="chip plain" :disabled="busy.has(`c:${c}`)" :title="`cargo ${c}`" @click="run(`c:${c}`, () => cargo(island, p, `cargo ${c}`, c))">
+        <button v-for="c in CARGO" :key="c" class="chip plain" :disabled="busy.has(`c:${c}`)" :title="`cargo ${c}`" @click="click($event, `cargo ${c}`, `c:${c}`, () => cargo(island, p, `cargo ${c}`, c))">
           <span v-if="busy.has(`c:${c}`)" class="spinner" /><Icon v-else name="terminal" :size="10" />{{ c }}
         </button>
       </div>
@@ -137,10 +205,10 @@ const running = computed(() => list.value.filter((c) => c.state === "running").l
       <h3>
         Docker <span v-if="docker === 'ok'" class="caption">{{ t("docker.count", { on: running, all: list.length }) }}</span>
         <span class="spacer" />
-        <button class="btn small" :disabled="busy.has('up')" @click="run('up', () => compose(island, p, 'up -d'))">
+        <button class="btn small" :disabled="busy.has('up')" @click="click($event, composeCommand(p, 'up -d'), 'up', () => compose(island, p, 'up -d'))">
           <span v-if="busy.has('up')" class="spinner" /><Icon v-else name="up" :size="11" />up
         </button>
-        <button class="btn small" :disabled="busy.has('down')" @click="run('down', () => compose(island, p, 'down'))">
+        <button class="btn small" :disabled="busy.has('down')" @click="click($event, composeCommand(p, 'down'), 'down', () => compose(island, p, 'down'))">
           <span v-if="busy.has('down')" class="spinner" /><Icon v-else name="down" :size="11" />down
         </button>
       </h3>

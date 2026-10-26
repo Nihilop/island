@@ -45,5 +45,14 @@
   "unreal.launch": "Compiler (Development Editor) puis ouvrir l'éditeur",
   "kind.rust": "Rust",
   "rust.crates": "{n} crate(s)",
-  "run.cargo": "Commande cargo dans Windows Terminal"
+  "run.cargo": "Commande cargo dans Windows Terminal",
+  "custom.title": "Commandes",
+  "custom.shift": "Maj+clic sur une commande pour la compléter",
+  "custom.add": "Ajouter une commande",
+  "custom.placeholder": "cargo xtask dev, pnpm run dev -- --host…",
+  "custom.pin": "Épingler",
+  "custom.run": "Lancer",
+  "custom.cancel": "Annuler",
+  "custom.unpin": "Retirer",
+  "custom.hint": "Commande épinglée"
 }

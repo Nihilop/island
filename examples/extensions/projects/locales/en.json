@@ -45,5 +45,14 @@
   "unreal.launch": "Build (Development Editor), then open the editor",
   "kind.rust": "Rust",
   "rust.crates": "{n} crate(s)",
-  "run.cargo": "cargo command in Windows Terminal"
+  "run.cargo": "cargo command in Windows Terminal",
+  "custom.title": "Commands",
+  "custom.shift": "Shift+click a command to complete it",
+  "custom.add": "Add a command",
+  "custom.placeholder": "cargo xtask dev, pnpm run dev -- --host…",
+  "custom.pin": "Pin",
+  "custom.run": "Run",
+  "custom.cancel": "Cancel",
+  "custom.unpin": "Remove",
+  "custom.hint": "Pinned command"
 }

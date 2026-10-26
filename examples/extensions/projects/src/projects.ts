@@ -13,6 +13,8 @@ export type Kind = "unreal" | "node" | "rust" | "compose" | "sln";
 /** Rust : une crate (ou chaque membre d'un workspace) et ses exécutables. */
 export interface Crate {
   name: string;
+  /** Dossier de la crate. */
+  dir: string;
   bins: string[];
 }
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
@@ -109,7 +111,7 @@ async function crateAt(island: Island, dir: string, toml: string): Promise<Crate
     const src = await island.files.list(`${dir}\\src`).catch(() => [] as FileEntry[]);
     if (src.some((f) => low(f.name) === "main.rs")) bins.push(name);
   }
-  return { name, bins };
+  return { name, dir, bins };
 }
 
 /** Crates d'un projet Rust : membres du workspace (motifs `dossier/*` compris), ou la crate. */
@@ -227,7 +229,7 @@ export async function packageManager(island: Island, p: Project): Promise<Packag
 
 type Shell = NonNullable<RunSpec["shell"]>;
 /** Commande dans un onglet de Windows Terminal, avec le shell choisi dans les réglages. */
-const inTerminal = async (island: Island, p: Project, command: string, title: string) =>
+export const inTerminal = async (island: Island, p: Project, command: string, title: string) =>
   island.terminal.run({ cwd: p.path, command, title, shell: ((await island.settings.get<string>("terminal").catch(() => "")) || "default") as Shell });
 
 export async function runScript(island: Island, p: Project, script: string) {
@@ -243,11 +245,13 @@ export async function openEditor(island: Island, p: Project) {
 export const openTerminal = (island: Island, p: Project) => inTerminal(island, p, "", p.name);
 
 /** `docker compose …` ; un fichier au nom non standard (`docker-compose.dev.yml`) est passé par `-f`. */
-export function compose(island: Island, p: Project, args: string) {
+export function composeCommand(p: Project, args: string) {
   const file = p.compose[0] ? base(p.compose[0]) : "";
   const f = file && !COMPOSE.includes(low(file)) ? `-f ${file} ` : "";
-  return inTerminal(island, p, `docker compose ${f}${args}`, `${p.name} · compose ${args.split(" ")[0]}`);
+  return `docker compose ${f}${args}`;
 }
+
+export const compose = (island: Island, p: Project, args: string) => inTerminal(island, p, composeCommand(p, args), `${p.name} · compose ${args.split(" ")[0]}`);
 
 /** Commandes cargo du workspace (ou de la crate). */
 export const CARGO = ["check", "build", "test", "clippy"] as const;

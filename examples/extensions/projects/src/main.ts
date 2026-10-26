@@ -7,6 +7,7 @@
 
 import { connect, type LauncherItem } from "@island/sdk";
 import { CARGO, cargo, compose, fileName, launchUnreal, primary, runScript, runnables, scan, type Project } from "./projects";
+import { customOf, loadCustom, runCommand, type CustomMap } from "./custom";
 
 const island = await connect();
 
@@ -31,6 +32,10 @@ island.events.on("projects:changed", async () => {
   projects = (await island.storage.get<Project[]>("projects")) ?? projects;
 });
 
+// Commandes épinglées dans la vue (« cargo xtask dev »…).
+let custom: CustomMap = await loadCustom(island);
+island.events.on("projects:custom", async () => void (custom = await loadCustom(island)));
+
 interface Action {
   item: LauncherItem;
   run: () => Promise<unknown>;
@@ -49,6 +54,8 @@ function actions(p: Project): Action[] {
   for (const u of p.uprojects) out.push({ item: { id: `file|${u}`, title: sub(fileName(u)), subtitle: island.t("open.uproject") }, run: () => island.files.open(u), text: `${p.name} ${fileName(u)} unreal` });
   for (const s of p.solutions) out.push({ item: { id: `file|${s}`, title: sub(fileName(s)), subtitle: island.t("open.sln") }, run: () => island.files.open(s), text: `${p.name} ${fileName(s)} sln visual` });
   for (const s of p.scripts) out.push({ item: { id: `script|${p.path}|${s}`, title: sub(s), subtitle: island.t("run.script") }, run: () => runScript(island, p, s), text: `${p.name} ${s}` });
+  for (const c of customOf(custom, p))
+    out.push({ item: { id: `custom|${p.path}|${c}`, title: sub(c), subtitle: island.t("custom.hint") }, run: () => runCommand(island, p, c), text: `${p.name} ${c}` });
   for (const r of runnables(p))
     out.push({ item: { id: `cargo-run|${p.path}|${r.command}`, title: sub(`run ${r.label}`), subtitle: r.command }, run: () => cargo(island, p, r.command, `run ${r.label}`), text: `${p.name} cargo run ${r.label}` });
   if (p.kinds.includes("rust"))

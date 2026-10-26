@@ -1,7 +1,7 @@
 {
   "id": "dev.island.projects",
   "name": "Projets",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "Island",
   "description": "Tes projets Unreal, Node, Rust et Docker Compose : ouvrir, lancer les scripts, piloter les conteneurs. Recherche avec p: dans le lanceur.",
   "icon": "icons/projects.svg",

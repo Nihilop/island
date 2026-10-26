@@ -86,6 +86,8 @@ island.events.on<string>("projects:select", (path) => {
 // Raccourcis : ↑ ↓ dans la liste.
 function onKey(e: KeyboardEvent) {
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  // Champ qui garde ses flèches (suggestions de commandes).
+  if ((e.target as HTMLElement | null)?.closest?.("[data-own-keys]")) return;
   const list = filtered.value;
   if (!list.length) return;
   const i = Math.max(0, list.findIndex((p) => p.path === current.value?.path));
