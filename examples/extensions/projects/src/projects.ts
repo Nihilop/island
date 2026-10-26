@@ -8,7 +8,13 @@
 import type { FileEntry, Island, RunSpec } from "@island/sdk";
 import { launchCommand } from "./unreal";
 
-export type Kind = "unreal" | "node" | "compose" | "sln";
+export type Kind = "unreal" | "node" | "rust" | "compose" | "sln";
+
+/** Rust : une crate (ou chaque membre d'un workspace) et ses exécutables. */
+export interface Crate {
+  name: string;
+  bins: string[];
+}
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
 export interface Project {
@@ -23,6 +29,8 @@ export interface Project {
   /** Node : scripts du package.json, dans l'ordre. */
   scripts: string[];
   pm: PackageManager | null;
+  /** Rust : crates (membres du workspace, ou la crate seule). */
+  crates: Crate[];
   /** Docker Compose : fichiers, et nom de projet compose (étiquettes des conteneurs). */
   compose: string[];
   composeName: string | null;
@@ -52,7 +60,10 @@ export const SKIP = [
   ".cache",
 ];
 
+/** Fichiers compose : noms par défaut de Docker, puis variantes (`docker-compose.dev.yml`…). */
 const COMPOSE = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+const COMPOSE_LIKE = /^(docker-)?compose(\.[\w-]+)?\.ya?ml$/;
+const composeRank = (n: string) => (COMPOSE.includes(n) ? 0 : 1);
 
 const base = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 const parent = (p: string) => p.replace(/[\\/][^\\/]+$/, "");
@@ -69,16 +80,69 @@ function marks(files: FileEntry[]) {
     uprojects: names.filter((x) => x.n.endsWith(".uproject")).map((x) => x.f.path),
     solutions: names.filter((x) => x.n.endsWith(".sln")).map((x) => x.f.path),
     pkg: names.find((x) => x.n === "package.json")?.f.path ?? null,
-    compose: names.filter((x) => COMPOSE.includes(x.n)).map((x) => x.f.path),
+    cargo: names.find((x) => x.n === "cargo.toml")?.f.path ?? null,
+    compose: names
+      .filter((x) => COMPOSE_LIKE.test(x.n))
+      .sort((a, b) => composeRank(a.n) - composeRank(b.n) || a.n.localeCompare(b.n))
+      .map((x) => x.f.path),
     locks: new Set(names.map((x) => x.n)),
   };
 }
 
-const isProject = (m: ReturnType<typeof marks>) => !!(m.uprojects.length || m.solutions.length || m.pkg || m.compose.length);
+const isProject = (m: ReturnType<typeof marks>) => !!(m.uprojects.length || m.solutions.length || m.pkg || m.cargo || m.compose.length);
+
+// --- Rust ---------------------------------------------------------------------------------
+
+/** Valeur `clé = "…"` de la première table `[table]` d'un Cargo.toml (lecture minimale). */
+function tomlTable(src: string, table: string): string | null {
+  const re = new RegExp(`^\\[${table.replace(/[[\]]/g, "\\$&")}\\]\\s*$([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`, "m");
+  return src.match(re)?.[1] ?? null;
+}
+const tomlString = (body: string | null, key: string) => body?.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]+)"`, "m"))?.[1] ?? null;
+
+/** Crate d'un dossier : son nom et ses exécutables (`[[bin]]`, sinon src/main.rs). */
+async function crateAt(island: Island, dir: string, toml: string): Promise<Crate | null> {
+  const name = tomlString(tomlTable(toml, "package"), "name");
+  if (!name) return null;
+  const bins = [...toml.matchAll(/^\[\[bin\]\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/gm)].map((m) => tomlString(m[1], "name")).filter((b): b is string => !!b);
+  if (!bins.length) {
+    const src = await island.files.list(`${dir}\\src`).catch(() => [] as FileEntry[]);
+    if (src.some((f) => low(f.name) === "main.rs")) bins.push(name);
+  }
+  return { name, bins };
+}
+
+/** Crates d'un projet Rust : membres du workspace (motifs `dossier/*` compris), ou la crate. */
+async function crates(island: Island, dir: string, tomlPath: string): Promise<{ name: string | null; crates: Crate[] }> {
+  const toml = await island.files.readText(tomlPath);
+  const own = await crateAt(island, dir, toml);
+  const members = tomlTable(toml, "workspace")?.match(/members\s*=\s*\[([\s\S]*?)\]/)?.[1];
+  if (!members) return { name: own?.name ?? null, crates: own ? [own] : [] };
+  const dirs: string[] = [];
+  for (const m of members.matchAll(/"([^"]+)"/g)) {
+    const rel = m[1].replace(/\//g, "\\");
+    if (!rel.endsWith("*")) dirs.push(`${dir}\\${rel}`);
+    else {
+      const parentDir = `${dir}\\${rel.replace(/\\?\*$/, "")}`;
+      const subs = await island.files.list(parentDir).catch(() => [] as FileEntry[]);
+      dirs.push(...subs.filter((s) => s.dir).map((s) => s.path));
+    }
+  }
+  const found = await Promise.all(
+    dirs.map((d) =>
+      island.files
+        .readText(`${d}\\Cargo.toml`)
+        .then((t) => crateAt(island, d, t))
+        .catch(() => null),
+    ),
+  );
+  const list = [...(own ? [own] : []), ...found.filter((c): c is Crate => !!c)];
+  return { name: own?.name ?? null, crates: list };
+}
 
 async function detail(island: Island, dir: string, root: string, files: FileEntry[]): Promise<Project> {
   const m = marks(files);
-  const p: Project = { path: dir, name: base(dir), root, kinds: [], uprojects: m.uprojects, solutions: m.solutions, scripts: [], pm: null, compose: m.compose, composeName: null };
+  const p: Project = { path: dir, name: base(dir), root, kinds: [], uprojects: m.uprojects, solutions: m.solutions, scripts: [], pm: null, crates: [], compose: m.compose, composeName: null };
   if (m.uprojects.length) {
     p.kinds.push("unreal");
     p.name = base(m.uprojects[0]).replace(/\.uproject$/i, "");
@@ -103,6 +167,16 @@ async function detail(island: Island, dir: string, root: string, files: FileEntr
           : m.locks.has("package-lock.json")
             ? "npm"
             : null;
+  }
+  if (m.cargo) {
+    p.kinds.push("rust");
+    try {
+      const r = await crates(island, dir, m.cargo);
+      p.crates = r.crates;
+      if (r.name && !m.uprojects.length && !m.pkg) p.name = r.name;
+    } catch {
+      // Cargo.toml illisible : le projet reste listé, avec les commandes générales.
+    }
   }
   if (m.compose.length) {
     p.kinds.push("compose");
@@ -168,7 +242,24 @@ export async function openEditor(island: Island, p: Project) {
 
 export const openTerminal = (island: Island, p: Project) => inTerminal(island, p, "", p.name);
 
-export const compose = (island: Island, p: Project, args: string) => inTerminal(island, p, `docker compose ${args}`, `${p.name} · compose ${args.split(" ")[0]}`);
+/** `docker compose …` ; un fichier au nom non standard (`docker-compose.dev.yml`) est passé par `-f`. */
+export function compose(island: Island, p: Project, args: string) {
+  const file = p.compose[0] ? base(p.compose[0]) : "";
+  const f = file && !COMPOSE.includes(low(file)) ? `-f ${file} ` : "";
+  return inTerminal(island, p, `docker compose ${f}${args}`, `${p.name} · compose ${args.split(" ")[0]}`);
+}
+
+/** Commandes cargo du workspace (ou de la crate). */
+export const CARGO = ["check", "build", "test", "clippy"] as const;
+
+/** Exécutables à lancer : `cargo run -p <crate> --bin <bin>` (tout court s'il n'y en a qu'un). */
+export function runnables(p: Project): { label: string; command: string }[] {
+  const all = p.crates.flatMap((c) => c.bins.map((b) => ({ crate: c.name, bin: b })));
+  if (all.length === 1) return [{ label: all[0].bin, command: "cargo run" }];
+  return all.map((x) => ({ label: x.bin, command: `cargo run -p ${x.crate} --bin ${x.bin}` }));
+}
+
+export const cargo = (island: Island, p: Project, command: string, label: string) => inTerminal(island, p, command, `${p.name} · ${label}`);
 
 /** Unreal : compile la cible éditeur puis ouvre l'éditeur (« Exécuter sans débogage »). */
 export async function launchUnreal(island: Island, p: Project, uproject: string) {

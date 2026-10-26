@@ -69,7 +69,7 @@ async function forget(root: string) {
 
 watch(selected, (p) => void island.storage.set("selected", p));
 
-const ICON: Record<string, string> = { unreal: "game", node: "code", compose: "box", sln: "file" };
+const ICON: Record<string, string> = { unreal: "game", node: "code", rust: "box", compose: "box", sln: "file" };
 const mainIcon = (p: Project) => ICON[p.kinds[0]] ?? "folder";
 
 onMounted(async () => {

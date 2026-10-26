@@ -6,7 +6,7 @@
 //   p:jeu         projets et actions qui correspondent (« p:site dev » → script dev)
 
 import { connect, type LauncherItem } from "@island/sdk";
-import { compose, fileName, launchUnreal, primary, runScript, scan, type Project } from "./projects";
+import { CARGO, cargo, compose, fileName, launchUnreal, primary, runScript, runnables, scan, type Project } from "./projects";
 
 const island = await connect();
 
@@ -49,6 +49,10 @@ function actions(p: Project): Action[] {
   for (const u of p.uprojects) out.push({ item: { id: `file|${u}`, title: sub(fileName(u)), subtitle: island.t("open.uproject") }, run: () => island.files.open(u), text: `${p.name} ${fileName(u)} unreal` });
   for (const s of p.solutions) out.push({ item: { id: `file|${s}`, title: sub(fileName(s)), subtitle: island.t("open.sln") }, run: () => island.files.open(s), text: `${p.name} ${fileName(s)} sln visual` });
   for (const s of p.scripts) out.push({ item: { id: `script|${p.path}|${s}`, title: sub(s), subtitle: island.t("run.script") }, run: () => runScript(island, p, s), text: `${p.name} ${s}` });
+  for (const r of runnables(p))
+    out.push({ item: { id: `cargo-run|${p.path}|${r.command}`, title: sub(`run ${r.label}`), subtitle: r.command }, run: () => cargo(island, p, r.command, `run ${r.label}`), text: `${p.name} cargo run ${r.label}` });
+  if (p.kinds.includes("rust"))
+    for (const c of CARGO) out.push({ item: { id: `cargo|${p.path}|${c}`, title: sub(`cargo ${c}`), subtitle: island.t("run.cargo") }, run: () => cargo(island, p, `cargo ${c}`, c), text: `${p.name} cargo ${c}` });
   if (p.compose.length) {
     out.push({ item: { id: `up|${p.path}`, title: sub("compose up"), subtitle: island.t("compose.upHint") }, run: () => compose(island, p, "up -d"), text: `${p.name} docker compose up` });
     out.push({ item: { id: `down|${p.path}`, title: sub("compose down"), subtitle: island.t("compose.downHint") }, run: () => compose(island, p, "down"), text: `${p.name} docker compose down` });

@@ -96,6 +96,9 @@ button {
 .kind.node {
   color: var(--green);
 }
+.kind.rust {
+  color: var(--orange);
+}
 .kind.compose {
   color: var(--blue);
 }
@@ -296,4 +299,7 @@ p {
 }
 .tile.launch svg {
   color: var(--green);
+}
+.chip.plain svg {
+  color: var(--label-3);
 }

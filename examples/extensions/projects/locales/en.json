@@ -42,5 +42,8 @@
   "err.dockerUnavailable": "Docker isn't running.",
   "err.permission": "Missing permission: reinstall the extension.",
   "unreal.launchShort": "Launch",
-  "unreal.launch": "Build (Development Editor), then open the editor"
+  "unreal.launch": "Build (Development Editor), then open the editor",
+  "kind.rust": "Rust",
+  "rust.crates": "{n} crate(s)",
+  "run.cargo": "cargo command in Windows Terminal"
 }

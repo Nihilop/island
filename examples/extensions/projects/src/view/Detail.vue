@@ -5,7 +5,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import type { Island } from "@island/sdk";
 import Icon from "./Icon.vue";
-import { compose, fileName, launchUnreal, openEditor, openTerminal, packageManager, runScript, type Project } from "../projects";
+import { CARGO, cargo, compose, fileName, launchUnreal, openEditor, openTerminal, packageManager, runScript, runnables, type Project } from "../projects";
 import { act, containers, type Container } from "../docker";
 
 const props = defineProps<{ island: Island; project: Project }>();
@@ -112,6 +112,25 @@ const running = computed(() => list.value.filter((c) => c.state === "running").l
         </button>
       </div>
       <p v-else class="caption">{{ t("noScripts") }}</p>
+    </section>
+
+    <section v-if="p.kinds.includes('rust')">
+      <h3>Rust <span class="caption">{{ t("rust.crates", { n: p.crates.length }) }}</span></h3>
+      <div class="chips">
+        <button
+          v-for="r in runnables(p)"
+          :key="r.command"
+          class="chip"
+          :disabled="busy.has(`r:${r.command}`)"
+          :title="r.command"
+          @click="run(`r:${r.command}`, () => cargo(island, p, r.command, `run ${r.label}`))"
+        >
+          <span v-if="busy.has(`r:${r.command}`)" class="spinner" /><Icon v-else name="play" :size="10" />run {{ r.label }}
+        </button>
+        <button v-for="c in CARGO" :key="c" class="chip plain" :disabled="busy.has(`c:${c}`)" :title="`cargo ${c}`" @click="run(`c:${c}`, () => cargo(island, p, `cargo ${c}`, c))">
+          <span v-if="busy.has(`c:${c}`)" class="spinner" /><Icon v-else name="terminal" :size="10" />{{ c }}
+        </button>
+      </div>
     </section>
 
     <section v-if="p.compose.length">
